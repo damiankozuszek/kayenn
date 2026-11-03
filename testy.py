@@ -324,7 +324,7 @@ class Runner:
             self.fail(f"okno projektu pokazuje {len(pw.cards)} kart zamiast 2")
             return
         acts = [x.text() for x in pw.menu_bar.actions()[0].menu().actions() if not x.isSeparator()]
-        want = ["Nowy projekt", "Otwórz plik projektu…", "Zapisz", "Zapisz jako…", "Zakończ"]
+        want = ["Nowy projekt", "Otwórz plik projektu…", "Zapisz", "Zapisz jako…", "Nazwa projektu…", "Zakończ"]
         if acts != want:
             self.fail(f"menu Plik Panelu projektu: {acts} zamiast {want}")
         if pw.btn_editor.text() != "Przejdź do edytora":
@@ -395,9 +395,31 @@ class Runner:
         if not a.win.isVisible() or a.pw.isVisible() or a.editing is not None or "Dodaj" not in a.btn_add.text():
             self.fail("„Przejdź do edytora” nie wróciło do Panelu edycji w trybie dodawania")
         # dokument do wydruku (bez drukarki)
+        # Plik → Nazwa projektu…
+        from PySide6.QtWidgets import QInputDialog
+        old_get = QInputDialog.getText
+        QInputDialog.getText = staticmethod(lambda *a_, **k: ("  Hala   magazynowa A ", True))
+        try:
+            acts = {x.text(): x for x in a.pw.menu_bar.actions()[0].menu().actions()}
+            if "Nazwa projektu…" not in acts:
+                self.fail("brak „Nazwa projektu…” w menu Plik Panelu projektu")
+            else:
+                a.dirty = False
+                self.guard("Nazwa projektu", acts["Nazwa projektu…"].trigger)
+        finally:
+            QInputDialog.getText = old_get
+        if a.project.get("name") != "Hala magazynowa A" or not a.dirty:
+            self.fail(f"nazwa projektu: „{a.project.get('name')}”, zmiana zaznaczona: {a.dirty}")
+        if not a.pw.windowTitle().lstrip("*").startswith("Hala magazynowa A – Panel projektu"):
+            self.fail(f"tytuł Panelu projektu bez nazwy projektu: „{a.pw.windowTitle()}”")
+        if a._project_dump().get("nazwa") != "Hala magazynowa A":
+            self.fail("nazwa projektu nie trafia do pliku")
         doc = self.guard("dokument wydruku", a.project_document)
         if doc is not None and doc.isEmpty():
             self.fail("pusty dokument wydruku")
+        if doc is not None and not doc.toPlainText().lstrip().startswith("Projekt: Hala magazynowa A"):
+            self.fail(f"wydruk nie zaczyna się od „Projekt: Hala magazynowa A”: {doc.toPlainText()[:80]!r}")
+        self.guard("podgląd wydruku", self.print_preview)
         self.count("testy projektu")
         # zapis / odczyt pliku .obc
         self.ctx = "plik .obc"
@@ -428,6 +450,42 @@ class Runner:
         self.count("testy pliku")
         self.ctx = "dwuklik na pliku .obc"
         self.guard("uruchomienie z plikiem", self.start_with_file, path, len(before["przypadki"]))
+
+    def print_preview(self):
+        """Drukuj → okno podglądu wydruku (QPrintPreviewDialog) z wyrenderowanymi stronami; zapis do PDF."""
+        from PySide6 import QtPrintSupport
+        from PySide6.QtPrintSupport import QPrinter
+        a = self.app
+        seen = {}
+        cls = QtPrintSupport.QPrintPreviewDialog
+        old_exec = cls.exec
+
+        def fake_exec(dlg):
+            dlg.show()
+            self.pump(10)
+            seen["title"] = dlg.windowTitle()
+            self.shot(dlg, "10_podglad_wydruku")
+            pdf = os.path.join(tempfile.mkdtemp(prefix="obc_pdf_"), "wydruk.pdf")
+            pr = QPrinter(QPrinter.PrinterMode.HighResolution)
+            pr.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+            pr.setOutputFileName(pdf)
+            dlg.paintRequested.emit(pr)                  # to samo, co drukowanie z podglądu
+            seen["pdf"] = os.path.getsize(pdf) if os.path.exists(pdf) else 0
+            dlg.close()
+            return 0
+        cls.exec = fake_exec
+        try:
+            a.print_project()
+        finally:
+            cls.exec = old_exec
+        if "title" not in seen:
+            self.fail("Drukuj nie otworzyło podglądu wydruku")
+            return
+        if "Podgląd wydruku" not in seen["title"] or a.project_title() not in seen["title"]:
+            self.fail(f"tytuł podglądu: „{seen['title']}”")
+        if seen.get("pdf", 0) < 10000:
+            self.fail(f"wydruk z podglądu do PDF ma tylko {seen.get('pdf')} B")
+        self.count("testy wydruku")
 
     def start_with_file(self, path, n_cases):
         """Uruchomienie programu z plikiem w argumencie (jak dwuklik) w osobnym procesie: od razu Panel projektu

@@ -3885,7 +3885,7 @@ class App:
         self.arrows3d = Var(True)
         self.dims3d = Var(True)
         self.bdims3d = Var(True)
-        self.project = {"cases": [], "next": 1, "globals": None}   # przypadki projektu (najmłodszy pierwszy)
+        self.project = {"cases": [], "next": 1, "globals": None, "name": ""}   # przypadki (najmłodszy pierwszy)
         self.editing = None                        # przypadek edytowany w Panelu edycji
         self.pw = None                             # Panel projektu
         self._ctx = None
@@ -4329,7 +4329,7 @@ class App:
             entries = [("Nowy projekt", "Ctrl+N", self.file_new),
                        ("Otwórz plik projektu…", "Ctrl+O", self.file_open), None,
                        ("Zapisz", "Ctrl+S", self.file_save), ("Zapisz jako…", "Ctrl+Shift+S", self.file_save_as),
-                       None] + entries
+                       None, ("Nazwa projektu…", None, self.rename_project), None] + entries
         for entry in entries:
             if entry is None:
                 mf.addSeparator()
@@ -4346,6 +4346,25 @@ class App:
         pw = getattr(self, "pw", None)
         return pw if pw is not None and pw.isVisible() else self.win
 
+    def project_title(self):
+        """Nazwa projektu (Plik → Nazwa projektu…), a gdy jej brak – nazwa pliku."""
+        nm = (self.project.get("name") or "").strip()
+        if nm:
+            return nm
+        return os.path.basename(self.project_path) if self.project_path else "nowy projekt"
+
+    def rename_project(self):
+        from PySide6.QtWidgets import QInputDialog
+        txt, ok = QInputDialog.getText(self._front(), "Nazwa projektu",
+                                       "Nazwa projektu (pasek tytułu Panelu projektu i nagłówek wydruku):",
+                                       QLineEdit.EchoMode.Normal, self.project.get("name") or "")
+        if not ok:
+            return
+        txt = " ".join(txt.split())
+        if txt != (self.project.get("name") or ""):
+            self.project["name"] = txt
+            self.project_changed()
+
     def update_title(self):
         name = os.path.basename(self.project_path) if self.project_path else "nowy projekt"
         ed = getattr(self, "editing", None)
@@ -4353,12 +4372,12 @@ class App:
         self.win.setWindowTitle(f"{star}{name} – Panel edycji – Obciążenia normowe (śnieg i wiatr)"
                                 + (f" – edycja: {ed['name']}" if ed else ""))
         if getattr(self, "pw", None) is not None:
-            self.pw.setWindowTitle(f"{star}{name} – Panel projektu – Obciążenia normowe")
+            self.pw.setWindowTitle(f"{star}{self.project_title()} – Panel projektu – Obciążenia normowe")
 
     def _ask_save(self):
         """Pytanie o zapis – tylko gdy zmienił się projekt (przypadki), nie formularz Panelu edycji.
         True – można kontynuować; False – anulowano."""
-        if not self.dirty or (not self.project_path and not self.project["cases"]):
+        if not self.dirty or (not self.project_path and not self.project["cases"] and not self.project.get("name")):
             return True
         B = QMessageBox.StandardButton
         ans = QMessageBox.question(self._front(), "Obciążenia normowe", "Zapisać zmiany w bieżącym projekcie?",
@@ -5231,13 +5250,15 @@ class App:
     # --- zapis / odczyt
     def _project_dump(self):
         keys = ("id", "name", "created", "state", "extra", "report")
-        return {"next": self.project["next"], "globals": self.project.get("globals"),
+        return {"nazwa": self.project.get("name") or "", "next": self.project["next"],
+                "globals": self.project.get("globals"),
                 "przypadki": [{k: c.get(k) for k in keys} for c in self.project["cases"]]}
 
     def _project_load(self, d):
-        self.project = {"cases": [], "next": 1, "globals": None}
+        self.project = {"cases": [], "next": 1, "globals": None, "name": ""}
         if not d:
             return
+        self.project["name"] = str(d.get("nazwa") or "")
         for c in d.get("przypadki", []):
             if isinstance(c, dict) and "state" in c:
                 c.setdefault("extra", {})
@@ -5260,10 +5281,9 @@ class App:
         doc = QTextDocument()
         doc.setDefaultFont(QFont(FONT, 9))
         parts = []
-        name = os.path.basename(self.project_path) if self.project_path else "nowy projekt"
         g = self.project.get("globals") or {}
         loc = g.get("loc") or {}
-        head = f"Projekt: {esc(name)}"
+        head = f"Projekt: <b>{esc(self.project_title())}</b>"
         if loc.get("name"):
             head += f" · lokalizacja: {esc(str(loc['name']))}"
         if g.get("A"):
@@ -5291,21 +5311,27 @@ class App:
             QMessageBox.information(self.pw or self.win, "Drukuj", "Projekt nie zawiera przypadków.")
             return
         try:
-            from PySide6.QtPrintSupport import QPrintDialog, QPrinter
+            from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
         except ImportError:
             QMessageBox.critical(self.pw or self.win, "Drukuj", "Brak modułu drukowania Qt (QtPrintSupport).")
             return
-        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        dlg = QPrintDialog(printer, self.pw or self.win)
-        dlg.setWindowTitle("Drukuj projekt")
-        if not dlg.exec():
-            return
+        # podgląd wydruku Qt (okno drukowania Windows 11 nie pokazuje podglądu); przycisk drukarki w podglądzie
+        # otwiera wybór drukarki
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            doc = self.project_document()
-            doc.print_(printer)
+            doc = self.project_document()                 # raz – obrazy modeli 3D liczone tylko tu
         finally:
             QApplication.restoreOverrideCursor()
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setDocName(self.project_title())
+        dlg = QPrintPreviewDialog(printer, self.pw or self.win)
+        dlg.setWindowTitle(f"Podgląd wydruku – {self.project_title()}")
+        dlg.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
+        scr = (self.pw or self.win).screen().availableGeometry()
+        dlg.resize(min(1000, scr.width() - 80), scr.height() - 80)
+        dlg.paintRequested.connect(lambda p: doc.print_(p))
+        self._preview = dlg                               # (testy: dostęp do okna podglądu)
+        dlg.exec()
 
     # ============================================== sceny i rysowanie modelu 3D ===
     def get_state(self):
