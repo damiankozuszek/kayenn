@@ -90,7 +90,13 @@ class Runner:
             self.fail(f"wyjątek w zdarzeniu Qt: {t.__name__}: {v}", "".join(traceback.format_exception(t, v, tb)))
         sys.excepthook = hook
         # okna dialogowe nie mogą blokować testu
-        QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes)
+        self.questions = 0                         # liczba pytań (np. „Zapisać zmiany?”), odpowiedź – self.answer
+        self.answer = QMessageBox.StandardButton.Yes
+
+        def question(*a, **k):
+            self.questions += 1
+            return self.answer
+        QMessageBox.question = staticmethod(question)
         for n in ("information", "warning", "critical"):
             setattr(QMessageBox, n, staticmethod(lambda *a, **k: QMessageBox.StandardButton.Ok))
         QInputDialog.getText = staticmethod(lambda *a, **k: ("", False))
@@ -265,7 +271,26 @@ class Runner:
     def test_project(self):
         m, a = self.m, self.app
         self.ctx = "projekt"
+        from PySide6.QtWidgets import QMessageBox
+        B = QMessageBox.StandardButton
         a.set_state({"pola": dict(m.DEFAULTS), "opcje": dict(snow_type="Dwupołaciowy", wind_type="Dwuspadowy")})
+        # zmiany formularza bez przypadków w projekcie – bez pytania o zapis
+        a.dirty = False
+        for v in ("13", "12"):
+            a.v["s_L"].set(v)
+            a.snow_type.set("Płaski" if v == "13" else "Dwupołaciowy")
+            self.recalc("zmiana formularza")
+        if a.dirty:
+            self.fail("zmiana formularza Panelu edycji oznaczyła projekt jako zmieniony")
+        q0 = self.questions
+        if not a._ask_save() or self.questions != q0:
+            self.fail("program pyta o zapis, choć nie dodano żadnego przypadku")
+        # menu i przyciski Panelu edycji
+        acts = [x.text() for x in a.win.menuBar().actions()[0].menu().actions() if not x.isSeparator()]
+        if acts != ["Zakończ"]:
+            self.fail(f"menu Plik Panelu edycji: {acts} zamiast tylko „Zakończ”")
+        if "Przejdź do projektu" not in a.btn_proj.text():
+            self.fail(f"przycisk „{a.btn_proj.text()}” zamiast „Przejdź do projektu”")
         a.nb.setCurrentIndex(1)
         a.mode3d.set("wiatr")
         self.pump()
@@ -283,6 +308,12 @@ class Runner:
             return
         if a.project["cases"][0]["extra"]["mode"] != "śnieg":
             self.fail("najmłodszy przypadek nie jest na górze listy")
+        if not a.dirty:
+            self.fail("dodanie przypadku nie oznaczyło projektu jako zmienionego")
+        self.answer, q0 = B.Cancel, self.questions
+        if a._ask_save() or self.questions != q0 + 1:
+            self.fail("po dodaniu przypadku program nie pyta o zapis (lub ignoruje „Anuluj”)")
+        self.answer = B.Yes
         self.guard("otwarcie okna projektu", a.open_project_window)
         self.pump(5)
         pw = a.pw
@@ -292,6 +323,21 @@ class Runner:
         if len(pw.cards) != 2:
             self.fail(f"okno projektu pokazuje {len(pw.cards)} kart zamiast 2")
             return
+        acts = [x.text() for x in pw.menu_bar.actions()[0].menu().actions() if not x.isSeparator()]
+        want = ["Nowy projekt", "Otwórz plik projektu…", "Zapisz", "Zapisz jako…", "Zakończ"]
+        if acts != want:
+            self.fail(f"menu Plik Panelu projektu: {acts} zamiast {want}")
+        if pw.btn_editor.text() != "Przejdź do edytora":
+            self.fail(f"przycisk „{pw.btn_editor.text()}” zamiast „Przejdź do edytora”")
+        if "Panel projektu" not in pw.windowTitle() or "Panel edycji" not in a.win.windowTitle():
+            self.fail(f"tytuły okien: „{pw.windowTitle()}”, „{a.win.windowTitle()}”")
+        # zamknięcie Panelu projektu = koniec programu, z pytaniem o zapis; „Anuluj” – panel zostaje
+        self.answer, q0 = B.Cancel, self.questions
+        pw.close()
+        self.pump(2)
+        if not pw.isVisible() or self.questions != q0 + 1:
+            self.fail("zamknięcie Panelu projektu ze zmianami nie zapytało o zapis albo zignorowało „Anuluj”")
+        self.answer = B.Yes
         self.guard("rozwinięcie karty śniegu", pw.cards[0].toggle)
         self.pump(5)
         self.shot(pw, "5_projekt_snieg")
@@ -344,10 +390,10 @@ class Runner:
             self.fail("Aktualizuj dodało nowy przypadek zamiast zmienić istniejący")
         self.guard("ponowne otwarcie projektu", a.open_project_window)
         self.pump(3)
-        self.guard("zamknięcie projektu", a.pw.close)
+        self.guard("Przejdź do edytora", a.pw.btn_editor.click)
         self.pump(3)
-        if not a.win.isVisible() or a.editing is not None or "Dodaj" not in a.btn_add.text():
-            self.fail("Zamknij projekt nie wróciło do okna głównego w trybie dodawania")
+        if not a.win.isVisible() or a.pw.isVisible() or a.editing is not None or "Dodaj" not in a.btn_add.text():
+            self.fail("„Przejdź do edytora” nie wróciło do Panelu edycji w trybie dodawania")
         # dokument do wydruku (bez drukarki)
         doc = self.guard("dokument wydruku", a.project_document)
         if doc is not None and doc.isEmpty():
@@ -375,7 +421,57 @@ class Runner:
             self.guard("przeliczenie wczytanego przypadku", a.ensure_calc, c)
             if c.get("_calc") is None:
                 self.fail(f"nie przeliczono wczytanego przypadku „{c['name']}”")
+        # Otwórz plik projektu (open_path): bez znacznika zmian
+        a.dirty = True
+        if not self.guard("open_path", a.open_path, path) or a.dirty or len(a.project["cases"]) != len(before["przypadki"]):
+            self.fail("open_path nie wczytało projektu (lub zostawiło znacznik zmian)")
         self.count("testy pliku")
+        self.ctx = "dwuklik na pliku .obc"
+        self.guard("uruchomienie z plikiem", self.start_with_file, path, len(before["przypadki"]))
+
+    def start_with_file(self, path, n_cases):
+        """Uruchomienie programu z plikiem w argumencie (jak dwuklik) w osobnym procesie: od razu Panel projektu
+        z przypadkami, Panel edycji ukryty. Skojarzenie w rejestrze w teście wyłączone."""
+        import subprocess
+        code = r'''
+import importlib.machinery, importlib.util, json, sys
+src, path = sys.argv[1], sys.argv[2]
+loader = importlib.machinery.SourceFileLoader("obc", src)
+spec = importlib.util.spec_from_loader("obc", loader)
+m = importlib.util.module_from_spec(spec); sys.modules["obc"] = m; loader.exec_module(m)
+m.register_file_type = lambda: None
+from PySide6.QtWidgets import QApplication
+apps = []
+orig_init = m.App.__init__
+def init(self, qapp):
+    orig_init(self, qapp); apps.append(self)
+m.App.__init__ = init
+def exec_(*a):
+    a_ = apps[0]
+    print("WYNIK " + json.dumps(dict(pw=a_.pw is not None and a_.pw.isVisible(), win=a_.win.isVisible(),
+                                    cases=len(a_.pw.cards) if a_.pw else -1, dirty=a_.dirty,
+                                    path=a_.project_path)), flush=True)
+    return 0
+QApplication.exec = exec_
+sys.argv = [src, path]
+try:
+    m.main()
+except SystemExit:
+    pass
+'''
+        env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+        r = subprocess.run([sys.executable, "-c", code, self.args.plik, path], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", env=env, timeout=120)
+        line = next((l for l in r.stdout.splitlines() if l.startswith("WYNIK ")), None)
+        if line is None:
+            self.fail("program uruchomiony z plikiem nie wystartował", r.stdout + r.stderr)
+            return
+        res = json.loads(line[6:])
+        if not res["pw"] or res["win"]:
+            self.fail(f"po otwarciu pliku nie pokazano od razu Panelu projektu: {res}")
+        if res["cases"] != n_cases or res["dirty"] or os.path.normcase(res["path"] or "") != os.path.normcase(path):
+            self.fail(f"po otwarciu pliku: {res} (oczekiwano {n_cases} przypadków, bez zmian)")
+        self.count("testy uruchomienia z plikiem")
 
     def drag_cards(self, pw):
         """Przeciągnięcie górnej karty uchwytem ⠿ pod drugą (QTest): karta przypięta do kursora,

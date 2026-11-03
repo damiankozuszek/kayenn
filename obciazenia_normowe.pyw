@@ -3153,12 +3153,8 @@ class MainWindow(QMainWindow):
         self.app = app
 
     def closeEvent(self, e):
-        if self.app._ask_save():
-            for w in (self.app.win3d, getattr(self.app, "win_ass", None), self.app.pw):
-                if w is not None:
-                    w.hide()
+        if self.app.quit_app():
             e.accept()
-            QApplication.quit()
         else:
             e.ignore()
 
@@ -3726,19 +3722,25 @@ class CaseList(QWidget):
 
 
 class ProjectWindow(QWidget):
-    """Okno projektu: lista przypadków (najmłodszy na górze), Zamknij projekt / Drukuj."""
+    """Panel projektu: menu Plik (nowy, otwórz, zapisz), lista przypadków (najmłodszy na górze),
+    Przejdź do edytora / Drukuj. Zamknięcie okna kończy program (jak Plik → Zakończ)."""
 
     def __init__(self, app):
         super().__init__(None, Qt.WindowType.Window)
         self.app = app
         self.setObjectName("page")
-        self.setWindowTitle("Obciążenia normowe – projekt")
+        self.setWindowTitle("Panel projektu – Obciążenia normowe")
         self.resize(1100, 860)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 10, 10, 10)
         lay.setSpacing(8)
-        self.empty = QLabel("Projekt nie zawiera przypadków. Dodaj je przyciskiem „Dodaj do projektu” w oknie "
-                            "głównym.")
+        from PySide6.QtWidgets import QMenuBar
+        mb = QMenuBar(self)
+        app.file_menu(mb, project=True)
+        lay.setMenuBar(mb)
+        self.menu_bar = mb
+        self.empty = QLabel("Projekt nie zawiera przypadków. Dodaj je przyciskiem „Dodaj do projektu” w Panelu "
+                            "edycji.")
         self.empty.setObjectName("muted")
         lay.addWidget(self.empty)
         sc = QScrollArea()
@@ -3749,9 +3751,11 @@ class ProjectWindow(QWidget):
         self.scroll = sc
         lay.addWidget(sc, 1)
         hb = QHBoxLayout()
-        b1 = QPushButton("Zamknij projekt")
+        b1 = QPushButton("Przejdź do edytora")
         b1.setObjectName("big")
-        b1.clicked.connect(lambda checked=False: self.close())
+        b1.setToolTip("Powrót do Panelu edycji")
+        self.btn_editor = b1
+        b1.clicked.connect(lambda checked=False: self.app.close_project_window())
         b2 = QPushButton("Drukuj")
         b2.setObjectName("big")
         b2.clicked.connect(lambda checked=False: self.app.print_project())
@@ -3822,8 +3826,10 @@ class ProjectWindow(QWidget):
         self.app.project_changed()
 
     def closeEvent(self, e):
-        e.accept()
-        self.app.close_project_window()
+        if self.app.quit_app():                      # zamknięcie Panelu projektu = koniec programu
+            e.accept()
+        else:
+            e.ignore()
 
 
 # ===================================================================
@@ -3880,8 +3886,8 @@ class App:
         self.dims3d = Var(True)
         self.bdims3d = Var(True)
         self.project = {"cases": [], "next": 1, "globals": None}   # przypadki projektu (najmłodszy pierwszy)
-        self.editing = None                        # przypadek edytowany w oknie głównym
-        self.pw = None                             # okno projektu
+        self.editing = None                        # przypadek edytowany w Panelu edycji
+        self.pw = None                             # Panel projektu
         self._ctx = None
 
         self.entries = {}
@@ -4121,19 +4127,7 @@ class App:
         w = MainWindow(self)
         self.win = w
         mb = w.menuBar()
-        mf = mb.addMenu("Plik")
-        for entry in (("Nowy projekt", "Ctrl+N", self.file_new), ("Otwórz plik projektu…", "Ctrl+O", self.file_open),
-                      None, ("Zapisz", "Ctrl+S", self.file_save),
-                      ("Zapisz jako…", "Ctrl+Shift+S", self.file_save_as), None,
-                      ("Zakończ", None, self.on_close)):
-            if entry is None:
-                mf.addSeparator()
-                continue
-            text, sc, fn = entry
-            act = mf.addAction(text)
-            if sc:
-                act.setShortcut(QKeySequence(sc))
-            act.triggered.connect(lambda checked=False, fn=fn: fn())
+        self.file_menu(mb, project=False)            # Panel edycji: tylko Plik → Zakończ
         mh = mb.addMenu("Pomoc")
         act = mh.addAction("Założenia do obliczeń")
         act.triggered.connect(lambda checked=False: self.show_assumptions())
@@ -4159,9 +4153,9 @@ class App:
         self.btn_add.setObjectName("big")
         self.btn_add.setToolTip("Zapisz bieżący model 3D i wyniki jako nowy przypadek projektu")
         self.btn_add.clicked.connect(lambda checked=False: self.add_or_update())
-        self.btn_proj = QPushButton("☰  Otwórz projekt")
+        self.btn_proj = QPushButton("☰  Przejdź do projektu")
         self.btn_proj.setObjectName("big")
-        self.btn_proj.setToolTip("Lista przypadków zapisanych w projekcie")
+        self.btn_proj.setToolTip("Panel projektu – lista przypadków, zapis i odczyt pliku projektu, wydruk")
         self.btn_proj.clicked.connect(lambda checked=False: self.open_project_window())
         self.proj_msg = QLabel("")
         self.proj_msg.setObjectName("muted")
@@ -4327,20 +4321,47 @@ class App:
         QTimer.singleShot(0, lambda: sb.setValue(pos))     # zachowanie miejsca przewinięcia
 
     # ------------------------------------------------------------ projekty ---
+    def file_menu(self, mb, project):
+        """Menu Plik. Panel projektu: Nowy projekt, Otwórz, Zapisz, Zapisz jako, Zakończ; Panel edycji: Zakończ."""
+        mf = mb.addMenu("Plik")
+        entries = [("Zakończ", None, self.on_close)]
+        if project:
+            entries = [("Nowy projekt", "Ctrl+N", self.file_new),
+                       ("Otwórz plik projektu…", "Ctrl+O", self.file_open), None,
+                       ("Zapisz", "Ctrl+S", self.file_save), ("Zapisz jako…", "Ctrl+Shift+S", self.file_save_as),
+                       None] + entries
+        for entry in entries:
+            if entry is None:
+                mf.addSeparator()
+                continue
+            text, sc, fn = entry
+            act = mf.addAction(text)
+            if sc:
+                act.setShortcut(QKeySequence(sc))
+            act.triggered.connect(lambda checked=False, fn=fn: fn())
+        return mf
+
+    def _front(self):
+        """Okno, nad którym pokazywać okna dialogowe (widoczny panel)."""
+        pw = getattr(self, "pw", None)
+        return pw if pw is not None and pw.isVisible() else self.win
+
     def update_title(self):
         name = os.path.basename(self.project_path) if self.project_path else "nowy projekt"
         ed = getattr(self, "editing", None)
-        self.win.setWindowTitle(f"{'*' if self.dirty else ''}{name} – Obciążenia normowe (śnieg i wiatr)"
+        star = "*" if self.dirty else ""
+        self.win.setWindowTitle(f"{star}{name} – Panel edycji – Obciążenia normowe (śnieg i wiatr)"
                                 + (f" – edycja: {ed['name']}" if ed else ""))
         if getattr(self, "pw", None) is not None:
-            self.pw.setWindowTitle(f"{'*' if self.dirty else ''}{name} – projekt – Obciążenia normowe")
+            self.pw.setWindowTitle(f"{star}{name} – Panel projektu – Obciążenia normowe")
 
     def _ask_save(self):
-        """True – można kontynuować; False – anulowano."""
-        if not self.dirty:
+        """Pytanie o zapis – tylko gdy zmienił się projekt (przypadki), nie formularz Panelu edycji.
+        True – można kontynuować; False – anulowano."""
+        if not self.dirty or (not self.project_path and not self.project["cases"]):
             return True
         B = QMessageBox.StandardButton
-        ans = QMessageBox.question(self.win, "Obciążenia normowe", "Zapisać zmiany w bieżącym projekcie?",
+        ans = QMessageBox.question(self._front(), "Obciążenia normowe", "Zapisać zmiany w bieżącym projekcie?",
                                    B.Yes | B.No | B.Cancel, B.Yes)
         if ans == B.Cancel:
             return False
@@ -4348,25 +4369,47 @@ class App:
             return self.file_save()
         return True
 
+    def quit_app(self):
+        """Koniec programu (Plik → Zakończ lub zamknięcie panelu). False – użytkownik anulował."""
+        if getattr(self, "_quitting", False):
+            return True
+        if not self._ask_save():
+            return False
+        self._quitting = True
+        for w in (self.win3d, getattr(self, "win_ass", None), self.pw, self.win):
+            if w is not None:
+                w.hide()
+        QApplication.quit()
+        return True
+
     def file_open(self):
         if not self._ask_save():
             return
-        path, _ = QFileDialog.getOpenFileName(self.win, "Otwórz projekt", os.path.dirname(self.project_path or ""),
+        path, _ = QFileDialog.getOpenFileName(self._front(), "Otwórz projekt",
+                                              os.path.dirname(self.project_path or ""),
                                               f"Projekt obciążeń (*{PROJECT_EXT});;Wszystkie pliki (*)")
-        if not path:
-            return
+        if path:
+            self.open_path(path)
+
+    def open_path(self, path):
+        """Wczytanie pliku projektu (menu lub dwuklik na pliku .obc). True – wczytano."""
         try:
             with open(path, encoding="utf-8") as fh:
                 st = json.load(fh)
+            if not isinstance(st, dict):
+                raise ValueError("to nie jest plik projektu")
         except (OSError, ValueError) as ex:
-            QMessageBox.critical(self.win, "Obciążenia normowe", f"Nie można odczytać pliku:\n{ex}")
-            return
-        self.project_path = path
+            QMessageBox.critical(self._front(), "Obciążenia normowe", f"Nie można odczytać pliku:\n{ex}")
+            return False
+        self.project_path = os.path.abspath(path)
         self.set_state(st)
         self._project_load(st.get("projekt"))
         self.set_editing(None)
+        self.dirty = False
+        self.update_title()
         if self.pw is not None and self.pw.isVisible():
             self.pw.rebuild()
+        return True
 
     def file_save(self):
         if not self.project_path:
@@ -4375,7 +4418,7 @@ class App:
 
     def file_save_as(self):
         start = self.project_path or ("projekt" + PROJECT_EXT)
-        path, _ = QFileDialog.getSaveFileName(self.win, "Zapisz projekt jako", start,
+        path, _ = QFileDialog.getSaveFileName(self._front(), "Zapisz projekt jako", start,
                                               f"Projekt obciążeń (*{PROJECT_EXT})")
         if not path:
             return False
@@ -4388,7 +4431,7 @@ class App:
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(dict(self.get_state(), projekt=self._project_dump()), fh, ensure_ascii=False, indent=2)
         except OSError as ex:
-            QMessageBox.critical(self.win, "Obciążenia normowe", f"Nie można zapisać pliku:\n{ex}")
+            QMessageBox.critical(self._front(), "Obciążenia normowe", f"Nie można zapisać pliku:\n{ex}")
             return False
         self.project_path = path
         self.dirty = False
@@ -4396,7 +4439,7 @@ class App:
         return True
 
     def on_close(self):
-        self.win.close()
+        self.quit_app()
 
     def show_assumptions(self):
         """Założenia obliczeń w osobnym, skalowalnym oknie."""
@@ -4492,9 +4535,8 @@ class App:
         return active
 
     def schedule(self):
-        if not self._loading and not self.dirty:
-            self.dirty = True
-            self.update_title()
+        # zmiany formularza Panelu edycji nie oznaczają projektu jako zmienionego (pytanie o zapis dopiero
+        # po dodaniu / zmianie przypadku – project_changed)
         if self._pending:
             return
         self._pending = True
@@ -4959,7 +5001,7 @@ class App:
             self.update_title()
 
     def _in_case(self, st, extra, fn):
-        """Wykonuje fn() z formularzem chwilowo ustawionym na dane przypadku, potem przywraca okno główne."""
+        """Wykonuje fn() z formularzem chwilowo ustawionym na dane przypadku, potem przywraca Panel edycji."""
         self.close_editor()
         if self._pending:
             self.recalc()
@@ -4983,7 +5025,7 @@ class App:
             self.draw3d()
 
     def _grab_current(self, mode):
-        """Bieżące obliczenia okna głównego (wyniki, model, dane do późniejszej edycji)."""
+        """Bieżące obliczenia Panelu edycji (wyniki, model, dane do późniejszej edycji)."""
         return dict(ok=bool(getattr(self, "_w_ok" if mode == "wiatr" else "_s_ok", False)),
                     err=self.status.text(), state=self.get_state(),
                     calc=dict(sgeo=self.sgeo, snow=self.snow, wgeo=self.wgeo, wind=self.wind, mode=mode,
@@ -5074,7 +5116,7 @@ class App:
         self.render_case(cv, case, image=True)
         return cv.grab()
 
-    # --- przyciski okna głównego
+    # --- przyciski Panelu edycji
     def set_editing(self, case):
         self.editing = case
         self.btn_add.setText("⟳  Aktualizuj" if case is not None else "＋  Dodaj do projektu")
@@ -5147,15 +5189,18 @@ class App:
         self.win.hide()
 
     def close_project_window(self):
-        """„Zamknij projekt” – powrót do okna głównego (koniec trybu edycji przypadku)."""
+        """„Przejdź do edytora” – z Panelu projektu do Panelu edycji (koniec trybu edycji przypadku)."""
         self.set_editing(None)
+        if self.pw is not None and self.pw.isVisible() and not self.win.isVisible():
+            g = self.pw.frameGeometry()               # Panel edycji w miejscu Panelu projektu
+            self.win.move(max(g.x(), 0), max(g.y(), 0))
         self.win.show()
         self.win.raise_()
         if self.pw is not None:
             self.pw.hide()
 
     def edit_case(self, case):
-        """Przypadek do okna głównego – wszystkie dane można zmienić, potem „Aktualizuj”."""
+        """Przypadek do Panelu edycji – wszystkie dane można zmienić, potem „Aktualizuj”."""
         self.close_editor()
         ex = case["extra"]
         dirty = self.dirty
@@ -5292,7 +5337,6 @@ class App:
             self.recalc()
         finally:
             self._loading = False
-        self.dirty = False
         self.update_title()
 
     def file_new(self):
@@ -5309,11 +5353,8 @@ class App:
             **{"sx_" + k_: v_ for k_, v_ in EXC_SEC_DEFAULT.items()},
             w_mtype=MULTI_TYPES[0],
             wind_zone="1", terrain="II", theta="0°", variant="", cpi_mode=CPI_MODES[0])})
-
-    def _mark_dirty(self):
-        if not getattr(self, "_loading", True) and getattr(self, "dirty", None) is False:
-            self.dirty = True
-            self.update_title()
+        self.dirty = False
+        self.update_title()
 
     def on_snow_case(self):
         self.show_snow()
@@ -5812,7 +5853,7 @@ class App:
 
     def _draw3d_now(self):
         cv = self.cv
-        ctx = self._ctx                                  # rysowanie zapisanego przypadku (okno projektu / wydruk)
+        ctx = self._ctx                                  # rysowanie zapisanego przypadku (Panel projektu / wydruk)
         if cv is None or (not ctx and not self.win3d.isVisible()):
             return
         cv.delete("all")
@@ -6630,6 +6671,42 @@ def _check_image():
     return path.replace("\\", "/")
 
 
+def register_file_type():
+    """Windows: pliki .obc otwierane dwuklikiem tym programem (rejestr bieżącego użytkownika, bez uprawnień
+    administratora). Zapis tylko przy zmianie – np. po przeniesieniu programu w inne miejsce."""
+    if sys.platform != "win32":
+        return
+    try:
+        import winreg
+        exe = sys.executable
+        if exe.lower().endswith("python.exe"):
+            exe_w = exe[:-10] + "pythonw.exe"
+            if os.path.exists(exe_w):
+                exe = exe_w                                     # bez okna konsoli
+        script = os.path.abspath(sys.argv[0] if sys.argv and sys.argv[0] else __file__)
+        cmd = f'"{exe}" "{script}" "%1"'
+        prog = "ObciazeniaNormowe.Projekt"
+        want = {rf"Software\Classes\{PROJECT_EXT}": prog,
+                rf"Software\Classes\{prog}": "Projekt obciążeń normowych",
+                rf"Software\Classes\{prog}\shell\open\command": cmd}
+        changed = False
+        for key, val in want.items():
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as k:
+                    cur = winreg.QueryValueEx(k, "")[0]
+            except OSError:
+                cur = None
+            if cur != val:
+                with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key) as k:
+                    winreg.SetValueEx(k, "", 0, winreg.REG_SZ, val)
+                changed = True
+        if changed:
+            import ctypes
+            ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, None, None)   # odświeżenie skojarzeń w Eksploratorze
+    except Exception:
+        pass                                                    # skojarzenie to wygoda – bez niego program działa
+
+
 def main():
     try:   # moduł mapy (QtWebEngine) musi być załadowany przed utworzeniem aplikacji
         import PySide6.QtWebEngineWidgets  # noqa: F401
@@ -6647,10 +6724,16 @@ def main():
     qapp.setPalette(pal)
     qapp.setFont(QFont(FONT, 9))
     qapp.setStyleSheet(STYLE.replace("@CHECK@", _check_image()))
+    register_file_type()
     app = App(qapp)
     scr = qapp.primaryScreen().availableGeometry()
     app.win.resize(640, min(960, scr.height() - 60))
-    app.win.show()
+    files = [a for a in sys.argv[1:] if not a.startswith("-") and os.path.isfile(a)]
+    if files and app.open_path(files[0]):           # dwuklik na pliku projektu – od razu Panel projektu
+        app.win.move(scr.x() + 40, scr.y() + 30)
+        app.open_project_window()
+    else:
+        app.win.show()
     sys.exit(qapp.exec())
 
 
