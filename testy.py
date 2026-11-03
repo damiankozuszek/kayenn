@@ -1,0 +1,440 @@
+# -*- coding: utf-8 -*-
+"""
+Testy programu obciazenia_normowe.pyw – uruchamiać po każdej zmianie:
+
+    py testy.py                 wszystkie testy
+    py testy.py --szybko        bez drugiego widoku 3D (ok. 2× szybciej)
+    py testy.py --zrzuty DIR    dodatkowo zrzuty okien do katalogu DIR (do obejrzenia)
+    py testy.py --plik X.pyw    test innej kopii programu
+
+Testy działają na prawdziwym Qt w trybie offscreen (bez okien na ekranie):
+  1. śnieg: SNOW_TYPES × s_diff × OBST_TYPES × warianty „Wyjątkowe” (wyłączone, domyślne sekcje, wszystkie
+     sekcje, każda sekcja osobno) × przypadki obciążenia – obliczenia, raport i model 3D (_draw3d_now),
+  2. wiatr: WIND_TYPES × MULTI_TYPES × θ × warianty × CPI_MODES – jw.,
+  3. stan formularza: get_state → set_state → get_state (bez zmian),
+  4. projekt: dodanie przypadków, okno projektu, rozwinięcie kart, zmiana opcji w karcie, edycja
+     i aktualizacja przypadku, zapis/odczyt projektu, dokument do wydruku,
+  5. pliki .obc: zapis i odczyt przez _write / _project_load.
+Wynik: lista błędów (wyjątki z pełnym śladem) i kod wyjścia 0 – wszystko dobrze, 1 – są błędy.
+Nie sprawdzają: płynności obrotu, gestów touchpada, prawdziwego wydruku, mapy i ULDK – to ręcznie.
+"""
+
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+import math
+import os
+import sys
+import tempfile
+import time
+import traceback
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SRC = os.path.join(HERE, "obciazenia_normowe.pyw")
+
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+# platforma offscreen w Windows nie widzi czcionek systemowych – bez tego zrzuty mają kwadraty zamiast liter
+os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
+
+
+def load_module(src=SRC):
+    loader = importlib.machinery.SourceFileLoader("obciazenia_normowe", src)
+    spec = importlib.util.spec_from_loader("obciazenia_normowe", loader)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["obciazenia_normowe"] = mod
+    loader.exec_module(mod)
+    return mod
+
+
+class Runner:
+    def __init__(self, m, args):
+        self.m, self.args = m, args
+        self.errors = []          # (opis, ślad)
+        self.ctx = ""
+        self.counts = {}
+        self.shot_dir = args.zrzuty
+        if self.shot_dir:
+            os.makedirs(self.shot_dir, exist_ok=True)
+
+    # --- narzędzia
+    def fail(self, what, tb=""):
+        self.errors.append((f"[{self.ctx}] {what}", tb))
+
+    def count(self, key, n=1):
+        self.counts[key] = self.counts.get(key, 0) + n
+
+    def pump(self, n=3):
+        for _ in range(n):
+            self.qapp.processEvents()
+
+    def guard(self, what, fn, *a, **k):
+        try:
+            return fn(*a, **k)
+        except Exception:
+            self.fail(what, traceback.format_exc())
+            return None
+
+    def shot(self, widget, name):
+        if self.shot_dir and widget is not None:
+            self.pump(5)
+            widget.grab().save(os.path.join(self.shot_dir, name + ".png"))
+
+    # --- przygotowanie Qt jak w main()
+    def setup(self):
+        m = self.m
+        from PySide6.QtWidgets import QApplication, QMessageBox, QInputDialog, QFileDialog
+        from PySide6.QtGui import QColor, QFont, QPalette
+
+        def hook(t, v, tb):                       # wyjątki w slotach / timerach Qt
+            self.fail(f"wyjątek w zdarzeniu Qt: {t.__name__}: {v}", "".join(traceback.format_exception(t, v, tb)))
+        sys.excepthook = hook
+        # okna dialogowe nie mogą blokować testu
+        QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes)
+        for n in ("information", "warning", "critical"):
+            setattr(QMessageBox, n, staticmethod(lambda *a, **k: QMessageBox.StandardButton.Ok))
+        QInputDialog.getText = staticmethod(lambda *a, **k: ("", False))
+        QFileDialog.getOpenFileName = staticmethod(lambda *a, **k: ("", ""))
+        QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: ("", ""))
+
+        try:
+            import PySide6.QtWebEngineWidgets  # noqa: F401
+        except ImportError:
+            pass
+        self.qapp = QApplication.instance() or QApplication(sys.argv)
+        self.qapp.setStyle("Fusion")
+        pal = self.qapp.palette()
+        R = QPalette.ColorRole
+        for role, col in ((R.Window, m.BG), (R.WindowText, m.TEXT), (R.Base, "#ffffff"), (R.Text, m.TEXT),
+                          (R.Button, "#eef0f3"), (R.ButtonText, m.TEXT), (R.Highlight, m.ACCENT),
+                          (R.HighlightedText, "#ffffff"), (R.PlaceholderText, m.MUTED)):
+            pal.setColor(role, QColor(col))
+        self.qapp.setPalette(pal)
+        self.qapp.setFont(QFont(m.FONT, 9))
+        self.qapp.setStyleSheet(m.STYLE.replace("@CHECK@", m._check_image()))
+        self.app = m.App(self.qapp)
+        self.app.win.resize(640, 960)
+        self.app.win.show()
+        self.app.show_3d()
+        self.app.win3d.resize(960, 720)
+        self.pump()
+
+    # --- rysowanie modelu 3D w bieżącym stanie
+    def draw(self, what):
+        a = self.app
+        views = [(math.radians(-32), math.radians(24))]
+        if not self.args.szybko:
+            views.append((math.radians(150), math.radians(60)))      # widok z drugiej strony, z góry
+        for yaw, pitch in views:
+            a.yaw, a.pitch, a.zoom, a.pan_x, a.pan_y = yaw, pitch, 1.0, 0.0, 0.0
+            a._scene_key = None
+            if self.guard(f"_draw3d_now: {what}", a._draw3d_now) is not False:
+                self.count("rysunki 3D")
+                if not a.cv.items:
+                    self.fail(f"pusty rysunek 3D: {what}")
+        a.reset_view()
+
+    def recalc(self, what):
+        self.guard(f"recalc: {what}", self.app.recalc)
+        self.pump(1)
+
+    # ================================================================ śnieg ===
+    def test_snow(self):
+        m, a = self.m, self.app
+        a.nb.setCurrentIndex(0)
+        a.mode3d.set("śnieg")
+        self.pump()
+        all_secs = sorted({k for secs in m.EXC_SECTIONS.values() for k, _, _ in secs})
+        exc_variants = [("bez wyjątkowych", False, None),
+                        ("wyjątkowe – sekcje domyślne", True, dict(m.EXC_SEC_DEFAULT)),
+                        ("wyjątkowe – wszystkie sekcje", True, {k: True for k in all_secs})]
+        exc_variants += [(f"wyjątkowe – tylko {k}", True, {k2: k2 == k for k2 in all_secs}) for k in all_secs]
+        for stype in m.SNOW_TYPES:
+            for diff in (False, True):
+                for obst in m.OBST_TYPES:
+                    for ename, exc_on, secs in exc_variants:
+                        self.ctx = f"śnieg: {stype}, różne kąty={diff}, {obst}, {ename}"
+                        self.guard("ustawienie formularza", self._set_snow, stype, diff, obst, exc_on, secs)
+                        self.recalc(self.ctx)
+                        if not a._s_ok:
+                            self.fail(f"dane domyślne odrzucone: {a.status.text()}")
+                            continue
+                        self.count("obliczenia śniegu")
+                        for c in [c["name"] for c in a.snow["cases"]]:
+                            self.ctx = f"śnieg: {stype}, różne kąty={diff}, {obst}, {ename}, przypadek {c}"
+                            self.guard("zmiana przypadku", a.snow_case.set, c)
+                            self.guard("show_snow", a.show_snow)
+                            self.count("przypadki śniegu")
+                            self.draw(c)
+                        self.pump(1)
+        # nawis śnieżny (A > 300 m lub strefa 4), Cₜ ze wzoru, barierki – na każdym kształcie
+        overhangs = 0
+        for A, zone in (("400", "2"), ("210", "4")):
+            for stype in m.SNOW_TYPES:
+                for ename, exc_on, secs in exc_variants[:3:2]:
+                    self.ctx = f"śnieg (nawis, Cₜ wzór, barierki): A={A}, strefa {zone}, {stype}, {ename}"
+                    a.v["A"].set(A)
+                    a.snow_zone.set(zone)
+                    a.ct_mode.set(m.CT_MODES[1])
+                    a.guard.set(True)
+                    self.guard("ustawienie formularza", self._set_snow, stype, False, m.OBST_TYPES[0], exc_on, secs)
+                    self.recalc(self.ctx)
+                    if not a._s_ok:
+                        self.fail(f"dane odrzucone: {a.status.text()}")
+                        continue
+                    overhangs += bool(a.snow["overhang"])
+                    for c in [c["name"] for c in a.snow["cases"]]:
+                        self.guard("zmiana przypadku", a.snow_case.set, c)
+                        self.guard("show_snow", a.show_snow)
+                        self.draw(c)
+        self.count("obliczenia z nawisem", overhangs)
+        if not overhangs:
+            self.ctx = "śnieg (nawis)"
+            self.fail("żaden kształt nie dał nawisu śnieżnego – draw_overhang nie był sprawdzony")
+        a.v["A"].set("210")
+        a.snow_zone.set("1")
+        a.ct_mode.set(m.CT_MODES[0])
+        a.guard.set(False)
+        self._set_snow("Dwupołaciowy", False, m.OBST_TYPES[0], False, dict(m.EXC_SEC_DEFAULT))
+        self.recalc("powrót do domyślnych")
+
+    def _set_snow(self, stype, diff, obst, exc_on, secs):
+        a = self.app
+        a.snow_type.set(stype)
+        a.s_diff.set(diff)
+        a.s_obst.set(obst)
+        a.s_exc.set(exc_on)
+        for k, v in (secs or {}).items():
+            getattr(a, "sx_" + k).set(v)
+
+    # ================================================================ wiatr ===
+    def test_wind(self):
+        m, a = self.m, self.app
+        a.nb.setCurrentIndex(1)
+        a.mode3d.set("wiatr")
+        self.pump()
+        for wtype in m.WIND_TYPES:
+            for mt in m.MULTI_TYPES:
+                for cpi in m.CPI_MODES:
+                    self.ctx = f"wiatr: {wtype}, {mt}, cpi {cpi}"
+                    a.wind_type.set(wtype)
+                    a.w_mtype.set(mt)
+                    a.cpi_mode.set(cpi)
+                    self.recalc(self.ctx)
+                    if not a._w_ok:
+                        self.fail(f"dane domyślne odrzucone: {a.status.text()}")
+                        continue
+                    for th in [f"{t}°" for t in m.wind_thetas(a.wgeo)]:
+                        a.theta.set(th)
+                        self.recalc(f"{self.ctx}, θ {th}")
+                        labs = [l for l, _ in m.wind_variants(a.wgeo, a.wind["theta"])] or [""]
+                        for v in labs:
+                            self.ctx = f"wiatr: {wtype}, {mt}, cpi {cpi}, θ {th}, wariant {v or '–'}"
+                            a.variant.set(v)
+                            self.recalc(self.ctx)
+                            if not a._w_ok or a.wind is None:
+                                self.fail("błąd obliczeń wiatru")
+                                continue
+                            self.count("obliczenia wiatru")
+                            self.draw(v)
+                        self.pump(1)
+        a.wind_type.set("Dwuspadowy")
+        a.w_mtype.set(m.MULTI_TYPES[0])
+        a.cpi_mode.set(m.CPI_MODES[0])
+        a.theta.set("0°")
+        self.recalc("powrót do domyślnych")
+
+    # ======================================================= stan formularza ===
+    def test_state(self):
+        a = self.app
+        self.ctx = "stan formularza"
+        a.snow_type.set("Jednopołaciowy")
+        a.wind_type.set("Czterospadowy")
+        a.v["s_alpha"].set("17")
+        a.v["w_L"].set("21")
+        self.recalc(self.ctx)
+        st = a.get_state()
+        self.guard("set_state", a.set_state, json.loads(json.dumps(st)))
+        st2 = a.get_state()
+        if st != st2:
+            diff = {k: (st[k], st2[k]) for k in st if st.get(k) != st2.get(k)}
+            self.fail(f"get_state → set_state zmienia stan: {diff}")
+        self.count("testy stanu")
+
+    # ============================================================== projekt ===
+    def test_project(self):
+        m, a = self.m, self.app
+        self.ctx = "projekt"
+        a.set_state({"pola": dict(m.DEFAULTS), "opcje": dict(snow_type="Dwupołaciowy", wind_type="Dwuspadowy")})
+        a.nb.setCurrentIndex(1)
+        a.mode3d.set("wiatr")
+        self.pump()
+        self.shot(a.win, "1_glowne_wiatr")
+        self.shot(a.win3d, "3_okno3d_wiatr")
+        self.guard("dodanie przypadku (wiatr)", a.add_or_update)
+        a.nb.setCurrentIndex(0)
+        a.mode3d.set("śnieg")
+        self.pump()
+        self.shot(a.win, "1_glowne_snieg")
+        self.shot(a.win3d, "3_okno3d_snieg")
+        self.guard("dodanie przypadku (śnieg)", a.add_or_update)
+        if len(a.project["cases"]) != 2:
+            self.fail(f"projekt ma {len(a.project['cases'])} przypadków zamiast 2")
+            return
+        if a.project["cases"][0]["extra"]["mode"] != "śnieg":
+            self.fail("najmłodszy przypadek nie jest na górze listy")
+        self.guard("otwarcie okna projektu", a.open_project_window)
+        self.pump(5)
+        pw = a.pw
+        if pw is None or not pw.isVisible() or a.win.isVisible():
+            self.fail("okno projektu nie zastąpiło okna głównego")
+            return
+        if len(pw.cards) != 2:
+            self.fail(f"okno projektu pokazuje {len(pw.cards)} kart zamiast 2")
+            return
+        self.guard("rozwinięcie karty śniegu", pw.cards[0].toggle)
+        self.pump(5)
+        self.shot(pw, "5_projekt_snieg")
+        card = pw.cards[0]
+        if card.body is None:
+            self.fail("karta nie rozwinęła się")
+        else:
+            if not card.canvas.items:
+                self.fail("pusty podgląd 3D w karcie")
+            self.guard("przełącznik w karcie", card._toggle, "dims3d", False)
+            self.guard("przełącznik w karcie", card._toggle, "dims3d", True)
+            cases = [c["name"] for c in card.case["_calc"]["snow"]["cases"]]
+            for c in cases[1:2]:
+                self.guard("zmiana przypadku śniegu w karcie", card.set_option, "snow_case", c)
+                self.pump(3)
+            self.guard("widok domyślny w karcie", pw.cards[0]._reset_view)
+        self.guard("zwinięcie karty", pw.cards[0].toggle)
+        self.guard("rozwinięcie karty wiatru", pw.cards[1].toggle)
+        self.pump(5)
+        self.shot(pw, "6_projekt_wiatr")
+        card = pw.cards[1]
+        if card.body is not None:
+            th = [f"{t}°" for t in m.wind_thetas(card.case["_calc"]["wgeo"])]
+            if len(th) > 1:
+                self.guard("zmiana θ w karcie", card.set_option, "theta", th[1])
+                self.pump(3)
+        # przenoszenie (zmiana kolejności)
+        ids = [c["id"] for c in a.project["cases"]]
+        self.guard("zmiana kolejności", pw.move_case, ids[1], 0)
+        if [c["id"] for c in a.project["cases"]] != [ids[1], ids[0]]:
+            self.fail("zmiana kolejności przypadków nie zadziałała")
+        if [c.case["id"] for c in pw.cards] != [c["id"] for c in a.project["cases"]]:
+            self.fail("kolejność kart różni się od kolejności przypadków")
+        # Edytuj → Aktualizuj
+        case = a.project["cases"][0]
+        self.guard("edycja przypadku", pw.edit_case, case)
+        self.pump(5)
+        if not a.win.isVisible() or a.editing is not case:
+            self.fail("Edytuj nie przeniosło przypadku do okna głównego")
+        if "Aktualizuj" not in a.btn_add.text():
+            self.fail(f"przycisk po Edytuj: „{a.btn_add.text()}” zamiast „Aktualizuj”")
+        key = "w_L" if case["extra"]["mode"] == "wiatr" else "s_L"
+        a.v[key].set("15")
+        self.recalc("edycja")
+        self.guard("aktualizacja przypadku", a.add_or_update)
+        if case["state"]["pola"].get(key) != "15":
+            self.fail("Aktualizuj nie zapisało zmiany w przypadku")
+        if len(a.project["cases"]) != 2:
+            self.fail("Aktualizuj dodało nowy przypadek zamiast zmienić istniejący")
+        self.guard("ponowne otwarcie projektu", a.open_project_window)
+        self.pump(3)
+        self.guard("zamknięcie projektu", a.pw.close)
+        self.pump(3)
+        if not a.win.isVisible() or a.editing is not None or "Dodaj" not in a.btn_add.text():
+            self.fail("Zamknij projekt nie wróciło do okna głównego w trybie dodawania")
+        # dokument do wydruku (bez drukarki)
+        doc = self.guard("dokument wydruku", a.project_document)
+        if doc is not None and doc.isEmpty():
+            self.fail("pusty dokument wydruku")
+        self.count("testy projektu")
+        # zapis / odczyt pliku .obc
+        self.ctx = "plik .obc"
+        path = os.path.join(tempfile.mkdtemp(prefix="obc_test_"), "test.obc")
+        before = a._project_dump()
+        if self.guard("zapis", a._write, path) is False:
+            return
+        if not os.path.exists(path):
+            self.fail("nie zapisano pliku projektu")
+            return
+        with open(path, encoding="utf-8") as fh:
+            d = json.load(fh)
+        for k in ("pola", "opcje", "lokalizacja", "strefy_recznie", "projekt"):
+            if k not in d:
+                self.fail(f"w pliku brak klucza „{k}”")
+        self.guard("odczyt projektu", a._project_load, d.get("projekt"))
+        after = a._project_dump()
+        if json.dumps(before, sort_keys=True) != json.dumps(after, sort_keys=True):
+            self.fail("zapis + odczyt zmienia projekt")
+        for c in a.project["cases"]:
+            self.guard("przeliczenie wczytanego przypadku", a.ensure_calc, c)
+            if c.get("_calc") is None:
+                self.fail(f"nie przeliczono wczytanego przypadku „{c['name']}”")
+        self.count("testy pliku")
+
+    # ================================================================ start ===
+    def run(self):
+        t0 = time.time()
+        try:
+            m = self.m
+            if m is None:
+                return
+            self.ctx = "start"
+            self.guard("uruchomienie aplikacji", self.setup)
+            if not hasattr(self, "app"):
+                return
+            for name, fn in (("śnieg", self.test_snow), ("wiatr", self.test_wind), ("stan", self.test_state),
+                             ("projekt", self.test_project)):
+                t1 = time.time()
+                self.ctx = name
+                self.guard(f"test {name} przerwany", fn)
+                print(f"  {name:8s} {time.time() - t1:6.1f} s", flush=True)
+        finally:
+            print(f"Czas: {time.time() - t0:.1f} s")
+            for k, v in self.counts.items():
+                print(f"  {k}: {v}")
+            if self.shot_dir:
+                print(f"Zrzuty: {self.shot_dir}")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Testy obciazenia_normowe.pyw")
+    ap.add_argument("--szybko", action="store_true", help="jeden widok 3D zamiast dwóch")
+    ap.add_argument("--zrzuty", metavar="DIR", help="zapisz zrzuty okien do katalogu DIR")
+    ap.add_argument("--plik", default=SRC, help="testowany plik programu (domyślnie obciazenia_normowe.pyw)")
+    args = ap.parse_args()
+    try:
+        m = load_module(args.plik)
+    except Exception:
+        print("BŁĄD: nie można wczytać programu:\n" + traceback.format_exc())
+        sys.exit(1)
+    r = Runner(m, args)
+    r.run()
+    if hasattr(r, "app"):                               # zamknięcie okien bez pytania o zapis
+        r.app.dirty = False
+        for w in (r.app.win3d, r.app.pw, r.app.win):
+            if w is not None:
+                w.hide()
+        r.qapp.processEvents()
+    sys.stdout.flush()
+    if r.errors:
+        seen = set()
+        print(f"\nBŁĘDY: {len(r.errors)}")
+        for what, tb in r.errors:
+            print("-" * 70)
+            print(what)
+            key = tb.strip().splitlines()[-1] if tb else what
+            if tb and key not in seen:              # ten sam wyjątek – pełny ślad tylko raz
+                print(tb)
+            seen.add(key)
+        sys.exit(1)
+    print("\nOK – brak błędów.", flush=True)
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

@@ -3285,7 +3285,7 @@ class CaseCanvas(Canvas3D):
         self._edit_keys = {}
         self._last = None
         self._moved = False
-        self.setMinimumHeight(380)
+        self.setMinimumHeight(540)
 
     def redraw(self):
         self.app.render_case(self, self.card.case)
@@ -3365,6 +3365,27 @@ class CaseCanvas(Canvas3D):
                 self.redraw()
                 return True
         return QWidget.event(self, e)
+
+
+class FitBrowser(QTextBrowser):
+    """Raport w karcie przypadku – wysokość dopasowana do treści (przewija się cała lista, nie raport)."""
+
+    def __init__(self):
+        super().__init__()
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.document().documentLayout().documentSizeChanged.connect(lambda *a: self._fit())
+
+    def _fit(self):
+        h = int(math.ceil(self.document().size().height())) + 2 * self.frameWidth() + 2
+        if h != self.height():
+            self.setFixedHeight(max(h, 40))
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._fit()
+
+    def wheelEvent(self, e):
+        e.ignore()                                   # kółko przewija listę przypadków
 
 
 class CaseCard(QFrame):
@@ -3535,9 +3556,8 @@ class CaseCard(QFrame):
         bl.addLayout(bar)
         self.canvas = CaseCanvas(self.app, self)
         bl.addWidget(self.canvas)
-        self.report = QTextBrowser()
+        self.report = FitBrowser()
         self.report.setOpenLinks(False)
-        self.report.setMinimumHeight(360)
         self.report.setHtml(self.case.get("report", ""))
         bl.addWidget(self.report)
         self.body = body
@@ -3941,7 +3961,9 @@ class App:
         h.addWidget(b)
         lb = LabelX("nie wybrano")
         lb.setObjectName("muted")
+        lb.setWordWrap(True)                         # długi opis punktu łamie się, nie wchodzi na przełącznik
         h.addWidget(lb, 1)
+        h.addSpacing(8)
         h.addWidget(self._mk_check("Strefy ręcznie", self.manual_zones))
         c.grid.addWidget(box, 1, 1, 1, 5)
         self.loc_labels.append(lb)
@@ -4172,8 +4194,8 @@ class App:
         self.theta_boxes.append(self.combo(c, 3, 0, self.theta, "Kierunek wiatru θ", ["0°", "90°"], width=6))
         self.num(c, 3, 1, "phi", "Blokowanie wiaty φ", "0…1")
         self.variant_boxes.append(self.combo(c, 4, 0, self.variant, "Wariant", [], span=2))
-        self.combo(c, 5, 0, self.cpi_mode, "Ciśnienie wewn. cpi", CPI_MODES, width=18)
-        self.num(c, 5, 1, "cpi", "Własne cpi", "–")
+        self.combo(c, 5, 0, self.cpi_mode, "Ciśnienie wewn. cpi", CPI_MODES, span=2)   # pełny opis wariantu
+        self.num(c, 6, 0, "cpi", "Własne cpi", "–")
 
         c = self.card(lay, "Wyniki", stretch=1)
         self.wind_text, self.wind_tree = self._results(
@@ -4929,7 +4951,7 @@ class App:
 
     # --- rysowanie zapisanego przypadku na dowolnym płótnie
     _CTX_ATTRS = ("sgeo", "snow", "wgeo", "wind", "cv", "yaw", "pitch", "zoom", "pan_x", "pan_y", "_scene_key",
-                  "_scene_cache", "_snow_ztop", "_edit_keys", "_placed", "_scene_ver", "_s_ok", "_w_ok", "_ctx")
+                  "_scene_cache", "_snow_ztop", "_edit_keys", "_placed", "_defer_angles", "_scene_ver", "_s_ok", "_w_ok", "_ctx")
 
     def render_case(self, cv, case, image=False):
         self.ensure_calc(case)
@@ -5782,14 +5804,27 @@ class App:
             cv.create_line(a[0], a[1], b[0], b[1], fill="#e2e5df")
             k += 1
         fnt = (FONT, 9)
+        self._placed = []                                # zajęte prostokąty opisów (etykiety, wymiary)
+        self._defer_angles = None
         if mode == "wiatr":
             fr = wind_frame(g, self.wind["theta"])
             p1 = fr["to_xy"](-0.95 * m, fr["b"] / 2)
             p2 = fr["to_xy"](-0.55 * m, fr["b"] / 2)
             a, b = P((p1[0], p1[1], 0.02)), P((p2[0], p2[1], 0.02))
             cv.create_line(a[0], a[1], b[0], b[1], width=7, arrow="last", arrowshape=(18, 22, 8), fill="#b45309")
-            cv.create_text(a[0], a[1] - 14, text=f"wiatr θ = {self.wind['theta']}°", font=(FONT, 10, "bold"),
-                           fill="#b45309")
+            # opis za nasadą strzałki (na przedłużeniu), żeby strzałka go nie przekreślała
+            wtxt, wfnt = f"wiatr θ = {self.wind['theta']}°", (FONT, 10, "bold")
+            tmp = cv.create_text(0, 0, text=wtxt, font=wfnt)
+            bx = cv.bbox(tmp)
+            cv.delete(tmp)
+            tw, th = bx[2] - bx[0], bx[3] - bx[1]
+            dx, dy = a[0] - b[0], a[1] - b[1]
+            dl = math.hypot(dx, dy) or 1.0
+            dx, dy = dx / dl, dy / dl
+            r = abs(dx) * tw / 2 + abs(dy) * th / 2 + 6
+            tx, ty = a[0] + dx * r, a[1] + dy * r
+            cv.create_text(tx, ty, text=wtxt, font=wfnt, fill="#b45309")
+            self._placed.append((tx - tw / 2 - 3, ty - th / 2 - 2, tx + tw / 2 + 3, ty + th / 2 + 2))
         for f_ in faces:
             if f_.get("n") is None:
                 f_["n"] = outward(f_["poly"])
@@ -5860,27 +5895,34 @@ class App:
                 a_, b_ = (P(tip), P(c)) if v > 0 else (P(c), P(tip))
                 cv.create_line(a_[0], a_[1], b_[0], b_[1], arrow="last", width=2.5,
                                fill="#991b1b" if v > 0 else "#1e40af", arrowshape=(11, 13, 5))
-        self._placed = []
+        # wymiary przed etykietami: opisy wymiarów zostają na liniach wymiarowych, etykiety obciążeń je omijają;
+        # opisy kątów na końcu – omijają etykiety (jak dotąd)
+        self._defer_angles = []
+        try:
+            if mode == "śnieg" and self.dims3d.get():
+                self.draw_snow_dims(cv, g, P, facing, size)
+            if mode == "wiatr" and self.dims3d.get():
+                self.draw_dims(cv, g, P, facing, size)
+            if self.bdims3d.get():
+                self.draw_bdims(cv, mode, g, P, facing, size)
+        finally:
+            angles, self._defer_angles = self._defer_angles, None
         if self.labels3d.get():
             for pos, txt in texts:
                 c = P(pos)
-                self._label(cv, c[0], c[1] - 16, txt, outline="#111827")
+                self._label(cv, c[0], c[1] - 16, txt, outline="#111827", dodge=True)
             cand = []
             for depth, f_, pr in drawn:
                 if not f_.get("label") or not is_rep(f_):
                     continue
                 ar = poly_area([(p[0], p[1]) for p in pr])
                 if ar >= (450 if mode == "wiatr" else 250):
-                    cand.append((ar, f_))
-            for ar, f_ in sorted(cand, key=lambda x: -x[0]):
+                    cand.append((ar, f_, pr))
+            for ar, f_, pr in sorted(cand, key=lambda x: -x[0]):
                 c = P(f_.get("anchor") or centroid(f_["poly"]))
-                self._label(cv, c[0], c[1], f_["label"])
-        if mode == "śnieg" and self.dims3d.get():
-            self.draw_snow_dims(cv, g, P, facing, size)
-        if mode == "wiatr" and self.dims3d.get():
-            self.draw_dims(cv, g, P, facing, size)
-        if self.bdims3d.get():
-            self.draw_bdims(cv, mode, g, P, facing, size)
+                self._label(cv, c[0], c[1], f_["label"], dodge=True, poly=[(p[0], p[1]) for p in pr])
+        for args in angles:
+            self._angle_label(*args)
         if mode == "śnieg" and self.snow["overhang"]:
             self.draw_overhang(cv, g, P, facing, self.snow["overhang"], size)
         self.draw_legend(cv, mode, g, Hc, fnt)
@@ -5894,16 +5936,48 @@ class App:
                             "Kółko – powiększenie\nPanel dotykowy: dwa palce – przesuwanie, "
                             "rozsunięcie – powiększenie\nKliknięcie wymiaru – zmiana")
 
-    def _label(self, cv, x, y, text, outline=""):
-        """Etykieta z tłem; pomijana, gdy zachodzi na wcześniej narysowaną."""
-        tid = cv.create_text(x, y, text=text, font=(FONT, 8, "bold"), fill="#111827", justify="center")
+    def _label(self, cv, x, y, text, outline="", dodge=False, poly=None):
+        """Etykieta z tłem. Gdy zachodzi na wcześniej narysowany opis: z dodge=True przesunięta w najbliższe
+        wolne miejsce (najpierw wewnątrz pola poly, potem tuż obok – z linią odniesienia), inaczej pomijana."""
+        fnt = (FONT, 8, "bold")
+        tmp = cv.create_text(0, 0, text=text, font=fnt, justify="center")
+        bx = cv.bbox(tmp)
+        cv.delete(tmp)
+        hw, hh = (bx[2] - bx[0]) / 2 + 3, (bx[3] - bx[1]) / 2 + 2
+        placed = getattr(self, "_placed", [])
+        free = lambda cx, cy: not any(cx - hw < o[2] and o[0] < cx + hw and cy - hh < o[3] and o[1] < cy + hh
+                                      for o in placed)
+        W, Hc = cv.winfo_width(), cv.winfo_height()
+        on_cv = lambda cx, cy: hw <= cx <= W - hw and hh <= cy <= Hc - hh
+        pos, leader = ((x, y), False) if free(x, y) else (None, False)
+        if pos is None and dodge:
+            near = None
+            for r in range(4, 124, 4):
+                for k in range(24):
+                    t = math.radians(-90 + 15 * k)
+                    cx, cy = x + r * math.cos(t), y + r * math.sin(t)
+                    if not (on_cv(cx, cy) and free(cx, cy)):
+                        continue
+                    if poly is not None and _pip(cx, cy, poly):
+                        pos = (cx, cy)
+                        break
+                    if near is None and r <= 48:
+                        near = (cx, cy)
+                if pos is not None:
+                    break
+            if pos is None and near is not None:
+                pos, leader = near, True
+            elif pos is not None and poly is None:
+                leader = math.hypot(pos[0] - x, pos[1] - y) > 12
+        if pos is None:
+            return False
+        cx, cy = pos
+        self._placed = placed + [(cx - hw, cy - hh, cx + hw, cy + hh)]
+        if leader:                                     # linia odniesienia od miejsca etykiety do opisu
+            cv.create_line(x, y, cx, cy, fill="#4b5563", width=1)
+            cv.create_oval(x - 2, y - 2, x + 2, y + 2, fill="#4b5563", outline="")
+        tid = cv.create_text(cx, cy, text=text, font=fnt, fill="#111827", justify="center")
         bx = cv.bbox(tid)
-        box = (bx[0] - 3, bx[1] - 2, bx[2] + 3, bx[3] + 2)
-        for o in getattr(self, "_placed", []):
-            if box[0] < o[2] and o[0] < box[2] and box[1] < o[3] and o[1] < box[3]:
-                cv.delete(tid)
-                return False
-        self._placed = getattr(self, "_placed", []) + [box]
         rid = cv.create_rectangle(bx[0] - 2, bx[1] - 1, bx[2] + 2, bx[3] + 1, fill="#ffffff", outline=outline,
                                   stipple="" if outline else "gray75")
         cv.tag_raise(tid, rid)
@@ -6020,15 +6094,49 @@ class App:
             a, b = P(lpt(u0)), P(lpt(u1))
             cv.create_line(a[0], a[1], b[0], b[1], fill=col, width=1.5)
             key = sg_[3] if len(sg_) > 3 else None
-            lp = P(tuple(x + o for x, o in zip(lpt(u0 + (u1 - u0) * lab_t), lab_off)))
-            self._dim_box(cv, lp[0], lp[1], f"{f2(u1 - u0)} m", col, "#ffffff" if col != BDIM_COL else "#fff7ed",
-                          key)
+            txt = f"{f2(u1 - u0)} m"
+            lab_at = lambda t: P(tuple(x + o for x, o in zip(lpt(u0 + (u1 - u0) * t), lab_off)))
+            lp = lab_at(lab_t)
+            if self._box_busy(cv, lp[0], lp[1], txt):        # opis zajęty – przesunięcie wzdłuż linii wymiarowej
+                cands = [lab_at(lab_t + dt) for dt in (0.12, -0.12, 0.24, -0.24, 0.36, -0.36)
+                         if 0.1 <= lab_t + dt <= 0.9]
+                # krótkie odcinki (np. pola na szczycie dachu wielospadowego) – opisy schodkowo na zewnątrz
+                um = (u0 + u1) / 2
+                pb, pl = P(path(um)), P(lpt(um))
+                ox, oy = pl[0] - pb[0], pl[1] - pb[1]
+                if math.hypot(ox, oy) < 1.0:                    # brak odsunięcia – prostopadle do linii, w górę
+                    ox, oy = -(b[1] - a[1]), b[0] - a[0]
+                    if oy > 0:
+                        ox, oy = -ox, -oy
+                ol = math.hypot(ox, oy) or 1.0
+                ox, oy = ox / ol, oy / ol
+                tmp = cv.create_text(0, 0, text=txt, font=(FONT, 8, "bold"))
+                bx = cv.bbox(tmp)
+                cv.delete(tmp)
+                step = abs(ox) * (bx[2] - bx[0] + 8) + abs(oy) * (bx[3] - bx[1] + 4)
+                cands += [(lp[0] + ox * step * k, lp[1] + oy * step * k) for k in (1, 2, 3)]
+                for q in cands:
+                    if not self._box_busy(cv, q[0], q[1], txt):
+                        if q in cands[-3:]:                     # odsunięty opis – kreska do linii wymiarowej
+                            cv.create_line(lp[0], lp[1], q[0], q[1], fill=col, dash=(1, 2))
+                        lp = q
+                        break
+            self._dim_box(cv, lp[0], lp[1], txt, col, "#ffffff" if col != BDIM_COL else "#fff7ed", key)
+
+    def _box_busy(self, cv, x, y, text):
+        """Czy opis wymiaru w punkcie (x, y) zachodzi na wcześniej umieszczony opis."""
+        tmp = cv.create_text(x, y, text=text, font=(FONT, 8, "bold"))
+        bx = cv.bbox(tmp)
+        cv.delete(tmp)
+        b = (bx[0] - 3, bx[1] - 1, bx[2] + 3, bx[3] + 1)
+        return any(b[0] < o[2] and o[0] < b[2] and b[1] < o[3] and o[1] < b[3] for o in getattr(self, "_placed", []))
 
     def _dim_box(self, cv, x, y, text, col, bg, key):
         tid = cv.create_text(x, y, text=text, font=(FONT, 8, "bold"), fill=col)
         bx = cv.bbox(tid)
         rid = cv.create_rectangle(bx[0] - 3, bx[1] - 1, bx[2] + 3, bx[3] + 1, fill=bg, outline=col,
                                   dash=() if key else (2, 2))
+        self._placed = getattr(self, "_placed", []) + [(bx[0] - 3, bx[1] - 1, bx[2] + 3, bx[3] + 1)]
         cv.tag_raise(tid, rid)
         if key:
             tag = f"edit{len(self._edit_keys)}"
@@ -6040,6 +6148,9 @@ class App:
     def _angle_label(self, cv, P, pos, text, key=None):
         """Opis kąta; gdy zachodzi na etykietę obciążenia (lub inny opis kąta) – przesunięty
         w najbliższe wolne miejsce (bez linii odniesienia)."""
+        if getattr(self, "_defer_angles", None) is not None:      # rysowane po etykietach obciążeń
+            self._defer_angles.append((cv, P, pos, text, key))
+            return
         c = P(pos)
         tmp = cv.create_text(0, 0, text=text, font=(FONT, 8, "bold"))
         bx = cv.bbox(tmp)
