@@ -2693,6 +2693,8 @@ QTextBrowser {{ border: 1px solid #e3e6ea; background: {CARD}; }}
 QTreeWidget {{ border: 1px solid #e3e6ea; }}
 QPushButton#big {{ font-weight: bold; padding: 6px; }}
 QFrame#editor {{ background: {BDIM_COL}; border-radius: 3px; }}
+QFrame#card[lifted="true"] {{ border: 2px solid {ACCENT}; }}
+QFrame#dropSlot {{ border: 2px dashed #93b4f5; border-radius: 5px; background: #eef3fe; }}
 QFrame#editor QLabel {{ color: white; font-weight: bold; background: transparent; }}
 QFrame#editor QLineEdit {{ border: none; }}
 """
@@ -3406,6 +3408,8 @@ class CaseCard(QFrame):
         self.handle.setStyleSheet("font-size:16px; color:#6b7280; padding:0 4px;")
         self.handle.mousePressEvent = self._drag_press
         self.handle.mouseMoveEvent = self._drag_move
+        self.handle.mouseReleaseEvent = self._drag_release
+        self._drag_start = None
         hd.addWidget(self.handle)
         self.btn_exp = QPushButton("▸")
         self.btn_exp.setFixedWidth(28)
@@ -3478,23 +3482,27 @@ class CaseCard(QFrame):
             self.name.setText(t)
             self.app.project_changed()
 
-    # --- przeciąganie (zmiana kolejności)
+    # --- przeciąganie uchwytem ⠿ (zmiana kolejności): karta przypięta do kursora, pozostałe robią miejsce
     def _drag_press(self, e):
-        self._drag_start = e.position()
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._drag_start = e.globalPosition()
+            self.handle.setCursor(Qt.CursorShape.ClosedHandCursor)
 
     def _drag_move(self, e):
-        from PySide6.QtCore import QMimeData
-        from PySide6.QtGui import QDrag
-        if not (e.buttons() & Qt.MouseButton.LeftButton):
+        if self._drag_start is None:
             return
-        if (e.position() - self._drag_start).manhattanLength() < 6:
-            return
-        md = QMimeData()
-        md.setText(f"obc-case:{self.case['id']}")
-        dr = QDrag(self)
-        dr.setMimeData(md)
-        dr.setPixmap(self.grab().scaledToWidth(min(self.width(), 420)))
-        dr.exec(Qt.DropAction.MoveAction)
+        lst = self.pw.list
+        if lst.dragging is None:
+            if (e.globalPosition() - self._drag_start).manhattanLength() < 4:
+                return
+            lst.begin_drag(self, self._drag_start)
+        lst.drag_to(e.globalPosition())
+
+    def _drag_release(self, e):
+        self._drag_start = None
+        self.handle.setCursor(Qt.CursorShape.OpenHandCursor)
+        if self.pw.list.dragging is self:
+            self.pw.list.end_drag()
 
     # --- rozwijanie
     def toggle(self):
@@ -3631,36 +3639,90 @@ class CaseCard(QFrame):
 
 
 class CaseList(QWidget):
-    """Kontener kart przypadków przyjmujący upuszczenie (zmiana kolejności)."""
+    """Kontener kart przypadków. Przeciąganie karty: karta wyjęta z układu podąża za kursorem, w liście
+    zostaje puste pole (dropSlot) przesuwane między pozostałymi kartami; puszczenie – karta w miejscu pola."""
 
     def __init__(self, pw):
         super().__init__()
         self.pw = pw
-        self.setAcceptDrops(True)
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(0, 0, 0, 0)
         self.lay.setSpacing(6)
         self.lay.addStretch(1)
+        self.dragging = None
+        self._slot = None
+        self._last = None
+        self._scroll_timer = QTimer(self)
+        self._scroll_timer.setInterval(30)
+        self._scroll_timer.timeout.connect(self._autoscroll)
 
-    def dragEnterEvent(self, e):
-        if e.mimeData().hasText() and e.mimeData().text().startswith("obc-case:"):
-            e.acceptProposedAction()
+    def begin_drag(self, card, gpos):
+        idx = self.lay.indexOf(card)
+        if idx < 0:
+            return
+        self.dragging = card
+        slot = QFrame()
+        slot.setObjectName("dropSlot")
+        slot.setFixedHeight(card.height())
+        geo = card.geometry()
+        self.lay.removeWidget(card)                  # karta poza układem – przesuwana ręcznie
+        self.lay.insertWidget(idx, slot)
+        self._slot = slot
+        card.setGeometry(geo)
+        card.setProperty("lifted", True)
+        card.style().unpolish(card)
+        card.style().polish(card)
+        card.raise_()
+        self._off = self.mapFromGlobal(gpos.toPoint()).y() - geo.y()   # chwyt względem góry karty
+        self._last = gpos
+        self._scroll_timer.start()
 
-    def dragMoveEvent(self, e):
-        e.acceptProposedAction()
+    def drag_to(self, gpos):
+        card = self.dragging
+        if card is None:
+            return
+        self._last = gpos
+        y_cur = clamp(self.mapFromGlobal(gpos.toPoint()).y(), 0, self.height())
+        card.move(card.x(), int(y_cur - self._off))     # karta trzyma się kursora (wysoka może wyjść poza listę)
+        # miejsce: przed pierwszą kartą, której środek jest poniżej kursora
+        others = [c for c in self.pw.cards if c is not card]
+        idx = sum(1 for c in others if c.y() + c.height() / 2 < y_cur)
+        if self.lay.indexOf(self._slot) != idx:
+            self.lay.removeWidget(self._slot)
+            self.lay.insertWidget(idx, self._slot)
+            self.lay.activate()                      # pozostałe karty od razu robią miejsce
+            card.raise_()
 
-    def dropEvent(self, e):
-        cid = int(e.mimeData().text().split(":", 1)[1])
-        y = e.position().y()
-        cards = self.pw.cards
-        idx = len(cards)
-        for i, c in enumerate(cards):
-            g = c.geometry()
-            if y < g.y() + g.height() / 2:
-                idx = i
-                break
-        self.pw.move_case(cid, idx)
-        e.acceptProposedAction()
+    def _autoscroll(self):
+        """Kursor przy górnej / dolnej krawędzi okna listy – przewijanie."""
+        if self.dragging is None or self._last is None:
+            return
+        vp = self.pw.scroll.viewport()
+        y = vp.mapFromGlobal(self._last.toPoint()).y()
+        m = 40
+        d = y - m if y < m else (y - (vp.height() - m) if y > vp.height() - m else 0)
+        if d:
+            sb = self.pw.scroll.verticalScrollBar()
+            v = sb.value()
+            sb.setValue(v + int(clamp(d, -m, m) / 2) or (1 if d > 0 else -1))
+            if sb.value() != v:
+                self.drag_to(self._last)
+
+    def end_drag(self):
+        card, self.dragging = self.dragging, None
+        self._scroll_timer.stop()
+        if card is None:
+            return
+        idx = self.lay.indexOf(self._slot)
+        self.lay.removeWidget(self._slot)
+        self._slot.hide()
+        self._slot.deleteLater()
+        self._slot = None
+        card.setProperty("lifted", False)
+        card.style().unpolish(card)
+        card.style().polish(card)
+        self.lay.insertWidget(idx, card)
+        self.pw.place_case(card, idx)
 
 
 class ProjectWindow(QWidget):
@@ -3684,6 +3746,7 @@ class ProjectWindow(QWidget):
         sc.setFrameShape(QFrame.Shape.NoFrame)
         self.list = CaseList(self)
         sc.setWidget(self.list)
+        self.scroll = sc
         lay.addWidget(sc, 1)
         hb = QHBoxLayout()
         b1 = QPushButton("Zamknij projekt")
@@ -3725,6 +3788,17 @@ class ProjectWindow(QWidget):
         self.cards.insert(idx, card)
         self.list.lay.removeWidget(card)
         self.list.lay.insertWidget(idx, card)
+        self.app.project_changed()
+
+    def place_case(self, card, idx):
+        """Po przeciągnięciu: karta (już w układzie na pozycji idx) – ta sama kolejność w projekcie."""
+        old = self.cards.index(card)
+        if old == idx:
+            return
+        self.cards.insert(idx, self.cards.pop(old))
+        cases = self.app.project["cases"]
+        cases.remove(card.case)
+        cases.insert(idx, card.case)
         self.app.project_changed()
 
     def edit_case(self, case):

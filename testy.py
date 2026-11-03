@@ -318,6 +318,7 @@ class Runner:
             if len(th) > 1:
                 self.guard("zmiana θ w karcie", card.set_option, "theta", th[1])
                 self.pump(3)
+        self.guard("przeciąganie karty myszą", self.drag_cards, pw)
         # przenoszenie (zmiana kolejności)
         ids = [c["id"] for c in a.project["cases"]]
         self.guard("zmiana kolejności", pw.move_case, ids[1], 0)
@@ -375,6 +376,81 @@ class Runner:
             if c.get("_calc") is None:
                 self.fail(f"nie przeliczono wczytanego przypadku „{c['name']}”")
         self.count("testy pliku")
+
+    def drag_cards(self, pw):
+        """Przeciągnięcie górnej karty uchwytem ⠿ pod drugą (QTest): karta przypięta do kursora,
+        druga karta robi miejsce, po puszczeniu – nowa kolejność w projekcie i w liście."""
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+        for c in pw.cards:
+            if c.body is not None:
+                c.toggle()
+        self.pump(5)
+        if len(pw.cards) < 2:
+            return
+        top, second = pw.cards[0], pw.cards[1]
+        ids = [c.case["id"] for c in pw.cards]
+        y_top, y_second = top.y(), second.y()
+        h = top.handle
+        p0 = h.rect().center()
+        g0 = h.mapToGlobal(p0)
+        target_y = second.mapToGlobal(QPoint(0, second.height() // 2)).y() + 12   # poniżej środka drugiej karty
+        QTest.mousePress(h, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, p0)
+        local = p0
+        for k in range(1, 9):                             # ruch w kilku krokach
+            gy = g0.y() + (target_y - g0.y()) * k // 8
+            local = h.mapFromGlobal(QPoint(g0.x(), gy))
+            QTest.mouseMove(h, local)
+            self.pump(1)
+        lst = pw.list
+        if lst.dragging is not top:
+            self.fail("chwycenie uchwytu nie rozpoczęło przeciągania")
+            QTest.mouseRelease(h, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, local)
+            return
+        if top.y() <= y_top:
+            self.fail("przeciągana karta nie podąża za kursorem")
+        if lst.lay.indexOf(lst._slot) != 1:
+            self.fail(f"puste pole na pozycji {lst.lay.indexOf(lst._slot)} zamiast 1")
+        if second.y() >= y_second:
+            self.fail("pozostała karta nie zrobiła miejsca przeciąganej")
+        self.shot(pw, "7_projekt_przeciaganie")
+        QTest.mouseRelease(h, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, local)
+        self.pump(5)
+        if lst.dragging is not None or lst._slot is not None:
+            self.fail("przeciąganie nie zakończyło się po puszczeniu przycisku")
+        if [c.case["id"] for c in pw.cards] != [ids[1], ids[0]] + ids[2:]:
+            self.fail("po przeciągnięciu kolejność kart się nie zmieniła")
+        if [c["id"] for c in self.app.project["cases"]] != [c.case["id"] for c in pw.cards]:
+            self.fail("kolejność przypadków w projekcie różni się od kolejności kart")
+        if [lst.lay.itemAt(i).widget() for i in range(len(pw.cards))] != pw.cards:
+            self.fail("kolejność kart w układzie okna różni się od listy kart")
+        if top.y() <= second.y():
+            self.fail("przeciągnięta karta nie stoi pod drugą")
+        self.shot(pw, "8_projekt_po_przeciagnieciu")
+        # rozwinięta (wysoka) karta – z powrotem na górę
+        top.toggle()
+        self.pump(5)
+        h = top.handle
+        p0 = h.rect().center()
+        g0 = h.mapToGlobal(p0)
+        target_y = pw.cards[0].mapToGlobal(QPoint(0, 2)).y()
+        QTest.mousePress(h, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, p0)
+        for k in range(1, 9):
+            gy = g0.y() + (target_y - g0.y()) * k // 8
+            local = h.mapFromGlobal(QPoint(g0.x(), gy))
+            QTest.mouseMove(h, local)
+            self.pump(1)
+        g_now = h.mapToGlobal(p0).y()
+        if abs(g_now - target_y) > 2:
+            self.fail(f"rozwinięta karta odkleiła się od kursora ({g_now - target_y} px)")
+        self.shot(pw, "9_projekt_przeciaganie_rozwinietej")
+        QTest.mouseRelease(h, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, local)
+        self.pump(5)
+        if [c.case["id"] for c in pw.cards] != ids or \
+                [c["id"] for c in self.app.project["cases"]] != ids:
+            self.fail("rozwinięta karta nie wróciła na górę po przeciągnięciu")
+        top.toggle()
+        self.count("testy przeciągania")
 
     # ================================================================ start ===
     def run(self):
