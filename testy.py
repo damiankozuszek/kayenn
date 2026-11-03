@@ -417,8 +417,12 @@ class Runner:
         doc = self.guard("dokument wydruku", a.project_document)
         if doc is not None and doc.isEmpty():
             self.fail("pusty dokument wydruku")
-        if doc is not None and not doc.toPlainText().lstrip().startswith("Projekt: Hala magazynowa A"):
-            self.fail(f"wydruk nie zaczyna się od „Projekt: Hala magazynowa A”: {doc.toPlainText()[:80]!r}")
+        if doc is not None and doc.toPlainText().lstrip().splitlines()[0].strip() != "Projekt: Hala magazynowa A":
+            self.fail(f"nagłówek wydruku inny niż „Projekt: Hala magazynowa A”: {doc.toPlainText()[:80]!r}")
+        img = self.guard("obraz modelu do wydruku", a.snapshot, a.project["cases"][0])
+        if img is not None and (img.width() < 2000 or img.devicePixelRatio() < 2):
+            self.fail(f"obraz modelu do wydruku w niskiej rozdzielczości: {img.width()}×{img.height()} px, "
+                      f"dpr {img.devicePixelRatio()}")
         self.guard("podgląd wydruku", self.print_preview)
         self.count("testy projektu")
         # zapis / odczyt pliku .obc

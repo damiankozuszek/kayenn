@@ -5124,8 +5124,12 @@ class App:
             for n, v in vars_.items():
                 getattr(self, n)._v = v
 
-    def snapshot(self, case, w=1200, h=820):
-        """Obraz modelu 3D przypadku (do wydruku)."""
+    SNAP_W, SNAP_H, SNAP_DPR = 780, 540, 3         # obraz do wydruku: rozmiar logiczny, gęstość pikseli
+
+    def snapshot(self, case, w=SNAP_W, h=SNAP_H, dpr=SNAP_DPR):
+        """Obraz modelu 3D przypadku (do wydruku). Płótno w rozmiarze zbliżonym do obrazu na kartce (napisy
+        prawie w naturalnej wielkości), malowane w dpr-krotnej gęstości pikseli (ostre linie i tekst)."""
+        from PySide6.QtGui import QPixmap
         cv = getattr(self, "_snap_cv", None)
         if cv is None:
             cv = self._snap_cv = Canvas3D(self)
@@ -5133,7 +5137,11 @@ class App:
         cv.resize(w, h)
         cv._scene_key = None
         self.render_case(cv, case, image=True)
-        return cv.grab()
+        pm = QPixmap(int(w * dpr), int(h * dpr))
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(QColor(Canvas3D.BG_COL))
+        cv.render(pm)
+        return pm
 
     # --- przyciski Panelu edycji
     def set_editing(self, case):
@@ -5281,13 +5289,7 @@ class App:
         doc = QTextDocument()
         doc.setDefaultFont(QFont(FONT, 9))
         parts = []
-        g = self.project.get("globals") or {}
-        loc = g.get("loc") or {}
-        head = f"Projekt: <b>{esc(self.project_title())}</b>"
-        if loc.get("name"):
-            head += f" · lokalizacja: {esc(str(loc['name']))}"
-        if g.get("A"):
-            head += f" · A = {esc(str(g['A']))} m n.p.m."
+        head = f"Projekt: <b>{esc(self.project_title())}</b>"       # tylko nazwa projektu
         for i, case in enumerate(self.project["cases"]):
             self.ensure_calc(case)
             img = self.snapshot(case).toImage()
@@ -6144,7 +6146,8 @@ class App:
             if self.dims3d.get():
                 items.append(("line", SDIM_COL, "wymiary pól obciążenia"))
         if self.bdims3d.get():
-            items.append(("line", BDIM_COL, "wymiary budynku (kliknij, aby zmienić)"))
+            items.append(("line", BDIM_COL, "wymiary budynku" if self._ctx == "img"       # wydruk – bez klikania
+                          else "wymiary budynku (kliknij, aby zmienić)"))
         y = Hc - 14 - 20 * len(items)
         for kind, col, txt in items:
             if kind == "box":
