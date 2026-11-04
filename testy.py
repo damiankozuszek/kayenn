@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Testy programu kayenn_loading_codes.pyw – uruchamiać po każdej zmianie:
+Testy programu kayenn_codes.pyw – uruchamiać po każdej zmianie:
 
     py testy.py                 wszystkie testy
     py testy.py --szybko        bez drugiego widoku 3D (ok. 2× szybciej)
@@ -31,7 +31,7 @@ import time
 import traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, "kayenn_loading_codes.pyw")
+SRC = os.path.join(HERE, "kayenn_codes.pyw")
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 # platforma offscreen w Windows nie widzi czcionek systemowych – bez tego zrzuty mają kwadraty zamiast liter
@@ -39,10 +39,10 @@ os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"
 
 
 def load_module(src=SRC):
-    loader = importlib.machinery.SourceFileLoader("kayenn_loading_codes", src)
-    spec = importlib.util.spec_from_loader("kayenn_loading_codes", loader)
+    loader = importlib.machinery.SourceFileLoader("kayenn_codes", src)
+    spec = importlib.util.spec_from_loader("kayenn_codes", loader)
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["kayenn_loading_codes"] = mod
+    sys.modules["kayenn_codes"] = mod
     loader.exec_module(mod)
     return mod
 
@@ -636,10 +636,10 @@ except SystemExit:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Testy kayenn_loading_codes.pyw")
+    ap = argparse.ArgumentParser(description="Testy kayenn_codes.pyw")
     ap.add_argument("--szybko", action="store_true", help="jeden widok 3D zamiast dwóch")
     ap.add_argument("--zrzuty", metavar="DIR", help="zapisz zrzuty okien do katalogu DIR")
-    ap.add_argument("--plik", default=SRC, help="testowany plik programu (domyślnie kayenn_loading_codes.pyw)")
+    ap.add_argument("--plik", default=SRC, help="testowany plik programu (domyślnie kayenn_codes.pyw)")
     args = ap.parse_args()
     try:
         m = load_module(args.plik)

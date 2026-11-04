@@ -9,7 +9,7 @@ Moduły pakietu:
 | Moduł | Zakres |
 |---|---|
 | **KAYENN Manager** | projekt, raport obliczeniowy, wydruk – moduł podstawowy |
-| **KAYENN Loading Codes** | obciążenia wg norm: śnieg, wiatr, obciążenia użytkowe |
+| **KAYENN Codes** | obciążenia wg norm: śnieg, wiatr, obciążenia użytkowe |
 | **KAYENN Lab** | obciążenia wyznaczane metodami inżynierskimi |
 | **KAYENN FEM** | obliczenia metodą elementów skończonych (MES) |
 
@@ -27,7 +27,7 @@ Moduły pakietu:
 
 ### 1.2. Nazwa i identyfikacja wizualna
 - ~~Nadanie projektowi rozpoznawalnej nazwy~~ – **KAYENN**; nazwy modułów: KAYENN Manager,
-  KAYENN Loading Codes, KAYENN Lab, KAYENN FEM.
+  KAYENN Codes, KAYENN Lab, KAYENN FEM.
 - Sprawdzenie dostępności nazwy w bazach znaków towarowych (EUIPO, UPRP) i domeny projektu.
 - Opracowanie znaku graficznego (logo, ikona aplikacji).
 - Najlepiej przed szerszym udostępnieniem – późniejsza zmiana nazwy utrudnia rozpoznawalność
@@ -68,10 +68,10 @@ Rozdzielenie obecnego programu na dwie niezależne aplikacje współpracujące n
 - odpowiada za wydruk raportu,
 - uruchomiony samodzielnie (z menu Start, skrótu itp.) otwiera pustą listę z możliwością nadania nazwy
   projektowi,
-- pozwala otworzyć moduł KAYENN Loading Codes i kontynuować w nim pracę, a docelowo – uruchamiać pozostałe
+- pozwala otworzyć moduł KAYENN Codes i kontynuować w nim pracę, a docelowo – uruchamiać pozostałe
   moduły.
 
-**Moduły narzędziowe** (KAYENN Loading Codes i kolejne) służą do obliczeń, których wyniki zapisywane są
+**Moduły narzędziowe** (KAYENN Codes i kolejne) służą do obliczeń, których wyniki zapisywane są
 w KAYENN Manager.
 
 Zadania:
@@ -82,7 +82,7 @@ Zadania:
 
 ## Etap 4. Obciążenia użytkowe
 
-- Trzecia zakładka modułu KAYENN Loading Codes, obok śniegu i wiatru: obciążenia użytkowe wg PN-EN 1991-1-1
+- Trzecia zakładka modułu KAYENN Codes, obok śniegu i wiatru: obciążenia użytkowe wg PN-EN 1991-1-1
   wraz z Załącznikiem krajowym.
 
 ---
@@ -90,7 +90,7 @@ Zadania:
 ## Etap 5. Moduł KAYENN Lab
 
 Nowy moduł z narzędziami do wyznaczania obciążeń metodami inżynierskimi – jako uzupełnienie modułu
-KAYENN Loading Codes, który w całości odwzorowuje podejście normowe.
+KAYENN Codes, który w całości odwzorowuje podejście normowe.
 
 Pierwsze narzędzie – **kalkulator obciążeń stałych**:
 - wyznaczanie obciążenia od układu warstw (np. posadzki, stropu, dachu) na podstawie materiałów i grubości,

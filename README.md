@@ -8,12 +8,12 @@ Nazwa pochodzi od **kN** – kiloniutona, jednostki, w której konstruktor liczy
 
 | Moduł | Zakres | Stan |
 |---|---|---|
-| **KAYENN Manager** | projekt, raport obliczeniowy, wydruk | obecnie zintegrowany z Loading Codes (Panel projektu) |
-| **KAYENN Loading Codes** | obciążenia wg norm: śnieg, wiatr | dostępny |
+| **KAYENN Manager** | projekt, raport obliczeniowy, wydruk | obecnie zintegrowany z KAYENN Codes (Panel projektu) |
+| **KAYENN Codes** | obciążenia wg norm: śnieg, wiatr | dostępny |
 | **KAYENN Lab** | obciążenia wyznaczane metodami inżynierskimi | planowany |
 | **KAYENN FEM** | obliczenia metodą elementów skończonych | planowany |
 
-### KAYENN Loading Codes
+### KAYENN Codes
 
 - **śnieg** – PN-EN 1991-1-3 (+AC, Ap1, Załącznik krajowy), w tym zaspy wyjątkowe (Załącznik B wg NB1.3),
 - **wiatr** – PN-EN 1991-1-4:2008 (+AC, Ap1…Ap3, Załącznik krajowy) – budynki i wiaty.
@@ -31,10 +31,10 @@ Wymagany Python 3 i PySide6 (z QtWebEngine – dla mapy):
 
 ```
 py -m pip install PySide6
-py kayenn_loading_codes.pyw
+py kayenn_codes.pyw
 ```
 
-W Windows wystarczy dwuklik na `kayenn_loading_codes.pyw`. Przy pierwszym uruchomieniu bez PySide6 program
+W Windows wystarczy dwuklik na `kayenn_codes.pyw`. Przy pierwszym uruchomieniu bez PySide6 program
 zaproponuje instalację.
 
 ## Testy

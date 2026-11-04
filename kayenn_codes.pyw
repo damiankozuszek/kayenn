@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-KAYENN Loading Codes – śnieg i wiatr
-====================================
+KAYENN Codes – śnieg i wiatr
+============================
 Obciążenie śniegiem dachów wg PN-EN 1991-1-3 (+AC, Ap1, Załącznik krajowy)
 Oddziaływanie wiatru na budynki i wiaty wg PN-EN 1991-1-4:2008 (+AC, Ap1..Ap3, Załącznik krajowy)
 
 Moduł pakietu KAYENN (od kN – kiloniuton, czytane po angielsku „kej-en”).
 
-Uruchomienie: dwuklik (Windows) lub  python3 kayenn_loading_codes.pyw
+Uruchomienie: dwuklik (Windows) lub  python3 kayenn_codes.pyw
 Wymaga Pythona 3 i biblioteki PySide6:  py -m pip install PySide6
 (przy pierwszym uruchomieniu bez PySide6 program zaproponuje instalację).
 
@@ -2533,8 +2533,8 @@ DEFAULTS = dict(A="210", s_L="12", s_B="10", s_H="5", s_alpha="25", s_alpha2="25
 PROJECT_EXT = ".kayenn"
 
 ASSUMPTIONS = """\
-KAYENN LOADING CODES – ZAŁOŻENIA OBLICZEŃ
-=========================================
+KAYENN CODES – ZAŁOŻENIA OBLICZEŃ
+=================================
 
 ŚNIEG – PN-EN 1991-1-3:2005 z poprawkami AC:2009, Ap1:2010
 • s = μᵢ·Cₑ·Cₜ·sₖ (5.2); obciążenie działa pionowo na rzut poziomy dachu.
@@ -4371,7 +4371,7 @@ class App:
         name = os.path.basename(self.project_path) if self.project_path else "nowy projekt"
         ed = getattr(self, "editing", None)
         star = "*" if self.dirty else ""
-        self.win.setWindowTitle(f"{star}{name} – Panel edycji – KAYENN Loading Codes"
+        self.win.setWindowTitle(f"{star}{name} – Panel edycji – KAYENN Codes"
                                 + (f" – edycja: {ed['name']}" if ed else ""))
         if getattr(self, "pw", None) is not None:
             self.pw.setWindowTitle(f"{star}{self.project_title()} – Panel projektu – KAYENN Manager")
@@ -4858,7 +4858,7 @@ class App:
 
     def _build_3d(self):
         w = Win3D(self)
-        w.setWindowTitle("KAYENN Loading Codes – model 3D")
+        w.setWindowTitle("KAYENN Codes – model 3D")
         w.setMinimumSize(640, 480)
         self.win3d = w
         lay = QVBoxLayout(w)
@@ -5339,7 +5339,7 @@ class App:
 
     # ============================================== sceny i rysowanie modelu 3D ===
     def get_state(self):
-        st = {"program": "KAYENN Loading Codes", "wersja": 1,
+        st = {"program": "KAYENN Codes", "wersja": 1,
               "pola": {k: v.get() for k, v in self.v.items()}}
         st["opcje"] = {n: getattr(self, n).get() for n in self.STATE_VARS}
         st["lokalizacja"] = self.loc.get()
@@ -5895,7 +5895,7 @@ class App:
             return
         if not ctx:
             self.update_toolbar(mode)
-            self.win3d.setWindowTitle("KAYENN Loading Codes – model 3D – " + ("wiatr" if mode == "wiatr" else "śnieg"))
+            self.win3d.setWindowTitle("KAYENN Codes – model 3D – " + ("wiatr" if mode == "wiatr" else "śnieg"))
             self.close_editor()
         self._edit_keys = {}
         key = (mode, getattr(self, "_scene_ver", 0), self.snow_case.get() if mode != "wiatr" else None)
@@ -6686,7 +6686,7 @@ def _check_image():
     """Znaczek „ptaszka” do pól wyboru (PNG w katalogu tymczasowym – bez wtyczki SVG)."""
     import tempfile
     from PySide6.QtGui import QPixmap
-    path = os.path.join(tempfile.gettempdir(), "kayenn_loading_codes_check.png")
+    path = os.path.join(tempfile.gettempdir(), "kayenn_codes_check.png")
     pm = QPixmap(28, 28)
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
