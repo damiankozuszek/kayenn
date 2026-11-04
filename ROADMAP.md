@@ -1,6 +1,6 @@
-# STRATOS – plan rozwoju (Road Map)
+# KAENN – plan rozwoju (Road Map)
 
-Kierunki rozwoju pakietu STRATOS (**STR**uctural **A**ctions **T**oolkit, **O**pen **S**ource), uporządkowane
+Kierunki rozwoju pakietu KAENN (nazwa od kN – kiloniutona), uporządkowane
 od zadań możliwych do realizacji w najbliższym czasie do planów długoterminowych. Kolejność etapów nie jest
 sztywna – poszczególne zadania mogą być realizowane równolegle.
 
@@ -8,10 +8,10 @@ Moduły pakietu:
 
 | Moduł | Zakres |
 |---|---|
-| **STRATOS Manager** | projekt, raport obliczeniowy, wydruk – moduł podstawowy |
-| **STRATOS Loading Codes** | obciążenia wg norm: śnieg, wiatr, obciążenia użytkowe |
-| **STRATOS Lab** | obciążenia wyznaczane metodami inżynierskimi |
-| **STRATOS FEM** | obliczenia metodą elementów skończonych (MES) |
+| **KAENN Manager** | projekt, raport obliczeniowy, wydruk – moduł podstawowy |
+| **KAENN Loading Codes** | obciążenia wg norm: śnieg, wiatr, obciążenia użytkowe |
+| **KAENN Lab** | obciążenia wyznaczane metodami inżynierskimi |
+| **KAENN FEM** | obliczenia metodą elementów skończonych (MES) |
 
 ---
 
@@ -26,8 +26,8 @@ Moduły pakietu:
 - Upublicznienie repozytorium.
 
 ### 1.2. Nazwa i identyfikacja wizualna
-- ~~Nadanie projektowi rozpoznawalnej nazwy~~ – **STRATOS**; nazwy modułów: STRATOS Manager,
-  STRATOS Loading Codes, STRATOS Lab, STRATOS FEM.
+- ~~Nadanie projektowi rozpoznawalnej nazwy~~ – **KAENN**; nazwy modułów: KAENN Manager,
+  KAENN Loading Codes, KAENN Lab, KAENN FEM.
 - Sprawdzenie dostępności nazwy w bazach znaków towarowych (EUIPO, UPRP) i domeny projektu.
 - Opracowanie znaku graficznego (logo, ikona aplikacji).
 - Najlepiej przed szerszym udostępnieniem – późniejsza zmiana nazwy utrudnia rozpoznawalność
@@ -49,7 +49,7 @@ Celem jest program działający natywnie w systemach Linux, Windows i macOS – 
 uruchomieniu w każdym z nich.
 
 - Przegląd elementów zależnych od Windows: czcionki (`Segoe UI`, `Consolas`) z zamiennikami dla innych
-  systemów, skojarzenie plików `.stratos` (obecnie tylko rejestr Windows) – odpowiedniki dla Linuksa
+  systemów, skojarzenie plików `.kaenn` (obecnie tylko rejestr Windows) – odpowiedniki dla Linuksa
   (`.desktop`, typ MIME) i macOS.
 - Testy automatyczne uruchamiane na wszystkich trzech systemach (np. GitHub Actions).
 - Linux: dystrybucja przez sklepy z aplikacjami (np. Flathub).
@@ -59,20 +59,20 @@ uruchomieniu w każdym z nich.
 
 ---
 
-## Etap 3. Wydzielenie modułu STRATOS Manager
+## Etap 3. Wydzielenie modułu KAENN Manager
 
 Rozdzielenie obecnego programu na dwie niezależne aplikacje współpracujące na wspólnym pliku projektu.
 
-**STRATOS Manager** – moduł podstawowy całego pakietu:
+**KAENN Manager** – moduł podstawowy całego pakietu:
 - przechowuje informacje o projekcie i zarządza raportem obliczeniowym (lista przypadków, kolejność, nazwy),
 - odpowiada za wydruk raportu,
 - uruchomiony samodzielnie (z menu Start, skrótu itp.) otwiera pustą listę z możliwością nadania nazwy
   projektowi,
-- pozwala otworzyć moduł STRATOS Loading Codes i kontynuować w nim pracę, a docelowo – uruchamiać pozostałe
+- pozwala otworzyć moduł KAENN Loading Codes i kontynuować w nim pracę, a docelowo – uruchamiać pozostałe
   moduły.
 
-**Moduły narzędziowe** (STRATOS Loading Codes i kolejne) służą do obliczeń, których wyniki zapisywane są
-w STRATOS Manager.
+**Moduły narzędziowe** (KAENN Loading Codes i kolejne) służą do obliczeń, których wyniki zapisywane są
+w KAENN Manager.
 
 Zadania:
 - zdefiniowanie wspólnego, udokumentowanego formatu pliku projektu, obsługującego wpisy z różnych modułów,
@@ -82,15 +82,15 @@ Zadania:
 
 ## Etap 4. Obciążenia użytkowe
 
-- Trzecia zakładka modułu STRATOS Loading Codes, obok śniegu i wiatru: obciążenia użytkowe wg PN-EN 1991-1-1
+- Trzecia zakładka modułu KAENN Loading Codes, obok śniegu i wiatru: obciążenia użytkowe wg PN-EN 1991-1-1
   wraz z Załącznikiem krajowym.
 
 ---
 
-## Etap 5. Moduł STRATOS Lab
+## Etap 5. Moduł KAENN Lab
 
 Nowy moduł z narzędziami do wyznaczania obciążeń metodami inżynierskimi – jako uzupełnienie modułu
-STRATOS Loading Codes, który w całości odwzorowuje podejście normowe.
+KAENN Loading Codes, który w całości odwzorowuje podejście normowe.
 
 Pierwsze narzędzie – **kalkulator obciążeń stałych**:
 - wyznaczanie obciążenia od układu warstw (np. posadzki, stropu, dachu) na podstawie materiałów i grubości,
@@ -114,9 +114,9 @@ Kolejne narzędzia będą dodawane w miarę potrzeb użytkowników.
 
 ## Etap 7. Kierunki długoterminowe
 
-### 7.1. Moduł STRATOS FEM
+### 7.1. Moduł KAENN FEM
 - Moduł obliczeń metodą elementów skończonych, rozwijany jako kolejna gałąź pakietu, obok modułów
-  obciążeń i współpracujący ze STRATOS Manager.
+  obciążeń i współpracujący ze KAENN Manager.
 
 ### 7.2. Profesjonalna dystrybucja
 Jeśli wsparcie społeczności pokryje stałe koszty i pojawi się takie zapotrzebowanie, projekt będzie

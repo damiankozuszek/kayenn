@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Testy programu stratos_loading_codes.pyw – uruchamiać po każdej zmianie:
+Testy programu kaenn_loading_codes.pyw – uruchamiać po każdej zmianie:
 
     py testy.py                 wszystkie testy
     py testy.py --szybko        bez drugiego widoku 3D (ok. 2× szybciej)
@@ -14,7 +14,7 @@ Testy działają na prawdziwym Qt w trybie offscreen (bez okien na ekranie):
   3. stan formularza: get_state → set_state → get_state (bez zmian),
   4. projekt: dodanie przypadków, okno projektu, rozwinięcie kart, zmiana opcji w karcie, edycja
      i aktualizacja przypadku, zapis/odczyt projektu, dokument do wydruku,
-  5. pliki .stratos: zapis i odczyt przez _write / _project_load.
+  5. pliki .kaenn: zapis i odczyt przez _write / _project_load.
 Wynik: lista błędów (wyjątki z pełnym śladem) i kod wyjścia 0 – wszystko dobrze, 1 – są błędy.
 Nie sprawdzają: płynności obrotu, gestów touchpada, prawdziwego wydruku, mapy i ULDK – to ręcznie.
 """
@@ -31,7 +31,7 @@ import time
 import traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, "stratos_loading_codes.pyw")
+SRC = os.path.join(HERE, "kaenn_loading_codes.pyw")
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 # platforma offscreen w Windows nie widzi czcionek systemowych – bez tego zrzuty mają kwadraty zamiast liter
@@ -39,10 +39,10 @@ os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"
 
 
 def load_module(src=SRC):
-    loader = importlib.machinery.SourceFileLoader("stratos_loading_codes", src)
-    spec = importlib.util.spec_from_loader("stratos_loading_codes", loader)
+    loader = importlib.machinery.SourceFileLoader("kaenn_loading_codes", src)
+    spec = importlib.util.spec_from_loader("kaenn_loading_codes", loader)
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["stratos_loading_codes"] = mod
+    sys.modules["kaenn_loading_codes"] = mod
     loader.exec_module(mod)
     return mod
 
@@ -425,9 +425,9 @@ class Runner:
                       f"dpr {img.devicePixelRatio()}")
         self.guard("podgląd wydruku", self.print_preview)
         self.count("testy projektu")
-        # zapis / odczyt pliku .stratos
+        # zapis / odczyt pliku .kaenn
         self.ctx = "plik .obc"
-        path = os.path.join(tempfile.mkdtemp(prefix="stratos_test_"), "test.stratos")
+        path = os.path.join(tempfile.mkdtemp(prefix="kaenn_test_"), "test.kaenn")
         before = a._project_dump()
         if self.guard("zapis", a._write, path) is False:
             return
@@ -452,7 +452,7 @@ class Runner:
         if not self.guard("open_path", a.open_path, path) or a.dirty or len(a.project["cases"]) != len(before["przypadki"]):
             self.fail("open_path nie wczytało projektu (lub zostawiło znacznik zmian)")
         self.count("testy pliku")
-        self.ctx = "dwuklik na pliku .stratos"
+        self.ctx = "dwuklik na pliku .kaenn"
         self.guard("uruchomienie z plikiem", self.start_with_file, path, len(before["przypadki"]))
 
     def print_preview(self):
@@ -636,10 +636,10 @@ except SystemExit:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Testy stratos_loading_codes.pyw")
+    ap = argparse.ArgumentParser(description="Testy kaenn_loading_codes.pyw")
     ap.add_argument("--szybko", action="store_true", help="jeden widok 3D zamiast dwóch")
     ap.add_argument("--zrzuty", metavar="DIR", help="zapisz zrzuty okien do katalogu DIR")
-    ap.add_argument("--plik", default=SRC, help="testowany plik programu (domyślnie stratos_loading_codes.pyw)")
+    ap.add_argument("--plik", default=SRC, help="testowany plik programu (domyślnie kaenn_loading_codes.pyw)")
     args = ap.parse_args()
     try:
         m = load_module(args.plik)
