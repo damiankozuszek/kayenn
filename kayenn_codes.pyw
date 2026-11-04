@@ -1420,6 +1420,20 @@ def uldk_search(query, timeout=30):
 MAP_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script>
+// Windows z wyłączonymi „efektami animacji” zgłasza prefers-reduced-motion – MapLibre wyłącza wtedy animacje
+// (przyciski +/−, przelot do działki skaczą). Na mapie animacje zostawiamy – zapytanie musi być podmienione
+// przed wczytaniem MapLibre (zapamiętuje wynik przy pierwszym użyciu).
+(function () {
+  const mm = window.matchMedia ? window.matchMedia.bind(window) : null;
+  window.matchMedia = function (q) {
+    if (/prefers-reduced-motion/.test(q))
+      return {matches: false, media: q, onchange: null, addListener() {}, removeListener() {},
+              addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; }};
+    return mm(q);
+  };
+})();
+</script>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <style>
 html,body,#map{height:100%;margin:0;font-family:"Segoe UI",sans-serif;font-size:13px}
@@ -1519,11 +1533,42 @@ for (const b of BASES) {
   layers.push({id: b.id, type: 'raster', source: b.id, layout: {visibility: b.id === base ? 'visible' : 'none'}});
 }
 let map = null;
+// Płynny zoom kółkiem: w QtWebEngine ząbek kółka daje małe deltaY (60), a MapLibre przybliża wtedy o ~0,09 poziomu
+// krótkim szarpnięciem. Tu: ząbek = pół poziomu; skala w każdej klatce zbliża się wykładniczo do celu (TAU),
+// kolejne ząbki przesuwają cel – kręcenie kółkiem daje jeden ciągły, wyhamowujący ruch. Touchpad – proporcjonalnie.
+function smoothWheel(m) {
+  m.scrollZoom.disable();
+  const NOTCH = 0.5, TAU = 75;
+  let target = null, anchor = null, raf = 0, last = 0;
+  const stop = () => { if (raf) cancelAnimationFrame(raf); raf = 0; target = null; last = 0; };
+  function frame(t) {
+    const dt = last ? Math.min(t - last, 50) : 16; last = t;
+    const z = m.getZoom();
+    let nz = z + (target - z) * (1 - Math.exp(-dt / TAU));
+    if (Math.abs(target - nz) < 0.002) nz = target;
+    m.jumpTo({zoom: nz, around: anchor});
+    if (nz !== target) raf = requestAnimationFrame(frame); else stop();
+  }
+  const box = m.getCanvasContainer();
+  box.addEventListener('wheel', e => {
+    e.preventDefault();
+    const d = e.deltaY * (e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1);
+    if (!d) return;
+    const step = Math.abs(d) >= 50 ? -Math.sign(d) * NOTCH * Math.max(1, Math.round(Math.abs(d) / 120))
+                                   : -d / 120 * NOTCH;
+    target = Math.max(m.getMinZoom(), Math.min(m.getMaxZoom(), (target ?? m.getZoom()) + step));
+    const r = m.getCanvas().getBoundingClientRect();
+    anchor = m.unproject([e.clientX - r.left, e.clientY - r.top]);
+    if (!raf) raf = requestAnimationFrame(frame);
+  }, {passive: false});
+  box.addEventListener('mousedown', stop);     // przeciąganie mapy przerywa dojazd skali
+}
 try {
   map = new maplibregl.Map({container: 'map', center: [__LON__, __LAT__], zoom: __ZOOM__ - 0.5, maxZoom: 18.5,
     style: {version: 8, sources: sources, layers: layers}, attributionControl: {compact: true},
     dragRotate: false, pitchWithRotate: false, touchPitch: false});
   map.touchZoomRotate.disableRotation();
+  smoothWheel(map);
   map.addControl(new maplibregl.NavigationControl({showCompass: false}), 'top-right');
   map.addControl(new maplibregl.ScaleControl({unit: 'metric'}), 'bottom-left');
 } catch (e) {
