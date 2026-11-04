@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-OBCIĄŻENIA NORMOWE – śnieg i wiatr
-==================================
+STRATOS Loading Codes – śnieg i wiatr
+=====================================
 Obciążenie śniegiem dachów wg PN-EN 1991-1-3 (+AC, Ap1, Załącznik krajowy)
 Oddziaływanie wiatru na budynki i wiaty wg PN-EN 1991-1-4:2008 (+AC, Ap1..Ap3, Załącznik krajowy)
+
+Moduł pakietu STRATOS (STRuctural Actions Toolkit, Open Source).
 
 Uruchomienie: dwuklik (Windows) lub  python3 obciazenia_normowe.pyw
 Wymaga Pythona 3 i biblioteki PySide6:  py -m pip install PySide6
@@ -2531,8 +2533,8 @@ DEFAULTS = dict(A="210", s_L="12", s_B="10", s_H="5", s_alpha="25", s_alpha2="25
 PROJECT_EXT = ".obc"
 
 ASSUMPTIONS = """\
-OBCIĄŻENIA NORMOWE – ZAŁOŻENIA OBLICZEŃ
-=======================================
+STRATOS LOADING CODES – ZAŁOŻENIA OBLICZEŃ
+==========================================
 
 ŚNIEG – PN-EN 1991-1-3:2005 z poprawkami AC:2009, Ap1:2010
 • s = μᵢ·Cₑ·Cₜ·sₖ (5.2); obciążenie działa pionowo na rzut poziomy dachu.
@@ -2637,7 +2639,7 @@ def _no_qt():
         sys.exit(1)
     r = tk.Tk()
     r.withdraw()
-    if messagebox.askyesno("Obciążenia normowe", msg):
+    if messagebox.askyesno("STRATOS", msg):
         import subprocess
         exe = sys.executable
         if exe.lower().endswith("pythonw.exe"):
@@ -2648,9 +2650,9 @@ def _no_qt():
         except OSError:
             ok = False
         if ok:
-            messagebox.showinfo("Obciążenia normowe", "Zainstalowano PySide6.\nUruchom program ponownie.")
+            messagebox.showinfo("STRATOS", "Zainstalowano PySide6.\nUruchom program ponownie.")
         else:
-            messagebox.showerror("Obciążenia normowe",
+            messagebox.showerror("STRATOS",
                                  "Instalacja nie powiodła się.\nSpróbuj ręcznie:  py -m pip install PySide6")
     r.destroy()
     sys.exit(0)
@@ -3729,7 +3731,7 @@ class ProjectWindow(QWidget):
         super().__init__(None, Qt.WindowType.Window)
         self.app = app
         self.setObjectName("page")
-        self.setWindowTitle("Panel projektu – Obciążenia normowe")
+        self.setWindowTitle("Panel projektu – STRATOS Manager")
         self.resize(1100, 860)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 10, 10, 10)
@@ -4369,10 +4371,10 @@ class App:
         name = os.path.basename(self.project_path) if self.project_path else "nowy projekt"
         ed = getattr(self, "editing", None)
         star = "*" if self.dirty else ""
-        self.win.setWindowTitle(f"{star}{name} – Panel edycji – Obciążenia normowe (śnieg i wiatr)"
+        self.win.setWindowTitle(f"{star}{name} – Panel edycji – STRATOS Loading Codes"
                                 + (f" – edycja: {ed['name']}" if ed else ""))
         if getattr(self, "pw", None) is not None:
-            self.pw.setWindowTitle(f"{star}{self.project_title()} – Panel projektu – Obciążenia normowe")
+            self.pw.setWindowTitle(f"{star}{self.project_title()} – Panel projektu – STRATOS Manager")
 
     def _ask_save(self):
         """Pytanie o zapis – tylko gdy zmienił się projekt (przypadki), nie formularz Panelu edycji.
@@ -4380,7 +4382,7 @@ class App:
         if not self.dirty or (not self.project_path and not self.project["cases"] and not self.project.get("name")):
             return True
         B = QMessageBox.StandardButton
-        ans = QMessageBox.question(self._front(), "Obciążenia normowe", "Zapisać zmiany w bieżącym projekcie?",
+        ans = QMessageBox.question(self._front(), "STRATOS", "Zapisać zmiany w bieżącym projekcie?",
                                    B.Yes | B.No | B.Cancel, B.Yes)
         if ans == B.Cancel:
             return False
@@ -4418,7 +4420,7 @@ class App:
             if not isinstance(st, dict):
                 raise ValueError("to nie jest plik projektu")
         except (OSError, ValueError) as ex:
-            QMessageBox.critical(self._front(), "Obciążenia normowe", f"Nie można odczytać pliku:\n{ex}")
+            QMessageBox.critical(self._front(), "STRATOS", f"Nie można odczytać pliku:\n{ex}")
             return False
         self.project_path = os.path.abspath(path)
         self.set_state(st)
@@ -4450,7 +4452,7 @@ class App:
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(dict(self.get_state(), projekt=self._project_dump()), fh, ensure_ascii=False, indent=2)
         except OSError as ex:
-            QMessageBox.critical(self._front(), "Obciążenia normowe", f"Nie można zapisać pliku:\n{ex}")
+            QMessageBox.critical(self._front(), "STRATOS", f"Nie można zapisać pliku:\n{ex}")
             return False
         self.project_path = path
         self.dirty = False
@@ -4856,7 +4858,7 @@ class App:
 
     def _build_3d(self):
         w = Win3D(self)
-        w.setWindowTitle("Obciążenia normowe – model 3D")
+        w.setWindowTitle("STRATOS Loading Codes – model 3D")
         w.setMinimumSize(640, 480)
         self.win3d = w
         lay = QVBoxLayout(w)
@@ -5337,7 +5339,7 @@ class App:
 
     # ============================================== sceny i rysowanie modelu 3D ===
     def get_state(self):
-        st = {"program": "Obciazenia normowe", "wersja": 1,
+        st = {"program": "STRATOS Loading Codes", "wersja": 1,
               "pola": {k: v.get() for k, v in self.v.items()}}
         st["opcje"] = {n: getattr(self, n).get() for n in self.STATE_VARS}
         st["lokalizacja"] = self.loc.get()
@@ -5893,7 +5895,7 @@ class App:
             return
         if not ctx:
             self.update_toolbar(mode)
-            self.win3d.setWindowTitle("Obciążenia normowe – model 3D – " + ("wiatr" if mode == "wiatr" else "śnieg"))
+            self.win3d.setWindowTitle("STRATOS Loading Codes – model 3D – " + ("wiatr" if mode == "wiatr" else "śnieg"))
             self.close_editor()
         self._edit_keys = {}
         key = (mode, getattr(self, "_scene_ver", 0), self.snow_case.get() if mode != "wiatr" else None)
@@ -6714,9 +6716,9 @@ def register_file_type():
                 exe = exe_w                                     # bez okna konsoli
         script = os.path.abspath(sys.argv[0] if sys.argv and sys.argv[0] else __file__)
         cmd = f'"{exe}" "{script}" "%1"'
-        prog = "ObciazeniaNormowe.Projekt"
+        prog = "STRATOS.Projekt"
         want = {rf"Software\Classes\{PROJECT_EXT}": prog,
-                rf"Software\Classes\{prog}": "Projekt obciążeń normowych",
+                rf"Software\Classes\{prog}": "Projekt STRATOS",
                 rf"Software\Classes\{prog}\shell\open\command": cmd}
         changed = False
         for key, val in want.items():

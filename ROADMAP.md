@@ -1,9 +1,17 @@
-# Plan rozwoju (Road Map)
+# STRATOS – plan rozwoju (Road Map)
 
-Kierunki rozwoju projektu, uporządkowane od zadań możliwych do realizacji w najbliższym czasie do planów
-długoterminowych. Kolejność etapów nie jest sztywna – poszczególne zadania mogą być realizowane równolegle.
+Kierunki rozwoju pakietu STRATOS (**STR**uctural **A**ctions **T**oolkit, **O**pen **S**ource), uporządkowane
+od zadań możliwych do realizacji w najbliższym czasie do planów długoterminowych. Kolejność etapów nie jest
+sztywna – poszczególne zadania mogą być realizowane równolegle.
 
-Nazwy „Obciążenia normowe”, „Projekt” i pozostałe nazwy modułów są **nazwami roboczymi** (zob. etap 1).
+Moduły pakietu:
+
+| Moduł | Zakres |
+|---|---|
+| **STRATOS Manager** | projekt, raport obliczeniowy, wydruk – moduł podstawowy |
+| **STRATOS Loading Codes** | obciążenia wg norm: śnieg, wiatr, obciążenia użytkowe |
+| Obciążenia inżynierskie *(nazwa robocza)* | obciążenia wyznaczane metodami inżynierskimi |
+| MES *(nazwa robocza)* | obliczenia metodą elementów skończonych |
 
 ---
 
@@ -18,7 +26,9 @@ Nazwy „Obciążenia normowe”, „Projekt” i pozostałe nazwy modułów są
 - Upublicznienie repozytorium.
 
 ### 1.2. Nazwa i identyfikacja wizualna
-- Nadanie projektowi rozpoznawalnej nazwy w miejsce nazwy roboczej oraz spójnych nazw modułów.
+- ~~Nadanie projektowi rozpoznawalnej nazwy~~ – **STRATOS**; nazwy modułów: STRATOS Manager,
+  STRATOS Loading Codes. Do ustalenia: nazwy pozostałych modułów.
+- Sprawdzenie dostępności nazwy w bazach znaków towarowych (EUIPO, UPRP) i domeny projektu.
 - Opracowanie znaku graficznego (logo, ikona aplikacji).
 - Najlepiej przed szerszym udostępnieniem – późniejsza zmiana nazwy utrudnia rozpoznawalność
   i wymaga zmian w repozytoriach, pakietach i sklepach z aplikacjami.
@@ -49,20 +59,20 @@ uruchomieniu w każdym z nich.
 
 ---
 
-## Etap 3. Wydzielenie modułu Projekt
+## Etap 3. Wydzielenie modułu STRATOS Manager
 
 Rozdzielenie obecnego programu na dwie niezależne aplikacje współpracujące na wspólnym pliku projektu.
 
-**Moduł Projekt** – moduł podstawowy całego pakietu:
+**STRATOS Manager** – moduł podstawowy całego pakietu:
 - przechowuje informacje o projekcie i zarządza raportem obliczeniowym (lista przypadków, kolejność, nazwy),
 - odpowiada za wydruk raportu,
 - uruchomiony samodzielnie (z menu Start, skrótu itp.) otwiera pustą listę z możliwością nadania nazwy
   projektowi,
-- pozwala otworzyć moduł Obciążenia normowe i kontynuować w nim pracę, a docelowo – uruchamiać pozostałe
+- pozwala otworzyć moduł STRATOS Loading Codes i kontynuować w nim pracę, a docelowo – uruchamiać pozostałe
   moduły.
 
-**Moduły narzędziowe** (Obciążenia normowe i kolejne) służą do obliczeń, których wyniki zapisywane są
-w module Projekt.
+**Moduły narzędziowe** (STRATOS Loading Codes i kolejne) służą do obliczeń, których wyniki zapisywane są
+w STRATOS Manager.
 
 Zadania:
 - zdefiniowanie wspólnego, udokumentowanego formatu pliku projektu, obsługującego wpisy z różnych modułów,
@@ -73,7 +83,7 @@ Zadania:
 
 ## Etap 4. Obciążenia użytkowe
 
-- Trzecia zakładka modułu Obciążenia normowe, obok śniegu i wiatru: obciążenia użytkowe wg PN-EN 1991-1-1
+- Trzecia zakładka modułu STRATOS Loading Codes, obok śniegu i wiatru: obciążenia użytkowe wg PN-EN 1991-1-1
   wraz z Załącznikiem krajowym.
 
 ---
@@ -81,7 +91,7 @@ Zadania:
 ## Etap 5. Moduł Obciążenia inżynierskie
 
 Nowy moduł z narzędziami do wyznaczania obciążeń metodami inżynierskimi – jako uzupełnienie modułu
-Obciążenia normowe, który w całości odwzorowuje podejście normowe.
+STRATOS Loading Codes, który w całości odwzorowuje podejście normowe.
 
 Pierwsze narzędzie – **kalkulator obciążeń stałych**:
 - wyznaczanie obciążenia od układu warstw (np. posadzki, stropu, dachu) na podstawie materiałów i grubości,
@@ -107,7 +117,7 @@ Kolejne narzędzia będą dodawane w miarę potrzeb użytkowników.
 
 ### 7.1. Moduł MES
 - Moduł obliczeń metodą elementów skończonych, rozwijany jako kolejna gałąź pakietu, obok modułów
-  obciążeń i współpracujący z modułem Projekt.
+  obciążeń i współpracujący ze STRATOS Manager.
 
 ### 7.2. Profesjonalna dystrybucja
 Jeśli wsparcie społeczności pokryje stałe koszty i pojawi się takie zapotrzebowanie, projekt będzie
