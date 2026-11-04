@@ -1457,7 +1457,7 @@ html,body,#map{height:100%;margin:0;font-family:"Segoe UI",sans-serif;font-size:
 #info{bottom:44px;left:10px;max-width:420px;line-height:1.45}
 .warn{color:#b45309}
 /* legenda stref: przełącznik segmentowy (jeden rodzaj stref naraz) + lista stref; strefa wskazanego punktu wyróżniona */
-#legend{bottom:30px;right:10px;width:184px;padding:10px;border:0;border-radius:10px;
+#legend{bottom:44px;right:10px;width:184px;padding:10px;border:0;border-radius:10px;
   box-shadow:0 2px 10px rgba(15,23,42,.16),0 0 0 1px rgba(15,23,42,.06)}
 #legend .lt{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#64707d;margin:0 2px 7px}
 #legend .seg{display:flex;background:#eef1f5;border-radius:8px;padding:2px;gap:2px}
