@@ -426,7 +426,7 @@ class Runner:
         self.guard("podgląd wydruku", self.print_preview)
         self.count("testy projektu")
         # zapis / odczyt pliku .kayenn
-        self.ctx = "plik .obc"
+        self.ctx = "plik .kayenn"
         path = os.path.join(tempfile.mkdtemp(prefix="kayenn_test_"), "test.kayenn")
         before = a._project_dump()
         if self.guard("zapis", a._write, path) is False:

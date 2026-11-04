@@ -1402,7 +1402,7 @@ def uldk_search(query, timeout=30):
     """Zapytanie do usługi ULDK; zwraca dict(ok, items | msg) gotowy do przekazania mapie."""
     import urllib.request
     try:
-        req = urllib.request.Request(uldk_url(query), headers={"User-Agent": "ObciazeniaNormowe/1.0"})
+        req = urllib.request.Request(uldk_url(query), headers={"User-Agent": "KAYENN/1.0"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             text = r.read().decode("utf-8", "replace")
         items = uldk_parse(text)
@@ -3182,7 +3182,7 @@ class MapDialog(QDialog):
         lay.setContentsMargins(8, 8, 8, 8)
         self.view = QWebEngineView()
         prof = self.view.page().profile()
-        prof.setHttpUserAgent(prof.httpUserAgent() + " ObciazeniaNormowe/1.0")
+        prof.setHttpUserAgent(prof.httpUserAgent() + " KAYENN/1.0")
         lat, lon, zoom = (52.1, 19.4, 6) if not loc else (loc["lat"], loc["lon"], 12)
         init = ""
         if loc:
@@ -3194,7 +3194,7 @@ class MapDialog(QDialog):
         self._relay = _Relay()
         self._relay.done.connect(self._parcel_done)
         self.view.page().titleChanged.connect(self._on_title)     # mapa zgłasza zapytanie o działkę przez tytuł strony
-        self.view.setHtml(html, QUrl("https://obciazenia-normowe.local/"))
+        self.view.setHtml(html, QUrl("https://kayenn.local/"))
         lay.addWidget(self.view, 1)
         hb = QHBoxLayout()
         note = QLabel("Granice stref odczytane z map załączników krajowych jako gładkie krzywe (dokładność ok. 3–5 km). "
