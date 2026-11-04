@@ -10,8 +10,8 @@ Moduły pakietu:
 |---|---|
 | **STRATOS Manager** | projekt, raport obliczeniowy, wydruk – moduł podstawowy |
 | **STRATOS Loading Codes** | obciążenia wg norm: śnieg, wiatr, obciążenia użytkowe |
-| Obciążenia inżynierskie *(nazwa robocza)* | obciążenia wyznaczane metodami inżynierskimi |
-| MES *(nazwa robocza)* | obliczenia metodą elementów skończonych |
+| **STRATOS Lab** | obciążenia wyznaczane metodami inżynierskimi |
+| **STRATOS FEM** | obliczenia metodą elementów skończonych (MES) |
 
 ---
 
@@ -27,7 +27,7 @@ Moduły pakietu:
 
 ### 1.2. Nazwa i identyfikacja wizualna
 - ~~Nadanie projektowi rozpoznawalnej nazwy~~ – **STRATOS**; nazwy modułów: STRATOS Manager,
-  STRATOS Loading Codes. Do ustalenia: nazwy pozostałych modułów.
+  STRATOS Loading Codes, STRATOS Lab, STRATOS FEM.
 - Sprawdzenie dostępności nazwy w bazach znaków towarowych (EUIPO, UPRP) i domeny projektu.
 - Opracowanie znaku graficznego (logo, ikona aplikacji).
 - Najlepiej przed szerszym udostępnieniem – późniejsza zmiana nazwy utrudnia rozpoznawalność
@@ -49,7 +49,7 @@ Celem jest program działający natywnie w systemach Linux, Windows i macOS – 
 uruchomieniu w każdym z nich.
 
 - Przegląd elementów zależnych od Windows: czcionki (`Segoe UI`, `Consolas`) z zamiennikami dla innych
-  systemów, skojarzenie plików `.obc` (obecnie tylko rejestr Windows) – odpowiedniki dla Linuksa
+  systemów, skojarzenie plików `.stratos` (obecnie tylko rejestr Windows) – odpowiedniki dla Linuksa
   (`.desktop`, typ MIME) i macOS.
 - Testy automatyczne uruchamiane na wszystkich trzech systemach (np. GitHub Actions).
 - Linux: dystrybucja przez sklepy z aplikacjami (np. Flathub).
@@ -77,7 +77,6 @@ w STRATOS Manager.
 Zadania:
 - zdefiniowanie wspólnego, udokumentowanego formatu pliku projektu, obsługującego wpisy z różnych modułów,
 - mechanizm komunikacji między modułami (otwarcie przypadku do edycji, przekazanie wyników),
-- zachowanie zgodności z istniejącymi plikami `.obc`.
 
 ---
 
@@ -88,7 +87,7 @@ Zadania:
 
 ---
 
-## Etap 5. Moduł Obciążenia inżynierskie
+## Etap 5. Moduł STRATOS Lab
 
 Nowy moduł z narzędziami do wyznaczania obciążeń metodami inżynierskimi – jako uzupełnienie modułu
 STRATOS Loading Codes, który w całości odwzorowuje podejście normowe.
@@ -115,7 +114,7 @@ Kolejne narzędzia będą dodawane w miarę potrzeb użytkowników.
 
 ## Etap 7. Kierunki długoterminowe
 
-### 7.1. Moduł MES
+### 7.1. Moduł STRATOS FEM
 - Moduł obliczeń metodą elementów skończonych, rozwijany jako kolejna gałąź pakietu, obok modułów
   obciążeń i współpracujący ze STRATOS Manager.
 

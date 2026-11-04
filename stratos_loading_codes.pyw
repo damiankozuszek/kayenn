@@ -7,7 +7,7 @@ Oddziaływanie wiatru na budynki i wiaty wg PN-EN 1991-1-4:2008 (+AC, Ap1..Ap3, 
 
 Moduł pakietu STRATOS (STRuctural Actions Toolkit, Open Source).
 
-Uruchomienie: dwuklik (Windows) lub  python3 obciazenia_normowe.pyw
+Uruchomienie: dwuklik (Windows) lub  python3 stratos_loading_codes.pyw
 Wymaga Pythona 3 i biblioteki PySide6:  py -m pip install PySide6
 (przy pierwszym uruchomieniu bez PySide6 program zaproponuje instalację).
 
@@ -2530,7 +2530,7 @@ DEFAULTS = dict(A="210", s_L="12", s_B="10", s_H="5", s_alpha="25", s_alpha2="25
                 w_f="3", w_D="12", U="2.0", ti="20", cdir="1.0", cseason="1.0", rho="1.25", Aload="10",
                 cpi="0.2", phi="0")
 
-PROJECT_EXT = ".obc"
+PROJECT_EXT = ".stratos"
 
 ASSUMPTIONS = """\
 STRATOS LOADING CODES – ZAŁOŻENIA OBLICZEŃ
@@ -4408,12 +4408,12 @@ class App:
             return
         path, _ = QFileDialog.getOpenFileName(self._front(), "Otwórz projekt",
                                               os.path.dirname(self.project_path or ""),
-                                              f"Projekt obciążeń (*{PROJECT_EXT});;Wszystkie pliki (*)")
+                                              f"Projekt STRATOS (*{PROJECT_EXT});;Wszystkie pliki (*)")
         if path:
             self.open_path(path)
 
     def open_path(self, path):
-        """Wczytanie pliku projektu (menu lub dwuklik na pliku .obc). True – wczytano."""
+        """Wczytanie pliku projektu (menu lub dwuklik na pliku projektu). True – wczytano."""
         try:
             with open(path, encoding="utf-8") as fh:
                 st = json.load(fh)
@@ -4440,7 +4440,7 @@ class App:
     def file_save_as(self):
         start = self.project_path or ("projekt" + PROJECT_EXT)
         path, _ = QFileDialog.getSaveFileName(self._front(), "Zapisz projekt jako", start,
-                                              f"Projekt obciążeń (*{PROJECT_EXT})")
+                                              f"Projekt STRATOS (*{PROJECT_EXT})")
         if not path:
             return False
         if not path.lower().endswith(PROJECT_EXT):
@@ -6686,7 +6686,7 @@ def _check_image():
     """Znaczek „ptaszka” do pól wyboru (PNG w katalogu tymczasowym – bez wtyczki SVG)."""
     import tempfile
     from PySide6.QtGui import QPixmap
-    path = os.path.join(tempfile.gettempdir(), "obciazenia_normowe_check.png")
+    path = os.path.join(tempfile.gettempdir(), "stratos_loading_codes_check.png")
     pm = QPixmap(28, 28)
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
@@ -6703,7 +6703,7 @@ def _check_image():
 
 
 def register_file_type():
-    """Windows: pliki .obc otwierane dwuklikiem tym programem (rejestr bieżącego użytkownika, bez uprawnień
+    """Windows: pliki projektu (.stratos) otwierane dwuklikiem tym programem (rejestr bieżącego użytkownika, bez uprawnień
     administratora). Zapis tylko przy zmianie – np. po przeniesieniu programu w inne miejsce."""
     if sys.platform != "win32":
         return

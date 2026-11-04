@@ -9,6 +9,8 @@ oddziaływań na konstrukcje budowlane.
 |---|---|---|
 | **STRATOS Manager** | projekt, raport obliczeniowy, wydruk | obecnie zintegrowany z Loading Codes (Panel projektu) |
 | **STRATOS Loading Codes** | obciążenia wg norm: śnieg, wiatr | dostępny |
+| **STRATOS Lab** | obciążenia wyznaczane metodami inżynierskimi | planowany |
+| **STRATOS FEM** | obliczenia metodą elementów skończonych | planowany |
 
 ### STRATOS Loading Codes
 
@@ -16,7 +18,7 @@ oddziaływań na konstrukcje budowlane.
 - **wiatr** – PN-EN 1991-1-4:2008 (+AC, Ap1…Ap3, Załącznik krajowy) – budynki i wiaty.
 
 Funkcje: raport obliczeń, interaktywny model 3D z rozkładem obciążeń, mapa stref obciążenia
-z wyszukiwaniem działek, projekt z wieloma przypadkami (`.obc`), wydruk z podglądem.
+z wyszukiwaniem działek, projekt z wieloma przypadkami (`.stratos`), wydruk z podglądem.
 
 > Program jest narzędziem pomocniczym – wyniki należy weryfikować z normą.
 
@@ -28,10 +30,10 @@ Wymagany Python 3 i PySide6 (z QtWebEngine – dla mapy):
 
 ```
 py -m pip install PySide6
-py obciazenia_normowe.pyw
+py stratos_loading_codes.pyw
 ```
 
-W Windows wystarczy dwuklik na `obciazenia_normowe.pyw`. Przy pierwszym uruchomieniu bez PySide6 program
+W Windows wystarczy dwuklik na `stratos_loading_codes.pyw`. Przy pierwszym uruchomieniu bez PySide6 program
 zaproponuje instalację.
 
 ## Testy
