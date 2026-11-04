@@ -1456,6 +1456,10 @@ html,body,#map{height:100%;margin:0;font-family:"Segoe UI",sans-serif;font-size:
 #res div:hover{background:#eef3fb}
 #info{bottom:44px;left:10px;max-width:420px;line-height:1.45}
 .warn{color:#b45309}
+/* kursor: palec (kliknięcie wskazuje lokalizację); zaciśnięta dłoń tylko podczas faktycznego przesuwania mapy */
+.maplibregl-canvas-container.maplibregl-interactive,
+.maplibregl-canvas-container.maplibregl-interactive:active{cursor:pointer}
+.maplibregl-canvas-container.maplibregl-interactive.dragging{cursor:grabbing}
 /* legenda stref: przełącznik segmentowy (jeden rodzaj stref naraz) + lista stref; strefa wskazanego punktu wyróżniona */
 #legend{bottom:44px;right:10px;width:184px;padding:10px;border:0;border-radius:10px;
   box-shadow:0 2px 10px rgba(15,23,42,.16),0 0 0 1px rgba(15,23,42,.06)}
@@ -1569,6 +1573,8 @@ try {
     dragRotate: false, pitchWithRotate: false, touchPitch: false});
   map.touchZoomRotate.disableRotation();
   smoothWheel(map);
+  map.on('dragstart', () => map.getCanvasContainer().classList.add('dragging'));
+  map.on('dragend', () => map.getCanvasContainer().classList.remove('dragging'));
   map.addControl(new maplibregl.NavigationControl({showCompass: false}), 'top-right');
   map.addControl(new maplibregl.ScaleControl({unit: 'metric'}), 'bottom-left');
 } catch (e) {
