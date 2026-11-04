@@ -1481,8 +1481,15 @@ html,body,#map{height:100%;margin:0;font-family:"Segoe UI",sans-serif;font-size:
 <div id="info" class="box">Kliknij na mapie, aby wskazać lokalizację obiektu.</div>
 <div id="legend" class="box"></div>
 <script>
-const DATA = __ZONES__;
-const Z = DATA.zones, PL = DATA.poland;
+// Granice stref program przekazuje po wczytaniu strony (initData) – nie są wklejane w HTML. Strona z setHtml ma adres
+// data: z całą treścią; przy ~700 KB danych każde fetch() (kafelek mapy) kosztowało ~10 ms wątku głównego
+// i mapa przycinała się przy przesuwaniu i zoomie.
+let DATA = null, Z = null, PL = null, mapReady = false;
+function initData(d) {
+  DATA = d; Z = d.zones; PL = d.poland;
+  addZones();
+  if (window.pick) show();
+}
 const SC = {1:'#e6d200', 2:'#2fb36a', 3:'#2f7fd6', 4:'#9b4fd6', 5:'#d63a3a'};
 const WC = {1:'#43a047', 2:'#2f7fd6', 3:'#e0702f'};
 const BASES = [
@@ -1579,17 +1586,22 @@ function setZonesVis() {
     if (map.getLayer(k + '-' + s)) map.setLayoutProperty(k + '-' + s, 'visibility', show_[k] ? 'visible' : 'none');
   legend();
 }
-if (map) map.on('load', () => {
-  map.addSource('parcel', {type: 'geojson', data: {type: 'FeatureCollection', features: []}});
+function addZones() {                     // gdy gotowe są i mapa, i dane stref; warstwy stref pod działką
+  if (!map || !mapReady || !DATA || map.getSource('snow')) return;
   for (const [k, cols] of [['snow', SC], ['wind', WC]]) {
     map.addSource(k, {type: 'geojson', data: zoneFC(k, cols)});
     map.addSource(k + 'b', {type: 'geojson', data: bndFC(k)});
-    map.addLayer({id: k + '-fill', type: 'fill', source: k, paint: {'fill-color': ['get', 'col'], 'fill-opacity': 0.32, 'fill-antialias': false}});
-    map.addLayer({id: k + '-line', type: 'line', source: k + 'b', paint: {'line-color': '#333', 'line-width': 1.3, 'line-opacity': 0.75}});
+    map.addLayer({id: k + '-fill', type: 'fill', source: k, paint: {'fill-color': ['get', 'col'], 'fill-opacity': 0.32, 'fill-antialias': false}}, 'parcel-fill');
+    map.addLayer({id: k + '-line', type: 'line', source: k + 'b', paint: {'line-color': '#333', 'line-width': 1.3, 'line-opacity': 0.75}}, 'parcel-fill');
   }
+  setZonesVis();
+}
+if (map) map.on('load', () => {
+  map.addSource('parcel', {type: 'geojson', data: {type: 'FeatureCollection', features: []}});
   map.addLayer({id: 'parcel-fill', type: 'fill', source: 'parcel', paint: {'fill-color': '#d63a3a', 'fill-opacity': 0.12}});
   map.addLayer({id: 'parcel-line', type: 'line', source: 'parcel', paint: {'line-color': '#d63a3a', 'line-width': 2.5}});
-  setZonesVis();
+  mapReady = true;
+  addZones();
 });
 
 // przełącznik stylu – miniatury pokazują wycinek mapy wokół bieżącego środka
@@ -1640,6 +1652,7 @@ function inPL(lon, lat) {
   if (n % 2) return true;
   return Math.min(...PL.map(r => rdist(lon, lat, r))) <= __TOL__; }
 function zoneAt(k, lon, lat) {
+  if (!DATA) return null;
   if (!inPL(lon, lat)) return null;
   for (const z in Z[k]) { let n = 0; for (const r of Z[k][z]) if (pip(lon, lat, r)) n++; if (n % 2) return z; }
   let best = null, bd = 1e9;      // tuż za granicą państwa (w tolerancji) – strefa najbliższego obszaru
@@ -1652,10 +1665,11 @@ function show() {
   const p = window.pick; if (!p) return;
   const zs = zoneAt('snow', p.lon, p.lat), zw = zoneAt('wind', p.lon, p.lat);
   let h = '<b>' + (p.name ? esc(p.name) + '<br>' : '') + p.lat.toFixed(5) + '° N, ' + p.lon.toFixed(5) + '° E</b><br>';
-  h += 'Strefa śniegowa: <b>' + (zs || '–') + '</b> &nbsp; Strefa wiatrowa: <b>' + (zw || '–') + '</b><br>';
+  const nz = DATA ? '–' : '…';
+  h += 'Strefa śniegowa: <b>' + (zs || nz) + '</b> &nbsp; Strefa wiatrowa: <b>' + (zw || nz) + '</b><br>';
   h += 'Wysokość n.p.m.: <b>' + (p.alt === null ? (p.altErr ? '<span class="warn">brak danych</span>' : '…') :
        Math.round(p.alt) + ' m') + '</b>';
-  if (!zs || !zw) h += '<br><span class="warn">Punkt poza Polską – strefy trzeba wybrać ręcznie.</span>';
+  if (DATA && (!zs || !zw)) h += '<br><span class="warn">Punkt poza Polską – strefy trzeba wybrać ręcznie.</span>';
   document.getElementById('info').innerHTML = h;
 }
 function setPick(lat, lon, name, alt) {
@@ -3233,12 +3247,14 @@ class MapDialog(QDialog):
         if loc:
             alt = "null" if loc.get("alt") is None else repr(float(loc["alt"]))
             init = f"setPick({loc['lat']!r}, {loc['lon']!r}, {json.dumps(loc.get('name', ''))}, {alt});"
-        html = (MAP_HTML.replace("__ZONES__", json.dumps(ZONE_DATA, separators=(",", ":")))
-                .replace("__LAT__", repr(lat)).replace("__LON__", repr(lon)).replace("__ZOOM__", str(zoom))
+        html = (MAP_HTML.replace("__LAT__", repr(lat)).replace("__LON__", repr(lon)).replace("__ZOOM__", str(zoom))
                 .replace("__KIND__", kind).replace("__TOL__", repr(ZONE_BORDER_TOL_KM)).replace("__INIT__", init))
         self._relay = _Relay()
         self._relay.done.connect(self._parcel_done)
         self.view.page().titleChanged.connect(self._on_title)     # mapa zgłasza zapytanie o działkę przez tytuł strony
+        # granice stref osobno, po wczytaniu strony – duża strona w setHtml spowalnia każde zapytanie o kafelek
+        zones_js = "initData(" + json.dumps(ZONE_DATA, separators=(",", ":")) + ");"
+        self.view.loadFinished.connect(lambda ok: ok and self.view.page().runJavaScript(zones_js))
         self.view.setHtml(html, QUrl("https://kayenn.local/"))
         lay.addWidget(self.view, 1)
         hb = QHBoxLayout()
