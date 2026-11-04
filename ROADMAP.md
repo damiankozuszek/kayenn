@@ -24,7 +24,8 @@ Nazwy „Obciążenia normowe”, „Projekt” i pozostałe nazwy modułów są
   i wymaga zmian w repozytoriach, pakietach i sklepach z aplikacjami.
 
 ### 1.3. Dobrowolne wsparcie finansowe
-- Projekt jest i pozostanie niekomercyjny – autor nie pobiera opłat za korzystanie z programu.
+- Projekt jest i pozostanie niekomercyjny – program jest w 100% bezpłatny, a jedyną formą płatności
+  jest dobrowolna wpłata.
 - Uruchomienie możliwości dobrowolnego wsparcia (np. GitHub Sponsors) dla osób, które chcą docenić projekt
   i przyczynić się do jego rozwoju.
 - Wsparcie społeczności przekłada się bezpośrednio na czas, jaki autor może poświęcić projektowi –
@@ -43,7 +44,7 @@ uruchomieniu w każdym z nich.
 - Testy automatyczne uruchamiane na wszystkich trzech systemach (np. GitHub Actions).
 - Linux: dystrybucja przez sklepy z aplikacjami (np. Flathub).
 - Windows i macOS: prosta instrukcja uruchomienia z Pythona; ewentualnie paczki do pobrania bez podpisu
-  cyfrowego (podpis wiąże się ze stałymi kosztami – zob. etap 7).
+  cyfrowego (podpis wiąże się ze stałymi kosztami – zob. punkt 7.2).
 - Wieloplatformowość jest zasadą stałą: każda nowa funkcja powinna działać na wszystkich systemach.
 
 ---
@@ -108,11 +109,17 @@ Kolejne narzędzia będą dodawane w miarę potrzeb użytkowników.
 - Moduł obliczeń metodą elementów skończonych, rozwijany jako kolejna gałąź pakietu, obok modułów
   obciążeń i współpracujący z modułem Projekt.
 
-### 7.2. Usługi rozszerzone
-Jeśli wsparcie społeczności na to pozwoli i pojawi się takie zapotrzebowanie:
-- podpisane cyfrowo instalatory dla Windows i macOS,
-- inne płatne usługi pozwalające nadać projektowi bardziej profesjonalny charakter – bez ograniczania
-  bezpłatnego dostępu do programu.
+### 7.2. Profesjonalna dystrybucja
+Jeśli wsparcie społeczności pokryje stałe koszty i pojawi się takie zapotrzebowanie, projekt będzie
+korzystał z płatnych usług zewnętrznych, które czynią z niego program z prawdziwego zdarzenia:
+- podpisane cyfrowo instalatory dla Windows (certyfikat podpisywania kodu) i macOS (Apple Developer Program,
+  notaryzacja) – instalacja bez ostrzeżeń systemu o nieznanym wydawcy,
+- obecność w oficjalnych sklepach z aplikacjami (Microsoft Store, Mac App Store),
+- własna domena i strona internetowa projektu z dokumentacją,
+- inne usługi tego typu, wskazane przez potrzeby użytkowników.
+
+Koszty tych usług ponosi projekt ze środków z dobrowolnego wsparcia. **Dla użytkowników program pozostaje
+w pełni bezpłatny** – nie powstaną płatne wersje, funkcje ani subskrypcje.
 
 ---
 
