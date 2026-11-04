@@ -1455,19 +1455,22 @@ html,body,#map{height:100%;margin:0;font-family:"Segoe UI",sans-serif;font-size:
 #res div{padding:3px 4px;cursor:pointer;border-top:1px solid #eee}
 #res div:hover{background:#eef3fb}
 #info{bottom:44px;left:10px;max-width:420px;line-height:1.45}
-#legend{bottom:28px;right:10px;line-height:1.5}
-#legend label{display:block;font-weight:600;cursor:pointer;margin-top:4px}
-#legend label:first-child{margin-top:0}
-.sw{display:inline-block;width:14px;height:10px;border:1px solid #555;margin:0 5px 0 18px;vertical-align:-1px}
 .warn{color:#b45309}
-#styles{position:absolute;z-index:5;top:10px;right:10px;display:flex;gap:8px}
-#styles button{width:64px;height:64px;padding:0;border:2px solid #fff;border-radius:8px;cursor:pointer;
-  background-color:#dde3ea;background-repeat:no-repeat;box-shadow:0 1px 5px rgba(0,0,0,.35);
-  transition:transform .12s ease}
-#styles button:hover{transform:translateY(-2px)}
-#styles button.on{border-color:#1d6fd8;box-shadow:0 0 0 2px #1d6fd8,0 1px 5px rgba(0,0,0,.35)}
-#styles button:focus-visible{outline:2px solid #1d6fd8;outline-offset:2px}
-.maplibregl-ctrl-top-right{top:84px}
+/* legenda stref: przełącznik segmentowy (jeden rodzaj stref naraz) + lista stref; strefa wskazanego punktu wyróżniona */
+#legend{bottom:30px;right:10px;width:184px;padding:10px;border:0;border-radius:10px;
+  box-shadow:0 2px 10px rgba(15,23,42,.16),0 0 0 1px rgba(15,23,42,.06)}
+#legend .lt{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#64707d;margin:0 2px 7px}
+#legend .seg{display:flex;background:#eef1f5;border-radius:8px;padding:2px;gap:2px}
+#legend .seg button{flex:1;border:0;background:none;border-radius:6px;padding:4px 0;font:inherit;font-size:12px;
+  color:#4b5563;cursor:pointer}
+#legend .seg button:hover{color:#111}
+#legend .seg button.on{background:#fff;color:#111;font-weight:600;box-shadow:0 1px 2px rgba(15,23,42,.18)}
+#legend .seg button:focus-visible{outline:2px solid #1d6fd8;outline-offset:1px}
+#legend ul{list-style:none;margin:8px 0 0;padding:0}
+#legend li{display:flex;align-items:center;gap:8px;padding:3px 6px;border-radius:6px;color:#374151}
+#legend li i{width:14px;height:14px;border-radius:4px;flex:none;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}
+#legend li.cur{background:#eef3fb;color:#111;font-weight:600}
+#legend li.cur::after{content:"punkt";margin-left:auto;font-size:10.5px;font-weight:600;color:#1d6fd8}
 </style></head><body><div id="map"></div>
 <div id="search" class="box">
  <div id="tabs"><button id="tA" class="on">Adres</button><button id="tP">Działka</button></div>
@@ -1477,7 +1480,6 @@ html,body,#map{height:100%;margin:0;font-family:"Segoe UI",sans-serif;font-size:
   <div class="srow"><input id="gm" placeholder="Gmina (opcjonalnie)"><button id="pgo">Szukaj</button></div>
  </div>
  <div id="res"></div></div>
-<div id="styles" role="group" aria-label="Styl mapy"></div>
 <div id="info" class="box">Kliknij na mapie, aby wskazać lokalizację obiektu.</div>
 <div id="legend" class="box"></div>
 <script>
@@ -1492,18 +1494,8 @@ function initData(d) {
 }
 const SC = {1:'#e6d200', 2:'#2fb36a', 3:'#2f7fd6', 4:'#9b4fd6', 5:'#d63a3a'};
 const WC = {1:'#43a047', 2:'#2f7fd6', 3:'#e0702f'};
-const BASES = [
-  {id: 'osm', label: 'Mapa drogowa', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], max: 19,
-   attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-   thumb: (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`},
-  {id: 'topo', label: 'Mapa terenowa z warstwicami', max: 17,
-   tiles: ['a', 'b', 'c'].map(s => `https://${s}.tile.opentopomap.org/{z}/{x}/{y}.png`),
-   attr: 'Dane: &copy; OpenStreetMap, SRTM | Styl: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)',
-   thumb: (z, x, y) => `https://a.tile.opentopomap.org/${z}/${x}/${y}.png`},
-  {id: 'sat', label: 'Zdjęcia satelitarne', max: 19,
-   tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-   attr: 'Zdjęcia &copy; Esri',
-   thumb: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`}];
+const OSM = {tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], max: 19,
+  attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'};
 
 function pip(x, y, poly) { let ins = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -1532,13 +1524,9 @@ function bndFC(kind) {
 }
 
 let kind = '__KIND__';
-const show_ = {snow: kind === 'snow', wind: kind === 'wind'};
-let base = 'osm';
-const sources = {}, layers = [];
-for (const b of BASES) {
-  sources[b.id] = {type: 'raster', tiles: b.tiles, tileSize: 256, maxzoom: b.max, attribution: b.attr};
-  layers.push({id: b.id, type: 'raster', source: b.id, layout: {visibility: b.id === base ? 'visible' : 'none'}});
-}
+let zoneMode = kind;                       // 'snow' | 'wind' | 'none' – na mapie jeden rodzaj stref naraz
+const sources = {osm: {type: 'raster', tiles: OSM.tiles, tileSize: 256, maxzoom: OSM.max, attribution: OSM.attr}};
+const layers = [{id: 'osm', type: 'raster', source: 'osm'}];
 let map = null;
 // Płynny zoom kółkiem: w QtWebEngine ząbek kółka daje małe deltaY (60), a MapLibre przybliża wtedy o ~0,09 poziomu
 // krótkim szarpnięciem. Tu: ząbek = pół poziomu; skala w każdej klatce zbliża się wykładniczo do celu (TAU),
@@ -1546,14 +1534,18 @@ let map = null;
 function smoothWheel(m) {
   m.scrollZoom.disable();
   const NOTCH = 0.5, TAU = 75;
-  let target = null, anchor = null, raf = 0, last = 0;
+  let target = null, anchor = null, px = null, raf = 0, last = 0;
   const stop = () => { if (raf) cancelAnimationFrame(raf); raf = 0; target = null; last = 0; };
   function frame(t) {
     const dt = last ? Math.min(t - last, 50) : 16; last = t;
     const z = m.getZoom();
     let nz = z + (target - z) * (1 - Math.exp(-dt / TAU));
     if (Math.abs(target - nz) < 0.002) nz = target;
-    m.jumpTo({zoom: nz, around: anchor});
+    // nowa skala, potem przesunięcie tak, by punkt terenu spod kursora (anchor) został pod kursorem (px);
+    // jumpTo nie obsługuje opcji 'around' – stąd ręcznie
+    m.jumpTo({zoom: nz});
+    const a = m.project(anchor), c = m.project(m.getCenter());
+    m.jumpTo({center: m.unproject([c.x + a.x - px.x, c.y + a.y - px.y])});
     if (nz !== target) raf = requestAnimationFrame(frame); else stop();
   }
   const box = m.getCanvasContainer();
@@ -1565,7 +1557,8 @@ function smoothWheel(m) {
                                    : -d / 120 * NOTCH;
     target = Math.max(m.getMinZoom(), Math.min(m.getMaxZoom(), (target ?? m.getZoom()) + step));
     const r = m.getCanvas().getBoundingClientRect();
-    anchor = m.unproject([e.clientX - r.left, e.clientY - r.top]);
+    px = {x: e.clientX - r.left, y: e.clientY - r.top};
+    anchor = m.unproject([px.x, px.y]);
     if (!raf) raf = requestAnimationFrame(frame);
   }, {passive: false});
   box.addEventListener('mousedown', stop);     // przeciąganie mapy przerywa dojazd skali
@@ -1583,7 +1576,7 @@ try {
 }
 function setZonesVis() {
   for (const k of ['snow', 'wind']) for (const s of ['fill', 'line'])
-    if (map.getLayer(k + '-' + s)) map.setLayoutProperty(k + '-' + s, 'visibility', show_[k] ? 'visible' : 'none');
+    if (map.getLayer(k + '-' + s)) map.setLayoutProperty(k + '-' + s, 'visibility', zoneMode === k ? 'visible' : 'none');
   legend();
 }
 function addZones() {                     // gdy gotowe są i mapa, i dane stref; warstwy stref pod działką
@@ -1604,39 +1597,22 @@ if (map) map.on('load', () => {
   addZones();
 });
 
-// przełącznik stylu – miniatury pokazują wycinek mapy wokół bieżącego środka
-const box = document.getElementById('styles');
-for (const b of BASES) {
-  const btn = document.createElement('button'); btn.id = 'st-' + b.id; btn.setAttribute('aria-label', b.label);
-  btn.onclick = () => { base = b.id;
-    for (const q of BASES) map.setLayoutProperty(q.id, 'visibility', q.id === base ? 'visible' : 'none');
-    thumbs(); };
-  box.appendChild(btn);
-}
-function thumbs() {
-  const c = map ? map.getCenter() : {lng: __LON__, lat: __LAT__};
-  const z = Math.max(3, Math.min(16, Math.round(map ? map.getZoom() : __ZOOM__) - 1)), n = 2 ** z;
-  const fx = (c.lng + 180) / 360 * n, la = c.lat * Math.PI / 180;
-  const fy = (1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2 * n;
-  const tx = Math.floor(fx), ty = Math.floor(fy), S = 128;          // kafel 256 px pokazany w skali 1:2
-  const px = Math.max(64 - S, Math.min(0, 32 - (fx - tx) * S)), py = Math.max(64 - S, Math.min(0, 32 - (fy - ty) * S));
-  for (const b of BASES) { const el = document.getElementById('st-' + b.id);
-    el.style.backgroundImage = `url("${b.thumb(z, tx, ty)}")`;
-    el.style.backgroundSize = S + 'px ' + S + 'px'; el.style.backgroundPosition = px + 'px ' + py + 'px';
-    el.classList.toggle('on', b.id === base); }
-}
-let thumbT = 0;
-if (map) map.on('moveend', () => { clearTimeout(thumbT); thumbT = setTimeout(thumbs, 150); });
-thumbs();
-
 function legend() {
-  let h = '';
-  for (const [k, nm, cols, n] of [['snow', 'Strefy śniegowe', SC, 5], ['wind', 'Strefy wiatrowe', WC, 3]]) {
-    h += '<label><input type="checkbox" data-k="' + k + '"' + (show_[k] ? ' checked' : '') + '> ' + nm + '</label>';
-    if (show_[k]) for (let z = 1; z <= n; z++) h += '<span class="sw" style="background:' + cols[z] + '"></span>strefa ' + z + '<br>';
+  const modes = [['snow', 'Śnieg'], ['wind', 'Wiatr'], ['none', 'Ukryj']];
+  let h = '<div class="lt">Strefy obciążenia</div><div class="seg" role="radiogroup" aria-label="Strefy na mapie">';
+  for (const [m, nm] of modes)
+    h += `<button role="radio" aria-checked="${zoneMode === m}" data-m="${m}"${zoneMode === m ? ' class="on"' : ''}>${nm}</button>`;
+  h += '</div>';
+  if (zoneMode !== 'none') {
+    const cols = zoneMode === 'snow' ? SC : WC, p = window.pick;
+    const cur = p && DATA ? zoneAt(zoneMode, p.lon, p.lat) : null;
+    h += '<ul>';
+    for (const z in cols)
+      h += `<li${String(cur) === z ? ' class="cur"' : ''}><i style="background:${cols[z]}"></i>Strefa ${z}</li>`;
+    h += '</ul>';
   }
   const lg = document.getElementById('legend'); lg.innerHTML = h;
-  lg.querySelectorAll('input').forEach(i => i.onchange = () => { show_[i.dataset.k] = i.checked; setZonesVis(); });
+  lg.querySelectorAll('.seg button').forEach(b => b.onclick = () => { zoneMode = b.dataset.m; setZonesVis(); });
 }
 legend();
 
@@ -1671,6 +1647,7 @@ function show() {
        Math.round(p.alt) + ' m') + '</b>';
   if (DATA && (!zs || !zw)) h += '<br><span class="warn">Punkt poza Polską – strefy trzeba wybrać ręcznie.</span>';
   document.getElementById('info').innerHTML = h;
+  legend();
 }
 function setPick(lat, lon, name, alt) {
   if (map) { if (marker) marker.setLngLat([lon, lat]); else marker = new maplibregl.Marker({color: '#d63a3a'}).setLngLat([lon, lat]).addTo(map); }
