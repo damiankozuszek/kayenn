@@ -1,6 +1,6 @@
-# KAENN – plan rozwoju (Road Map)
+# KAYENN – plan rozwoju (Road Map)
 
-Kierunki rozwoju pakietu KAENN (nazwa od kN – kiloniutona), uporządkowane
+Kierunki rozwoju pakietu KAYENN (od kN – kiloniutona, czytanego po angielsku „kej-en”), uporządkowane
 od zadań możliwych do realizacji w najbliższym czasie do planów długoterminowych. Kolejność etapów nie jest
 sztywna – poszczególne zadania mogą być realizowane równolegle.
 
@@ -8,10 +8,10 @@ Moduły pakietu:
 
 | Moduł | Zakres |
 |---|---|
-| **KAENN Manager** | projekt, raport obliczeniowy, wydruk – moduł podstawowy |
-| **KAENN Loading Codes** | obciążenia wg norm: śnieg, wiatr, obciążenia użytkowe |
-| **KAENN Lab** | obciążenia wyznaczane metodami inżynierskimi |
-| **KAENN FEM** | obliczenia metodą elementów skończonych (MES) |
+| **KAYENN Manager** | projekt, raport obliczeniowy, wydruk – moduł podstawowy |
+| **KAYENN Loading Codes** | obciążenia wg norm: śnieg, wiatr, obciążenia użytkowe |
+| **KAYENN Lab** | obciążenia wyznaczane metodami inżynierskimi |
+| **KAYENN FEM** | obliczenia metodą elementów skończonych (MES) |
 
 ---
 
@@ -26,8 +26,8 @@ Moduły pakietu:
 - Upublicznienie repozytorium.
 
 ### 1.2. Nazwa i identyfikacja wizualna
-- ~~Nadanie projektowi rozpoznawalnej nazwy~~ – **KAENN**; nazwy modułów: KAENN Manager,
-  KAENN Loading Codes, KAENN Lab, KAENN FEM.
+- ~~Nadanie projektowi rozpoznawalnej nazwy~~ – **KAYENN**; nazwy modułów: KAYENN Manager,
+  KAYENN Loading Codes, KAYENN Lab, KAYENN FEM.
 - Sprawdzenie dostępności nazwy w bazach znaków towarowych (EUIPO, UPRP) i domeny projektu.
 - Opracowanie znaku graficznego (logo, ikona aplikacji).
 - Najlepiej przed szerszym udostępnieniem – późniejsza zmiana nazwy utrudnia rozpoznawalność
@@ -49,7 +49,7 @@ Celem jest program działający natywnie w systemach Linux, Windows i macOS – 
 uruchomieniu w każdym z nich.
 
 - Przegląd elementów zależnych od Windows: czcionki (`Segoe UI`, `Consolas`) z zamiennikami dla innych
-  systemów, skojarzenie plików `.kaenn` (obecnie tylko rejestr Windows) – odpowiedniki dla Linuksa
+  systemów, skojarzenie plików `.kayenn` (obecnie tylko rejestr Windows) – odpowiedniki dla Linuksa
   (`.desktop`, typ MIME) i macOS.
 - Testy automatyczne uruchamiane na wszystkich trzech systemach (np. GitHub Actions).
 - Linux: dystrybucja przez sklepy z aplikacjami (np. Flathub).
@@ -59,20 +59,20 @@ uruchomieniu w każdym z nich.
 
 ---
 
-## Etap 3. Wydzielenie modułu KAENN Manager
+## Etap 3. Wydzielenie modułu KAYENN Manager
 
 Rozdzielenie obecnego programu na dwie niezależne aplikacje współpracujące na wspólnym pliku projektu.
 
-**KAENN Manager** – moduł podstawowy całego pakietu:
+**KAYENN Manager** – moduł podstawowy całego pakietu:
 - przechowuje informacje o projekcie i zarządza raportem obliczeniowym (lista przypadków, kolejność, nazwy),
 - odpowiada za wydruk raportu,
 - uruchomiony samodzielnie (z menu Start, skrótu itp.) otwiera pustą listę z możliwością nadania nazwy
   projektowi,
-- pozwala otworzyć moduł KAENN Loading Codes i kontynuować w nim pracę, a docelowo – uruchamiać pozostałe
+- pozwala otworzyć moduł KAYENN Loading Codes i kontynuować w nim pracę, a docelowo – uruchamiać pozostałe
   moduły.
 
-**Moduły narzędziowe** (KAENN Loading Codes i kolejne) służą do obliczeń, których wyniki zapisywane są
-w KAENN Manager.
+**Moduły narzędziowe** (KAYENN Loading Codes i kolejne) służą do obliczeń, których wyniki zapisywane są
+w KAYENN Manager.
 
 Zadania:
 - zdefiniowanie wspólnego, udokumentowanego formatu pliku projektu, obsługującego wpisy z różnych modułów,
@@ -82,15 +82,15 @@ Zadania:
 
 ## Etap 4. Obciążenia użytkowe
 
-- Trzecia zakładka modułu KAENN Loading Codes, obok śniegu i wiatru: obciążenia użytkowe wg PN-EN 1991-1-1
+- Trzecia zakładka modułu KAYENN Loading Codes, obok śniegu i wiatru: obciążenia użytkowe wg PN-EN 1991-1-1
   wraz z Załącznikiem krajowym.
 
 ---
 
-## Etap 5. Moduł KAENN Lab
+## Etap 5. Moduł KAYENN Lab
 
 Nowy moduł z narzędziami do wyznaczania obciążeń metodami inżynierskimi – jako uzupełnienie modułu
-KAENN Loading Codes, który w całości odwzorowuje podejście normowe.
+KAYENN Loading Codes, który w całości odwzorowuje podejście normowe.
 
 Pierwsze narzędzie – **kalkulator obciążeń stałych**:
 - wyznaczanie obciążenia od układu warstw (np. posadzki, stropu, dachu) na podstawie materiałów i grubości,
@@ -114,9 +114,9 @@ Kolejne narzędzia będą dodawane w miarę potrzeb użytkowników.
 
 ## Etap 7. Kierunki długoterminowe
 
-### 7.1. Moduł KAENN FEM
+### 7.1. Moduł KAYENN FEM
 - Moduł obliczeń metodą elementów skończonych, rozwijany jako kolejna gałąź pakietu, obok modułów
-  obciążeń i współpracujący ze KAENN Manager.
+  obciążeń i współpracujący ze KAYENN Manager.
 
 ### 7.2. Profesjonalna dystrybucja
 Jeśli wsparcie społeczności pokryje stałe koszty i pojawi się takie zapotrzebowanie, projekt będzie
