@@ -1449,7 +1449,7 @@ html,body,#map{height:100%;margin:0;font-family:"Segoe UI",sans-serif;font-size:
 .srow{display:flex;gap:6px}
 .srow input{flex:1;min-width:0}
 #pform .srow+.srow{margin-top:5px}
-#res{max-height:calc(100vh - 150px);overflow-y:auto;overscroll-behavior:contain}
+#res{max-height:calc(100vh - 260px);overflow-y:auto;overscroll-behavior:contain}
 #res div{line-height:1.35}
 #res small{color:#56606d}
 #res div{padding:3px 4px;cursor:pointer;border-top:1px solid #eee}
@@ -1678,8 +1678,17 @@ document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'E
 
 // --- działki ewidencyjne: zapytanie wykonuje program (usługa ULDK GUGiK), wynik wraca do parcelResult()
 const $ = id => document.getElementById(id);
+// lista wyników kończy się nad polem informacji o punkcie (jego wysokość się zmienia – przeliczane na bieżąco)
+function fitRes() {
+  const r = $('res'), top = r.getBoundingClientRect().top;
+  const pad = $('search').getBoundingClientRect().bottom - r.getBoundingClientRect().bottom;   // dolny margines ramki
+  r.style.maxHeight = Math.max(90, $('info').getBoundingClientRect().top - 10 - pad - top) + 'px';
+}
+if (window.ResizeObserver) { const ro = new ResizeObserver(fitRes); ro.observe($('info')); ro.observe($('search')); }
+window.addEventListener('resize', fitRes);
 function tab(p) { $('tA').classList.toggle('on', !p); $('tP').classList.toggle('on', p);
-  $('aform').hidden = p; $('pform').hidden = !p; $('res').innerHTML = ''; (p ? $('obr') : $('q')).focus(); }
+  $('aform').hidden = p; $('pform').hidden = !p; $('res').innerHTML = ''; (p ? $('obr') : $('q')).focus(); fitRes(); }
+fitRes();
 $('tA').onclick = () => tab(false); $('tP').onclick = () => tab(true);
 let pseq = 0, pgm = '';
 function psearch() {
