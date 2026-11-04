@@ -10,6 +10,8 @@ z wyszukiwaniem działek, projekt z wieloma przypadkami (`.obc`), wydruk z podgl
 
 > Program jest narzędziem pomocniczym – wyniki należy weryfikować z normą.
 
+Plany rozwoju: [ROADMAP.md](ROADMAP.md).
+
 ## Uruchomienie
 
 Wymagany Python 3 i PySide6 (z QtWebEngine – dla mapy):
