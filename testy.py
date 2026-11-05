@@ -148,15 +148,21 @@ class Runner:
 
     # ============================================================= użytkowe ===
     def test_use(self):
+        from PySide6.QtWidgets import QPushButton
         """Zakładka Użytkowe: wszystkie pozycje (także dachy kat. I – każde użytkowanie), wartość domyślna =
         zalecana, kontrola dolnej granicy (NB1), zapis i odczyt stanu; bez modelu 3D i dodawania."""
         m, a = self.m, self.app
         if a.nb.tabText(m.TAB_USE).strip().split()[-1] != "Użytkowe" or "Śnieg" not in a.nb.tabText(m.TAB_SNOW):
             self.fail(f"kolejność zakładek: {[a.nb.tabText(i) for i in range(a.nb.count())]}")
         a.nb.setCurrentIndex(m.TAB_USE)
-        self.pump(2)
-        if a.btn3d.isEnabled() or a.btn_add.isEnabled():
-            self.fail("na zakładce Użytkowe przyciski modelu 3D / dodawania są aktywne")
+        self.pump(3)
+        a._draw3d_now()
+        bottom = [b.text() for b in a.win.findChildren(QPushButton) if b.objectName() == "big" and b.isVisibleTo(a.win)]
+        if bottom != ["Dodaj do projektu"] or not a.btn_add.isEnabled():
+            self.fail(f"na zakładce Użytkowe na dole ma być tylko „Dodaj do projektu”: {bottom}")
+        if a.win3d is not None and a.win3d.isVisible() and \
+                not any("Brak modelu 3D" in " ".join(it.get("lines", [])) for it in a.cv.items.values()):
+            self.fail("okno 3D na zakładce Użytkowe nie pokazuje komunikatu o braku modelu")
         n = 0
         for gi, (gk, gt, tab, es) in enumerate(m.USE_GROUPS):
             a.use_group.setCurrentIndex(gi)
@@ -191,10 +197,50 @@ class Runner:
         if a._use_state() != st["uzytkowe"]:
             self.fail(f"stan zakładki Użytkowe nie wraca po odczycie: {a._use_state()} ≠ {st['uzytkowe']}")
         self.shot(a.win, "0_uzytkowe")
+        if a.win3d is not None:
+            self.shot(a.win3d, "0_uzytkowe_okno3d")
+        # Dodaj do projektu – przypadek użytkowy na górze listy; po rozwinięciu tylko krótka informacja
+        a.use_group.setCurrentIndex(0)
+        a.use_cat.setCurrentIndex(4)                     # C1
+        self.pump(1)
+        n0 = len(a.project["cases"])
+        self.guard("dodanie obciążeń użytkowych", a.add_or_update)
+        self.pump(3)
+        if len(a.project["cases"]) != n0 + 1 or a.project["cases"][0]["extra"].get("mode") != "użytkowe":
+            self.fail("Dodaj do projektu na zakładce Użytkowe nie dodało przypadku na górze listy")
+        else:
+            case = a.project["cases"][0]
+            card = a.pw.card_of(case)
+            if "Użytkowe" not in card.info.text() or "qₖ = 3" not in card.info.text():
+                self.fail(f"nagłówek karty użytkowej: „{card.info.text()}”")
+            self.guard("rozwinięcie karty użytkowej", card.toggle)
+            self.pump(3)
+            from PySide6.QtWidgets import QCheckBox
+            if card.body is None or getattr(card, "canvas", None) is not None and card.canvas.isVisible() or \
+                    card.body.findChildren(QCheckBox) or "qₖ = 3,0 kN/m²" not in card.report.toPlainText():
+                self.fail("karta użytkowa po rozwinięciu ma pokazywać tylko krótką informację o wartościach")
+            self.shot(a.pw, "0_karta_uzytkowa")
+            doc = self.guard("wydruk z przypadkiem użytkowym", a.project_document)
+            if doc is not None and "Obciążenia użytkowe" not in doc.toPlainText():
+                self.fail("wydruk bez przypadku obciążeń użytkowych")
+            # edycja przypadku użytkowego – zakładka Użytkowe w panelu edycji
+            self.guard("edycja przypadku użytkowego", a.edit_case, case)
+            self.pump(3)
+            ed = a.editor
+            if ed is None or ed.nb.currentIndex() != m.TAB_USE or ed.use_cat.currentIndex() != 4:
+                self.fail("edycja przypadku użytkowego nie otwiera zakładki Użytkowe z jego danymi")
+            ed.use_q.setText("2.5")
+            self.guard("koniec edycji przypadku użytkowego", ed.close_codes)
+            self.pump(3)
+            if "qₖ = 2,5" not in case.get("report", ""):
+                self.fail("zmiana w edycji przypadku użytkowego nie trafiła do projektu")
+            a.project["cases"].remove(case)
+            a.pw.rebuild()
+        a.dirty = False
         a.nb.setCurrentIndex(m.TAB_SNOW)
         self.pump(2)
-        if not a.btn3d.isEnabled():
-            self.fail("po powrocie na zakładkę Śnieg przycisk modelu 3D nieaktywny")
+        if not a.btn3d.isVisibleTo(a.win):
+            self.fail("po powrocie na zakładkę Śnieg brak przycisku modelu 3D")
 
     # ================================================================ śnieg ===
     def test_snow(self):

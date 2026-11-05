@@ -3690,6 +3690,19 @@ class CaseCard(QFrame):
     # --- nagłówek
     def _update_info(self):
         ex = self.case["extra"]
+        if ex.get("mode") == "użytkowe":
+            u = self.case["state"].get("uzytkowe") or {}
+            gr = next((g_ for g_ in USE_GROUPS if g_[0] == u.get("grupa")), None)
+            e = next((q for q in gr[3] if q["code"] == u.get("kategoria")), None) if gr else None
+            v = next((q for q in USE_LIKE if q["code"] == u.get("uzytkowanie")), None)
+            unit_q = "kN/m" if e and e.get("line") else "kN/m²"
+            vals = [f"{s_} = {App._use_fmt(parse_num(str(u.get(k_))))} {un}"
+                    for s_, k_, un in (("qₖ", "qk", unit_q), ("Qₖ", "Qk", "kN"))
+                    if parse_num(str(u.get(k_) or "")) is not None]
+            nm = (e["name"] if e else "") + (f" → {v['name']}" if v else "")
+            self.info.setText(f"  Użytkowe · {nm} · {', '.join(vals)} · dodano {self.case.get('created', '')}")
+            self.name.setText(self.case["name"])
+            return
         mode = "śnieg" if ex.get("mode") != "wiatr" else "wiatr"
         op = self.case["state"].get("opcje", {})
         shape = op.get("snow_type") if mode == "śnieg" else op.get("wind_type")
@@ -3776,9 +3789,18 @@ class CaseCard(QFrame):
         bar = QHBoxLayout()
         calc = self.case["_calc"]
         ex = self.case["extra"]
+        if calc["mode"] == "użytkowe":               # obciążenia użytkowe – tylko krótka informacja
+            self.report = FitBrowser()
+            self.report.setOpenLinks(False)
+            self.report.setHtml(self.case.get("report", ""))
+            bl.addWidget(self.report)
+            self.body = body
+            self._body_mode = "użytkowe"
+            self.layout().addWidget(body)
+            return
         tg = ex.setdefault("toggles", {})
         # tu tylko widok i wymiary budynku (klik na wymiarze w podglądzie); pozostałe zmiany – przycisk Edytuj
-        for key, lab in (("labels3d", "Etykiety"), ("arrows3d", "Strzałki"), ("dims3d", "Wymiary pól"),
+        for key, lab in (("labels3d", "Etykiety"), ("dims3d", "Wymiary pól"),
                          ("bdims3d", "Wymiary budynku")):
             if key == "arrows3d" and calc["mode"] != "wiatr":
                 continue
@@ -3808,6 +3830,9 @@ class CaseCard(QFrame):
         if self.body is None:
             return
         self.app.ensure_calc(self.case)
+        if self._body_mode == "użytkowe" and self.case["_calc"]["mode"] == "użytkowe":
+            self.report.setHtml(self.case.get("report", ""))
+            return
         if self.case["_calc"]["mode"] != self._body_mode:
             self.layout().removeWidget(self.body)
             self.body.hide()
@@ -5054,13 +5079,12 @@ class App:
 
     def _tab_changed(self, i):
         use = i == TAB_USE
-        for b in (self.btn3d, self.btn_add):
-            b.setEnabled(not use)
-            b.setToolTip("Obciążenia użytkowe – bez modelu 3D i bez dodawania do projektu (na razie)" if use else
-                         ("" if b is self.btn3d else "Zapisz bieżący model 3D i wyniki jako nowy przypadek projektu"))
+        self.btn3d.setVisible(not use)               # obciążenia użytkowe – bez modelu 3D
+        self.btn_add.setToolTip("Zapisz przyjęte obciążenia użytkowe jako nowy przypadek projektu" if use else
+                                "Zapisz bieżący model 3D i wyniki jako nowy przypadek projektu")
         if i in (TAB_SNOW, TAB_WIND):
             self.mode3d.set("śnieg" if i == TAB_SNOW else "wiatr")
-            self.draw3d()
+        self.draw3d()                                # okno 3D: model albo komunikat „brak modelu”
 
     # ------------------------------------------------------------ obciążenia użytkowe ---
     def _build_use_page(self):
@@ -5208,6 +5232,59 @@ class App:
         for ent in (self.use_q, self.use_Q):
             x = parse_num(ent.text()) if ent.text().strip() else 0.0
             self._mark_bad(ent, x is None)
+
+    def _use_valid(self):
+        """(czy można dodać do projektu, opis błędu)."""
+        e, v, _ = self._use_entry()
+        has = getattr(self, "_use_has", (True, True))
+        vals = []
+        for ent, rng, sym, on in ((self.use_q, v.get("q"), "qₖ", has[0]), (self.use_Q, v.get("Q"), "Qₖ", has[1])):
+            if not on or not ent.text().strip():
+                continue
+            x = parse_num(ent.text())
+            if x is None or x < 0:
+                return False, f"{sym}: niepoprawna wartość."
+            if rng and v.get("low_min") and x < rng[0] - 1e-9:
+                return False, f"{sym} poniżej dolnej granicy przedziału normowego (Załącznik krajowy NB1)."
+            vals.append(x)
+        if not vals:
+            return False, "Podaj przyjętą wartość obciążenia."
+        return True, ""
+
+    def _use_values(self):
+        """[(symbol, wartość, jednostka, przedział)] – wartości przyjęte do projektu."""
+        e, v, src = self._use_entry()
+        has = getattr(self, "_use_has", (True, True))
+        un_q = "kN/m" if v.get("line") else "kN/m²"
+        out = []
+        for ent, rng, sym, un, on in ((self.use_q, v.get("q"), "qₖ", un_q, has[0]),
+                                      (self.use_Q, v.get("Q"), "Qₖ", "kN", has[1])):
+            x = parse_num(ent.text()) if on and ent.text().strip() else None
+            if x is not None:
+                out.append((sym, x, un, rng))
+        return out
+
+    def _use_title(self):
+        e, v, _ = self._use_entry()
+        return e["name"] + (f" → {v['name']}" if e.get("like") else "")
+
+    def _use_report(self):
+        """Krótka informacja o wartościach przyjętych do projektu (karta przypadku, wydruk)."""
+        e, v, src = self._use_entry()
+        f = self._use_fmt
+        gt = USE_GROUPS[max(self.use_group.currentIndex(), 0)][1]
+        rows = []
+        for sym, x, un, rng in self._use_values():
+            r = ""
+            if rng:
+                lo, hi, rec = rng
+                r = (f" (wartość jedyna wg normy)" if abs(lo - hi) < 1e-9 else
+                     f" (przedział normowy {f(lo)}–{f(hi)} {un}, zalecana {f(rec)} {un})")
+            rows.append(f"<b>{sym} = {f(x)} {un}</b>{r}")
+        return (f"<p style='margin:0 0 4px 0;'><b>Obciążenia użytkowe</b> – {html.escape(gt)}<br>"
+                f"Kategoria: {html.escape(self._use_title())}</p>"
+                f"<p style='margin:0 0 4px 0;'>{'<br>'.join(rows)}</p>"
+                f"<p style='color:{MUTED}; margin:0;'>PN-EN 1991-1-1, {html.escape(src)}</p>")
 
     def _use_state(self):
         e, v, _ = self._use_entry()
@@ -5616,8 +5693,6 @@ class App:
         bar.addStretch(1)
         bar2 = QHBoxLayout()
         bar2.addWidget(self._mk_check("Etykiety", self.labels3d))
-        self.tb_wind2 = self._mk_check("Strzałki", self.arrows3d)
-        bar2.addWidget(self.tb_wind2)
         bar2.addWidget(self._mk_check("Wymiary pól", self.dims3d))
         bar2.addWidget(self._mk_check("Wymiary budynku", self.bdims3d))
         bar2.addStretch(1)
@@ -5638,7 +5713,6 @@ class App:
         wind = mode == "wiatr"
         self.tb_snow.setVisible(not wind)
         self.tb_wind.setVisible(wind)
-        self.tb_wind2.setVisible(wind)
 
     def draw3d(self):
         """Przerysowanie modelu – zbiorczo, najwyżej raz na obieg pętli zdarzeń."""
@@ -5732,8 +5806,12 @@ class App:
         st["lokalizacja"] = g["loc"]
         st["strefy_recznie"] = g["manual"]
 
+    def _cur_mode(self):
+        """Rodzaj obciążenia bieżącej zakładki: „użytkowe”, „śnieg” albo „wiatr”."""
+        return "użytkowe" if self.nb.currentIndex() == TAB_USE else self.mode3d.get()
+
     def _main_extra(self):
-        return {"mode": self.mode3d.get(), "snow_case": self.snow_case.get(),
+        return {"mode": self._cur_mode(), "snow_case": self.snow_case.get(),
                 "view": {k: getattr(self, k) for k in VIEW_KEYS},
                 "toggles": {k: bool(getattr(self, k).get()) for k in TOGGLE_KEYS}}
 
@@ -5768,6 +5846,10 @@ class App:
 
     def _grab_current(self, mode):
         """Bieżące obliczenia formularza obciążeń normowych (wyniki, model, dane do późniejszej edycji)."""
+        if mode == "użytkowe":
+            ok, err = self._use_valid()
+            return dict(ok=ok, err=err, state=self.get_state(), calc=dict(mode=mode, snow_case=None),
+                        report=self._use_report())
         return dict(ok=bool(getattr(self, "_w_ok" if mode == "wiatr" else "_s_ok", False)),
                     err=self.status.text(), state=self.get_state(),
                     calc=dict(sgeo=self.sgeo, snow=self.snow, wgeo=self.wgeo, wind=self.wind, mode=mode,
@@ -5918,7 +6000,7 @@ class App:
             if self._pending:
                 self.recalc()
             self.close_editor()
-            mode = self.mode3d.get()
+            mode = self._cur_mode()
             r = self._grab_current(mode)
             if not r["ok"]:
                 B = QMessageBox.StandardButton
@@ -5967,7 +6049,7 @@ class App:
         if self._pending:
             self.recalc()
         self.close_editor()
-        mode = self.mode3d.get()
+        mode = self._cur_mode()
         r = self._grab_current(mode)
         if not r["ok"]:
             QMessageBox.warning(self.win, "Projekt", "Nie można zapisać przypadku – dane są niepoprawne:\n"
@@ -6017,8 +6099,10 @@ class App:
         dirty = self.dirty
         self.set_state(case["state"])
         self.dirty = dirty
-        self.nb.setCurrentIndex(TAB_WIND if ex.get("mode") == "wiatr" else TAB_SNOW)
-        self.mode3d.set(ex.get("mode", "śnieg"))
+        md = ex.get("mode", "śnieg")
+        self.nb.setCurrentIndex({"wiatr": TAB_WIND, "użytkowe": TAB_USE}.get(md, TAB_SNOW))
+        if md != "użytkowe":
+            self.mode3d.set(md)
         if self.snow and ex.get("snow_case") in [c["name"] for c in self.snow["cases"]]:
             self.snow_case.set(ex["snow_case"])
         for k, v in (ex.get("view") or {}).items():
@@ -6069,10 +6153,16 @@ class App:
         head = f"Projekt: <b>{esc(self.project_title())}</b>"       # tylko nazwa projektu
         for i, case in enumerate(self.project["cases"]):
             self.ensure_calc(case)
-            img = self.snapshot(case).toImage()
-            doc.addResource(QTextDocument.ResourceType.ImageResource, QUrl(f"przypadek{i}.png"), img)
             ex, op = case["extra"], case["state"].get("opcje", {})
             mode = ex.get("mode", "śnieg")
+            if mode == "użytkowe":                   # bez modelu 3D – sama informacja o wartościach
+                brk = ' style="page-break-before:always;"' if i else ""
+                parts.append(f'<div{brk}><p style="color:#6b7280; font-size:8pt;">{head}</p>'
+                             f'<h2 style="margin:4px 0 2px 0;">{esc(case["name"])}</h2>'
+                             f'{html_body(case.get("report") or "")}</div>')
+                continue
+            img = self.snapshot(case).toImage()
+            doc.addResource(QTextDocument.ResourceType.ImageResource, QUrl(f"przypadek{i}.png"), img)
             sub = (f"Śnieg · {op.get('snow_type', '')} · przypadek ({case['_calc']['snow_case']})" if mode != "wiatr"
                    else f"Wiatr · {op.get('wind_type', '')} · θ = {op.get('theta', '')}"
                    + (f" · {op.get('variant')}" if op.get("variant") else ""))
@@ -6424,25 +6514,73 @@ class App:
         self.draw3d()
 
     def scene_wind(self):
+        """Wiatr jak śnieg: powierzchnie budynku neutralne, na każdym polu półprzezroczysta warstwa obciążenia
+        na zewnątrz powierzchni – grubość ∝ |we|, kolor: parcie czerwony, ssanie niebieski. Etykieta – sama
+        wartość z jednostką (bez oznaczenia pola). Kopuła – pola barwione na powierzchni (bez warstwy)."""
         g, w = self.wgeo, self.wind
         faces, texts, lines = [], [], []
         canopy = g.kind in ("can1", "can2")
+        size = max(g.L, g.B, getattr(g, "h_top", 0.0) or 0.0, 1e-3)
+        wmax = max([abs(z["we"]) for z in w["zones"]] + [1e-9])
+        tsc = 0.07 * size / wmax                   # grubość warstwy (mniejsza niż odsunięcie wymiarów N)
+        slabs = []
         for z in w["zones"]:
             t = min(abs(z["cpe"]) / 2.0, 1.0)
             col = mix((255, 255, 255), PRESS_COL if z["cpe"] > 0 else SUCT_COL, 0.15 + 0.6 * t)
             dome = z.get("dome")
-            lab = None if dome else f"{z['name']}\n{f2(z['we'], 3, True)} kN/m²"
+            lab = None if dome else f"{f2(z['we'], 3, True)} kN/m²"
             grp = None if dome else (z["kind"], z["name"], round(z["cpe"], 4), z.get("rect") or id(z))
-            n_up = None
+            P = z["poly"]
+            n = unit(newell(P))
             if z["kind"] in ("roof", "canopy"):     # połać: normalna zawsze w górę (dachy wklęsłe)
-                n_up = unit(newell(z["poly"]))
-                if n_up[2] < 0:
-                    n_up = tuple(-c for c in n_up)
-            faces.append(dict(poly=z["poly"], fill=col, outline=col if dome else "#4b5563", label=lab, n=n_up,
-                              value=z["we"], cull=not canopy, kind=z["kind"], grp=grp,
-                              arr=z.get("arr", True), anchor=z.get("anchor")))
+                if n[2] < 0:
+                    n = tuple(-c for c in n)
+            else:                                    # ściana: normalna na zewnątrz budynku
+                c = centroid(P)
+                if n[0] * (c[0] - g.L / 2) + n[1] * (c[1] - g.B / 2) < 0:
+                    n = tuple(-c_ for c_ in n)
+            if dome:
+                faces.append(dict(poly=P, fill=col, outline=col, n=n, value=z["we"], cull=not canopy,
+                                  kind=z["kind"]))
+                continue
+            roofy = z["kind"] in ("roof", "canopy")
+            faces.append(dict(poly=P, fill=ROOF_COL if roofy else WALL_COL, outline=ROOF_OUT if roofy else WALL_OUT,
+                              n=n, cull=not canopy, kind=z["kind"], base=("w", id(z))))
+            d = tsc * abs(z["we"])
+            if d < 1e-9:
+                continue
+            top = [tuple(a_ + nn * d for a_, nn in zip(q, n)) for q in P]
+            edge = mix((255, 255, 255), PRESS_COL if z["cpe"] > 0 else SUCT_COL, 0.85)
+            faces.append(dict(poly=top, fill=col, outline=edge, n=n, cull=True, label=lab, grp=grp, prio=0,
+                              alpha=SNOW_ALPHA, on=("w", id(z)), value=z["we"], kind=z["kind"]))
+            slabs.append((P, top, n, d, col, edge, z))
+        # ścianki boczne warstw: krawędź zewnętrzna – zamknięcie; styk pól tej samej powierzchni – uskok grubości
+        keyf = lambda p: (round(p[0], 4), round(p[1], 4), round(p[2], 4))
+        edges = {}
+        for i, sl in enumerate(slabs):
+            P = sl[0]
+            for j in range(len(P)):
+                j1 = (j + 1) % len(P)
+                edges.setdefault(frozenset((keyf(P[j]), keyf(P[j1]))), []).append((i, j, j1))
+        for k, lst in edges.items():
+            if len(lst) >= 2:
+                (i1, a1, b1), (i2, a2, b2) = lst[0], lst[1]
+                if sum(x_ * y_ for x_, y_ in zip(slabs[i1][2], slabs[i2][2])) > 0.999:   # ta sama powierzchnia
+                    if abs(slabs[i1][3] - slabs[i2][3]) < 1e-9:
+                        continue
+                    hi, lo = (i1, i2) if slabs[i1][3] > slabs[i2][3] else (i2, i1)
+                    ia, ib = (a1, b1) if hi == i1 else (a2, b2)
+                    la, lb = (a2, b2) if hi == i1 else (a1, b1)
+                    Ph, th, Pl, tl = slabs[hi][0], slabs[hi][1], slabs[lo][0], slabs[lo][1]
+                    ta = next(tl[q] for q in (la, lb) if keyf(Pl[q]) == keyf(Ph[ia]))
+                    tb = next(tl[q] for q in (la, lb) if keyf(Pl[q]) == keyf(Ph[ib]))
+                    self._wind_side(faces, [th[ia], th[ib], tb, ta], centroid(tl), slabs[hi])
+                    continue
+            for i, ja, jb in lst:
+                P, top = slabs[i][0], slabs[i][1]
+                self._wind_side(faces, [P[ja], P[jb], top[jb], top[ja]], centroid(P), slabs[i])
         for pt in w["points"]:
-            texts.append((pt["pos"], f"{pt['name']}\n{f2(pt['we'], 3, True)} kN/m²"))
+            texts.append((pt["pos"], f"{f2(pt['we'], 3, True)} kN/m²"))
         if g.kind == "dome":
             for P, n in g.shape.wall_facets():
                 faces.append(dict(poly=P, fill=NEUTRAL_COL, outline=NEUTRAL_COL, n=n, cull=True))
@@ -6457,6 +6595,18 @@ class App:
                 for y in (0.15, g.B - 0.15):
                     lines.append(((x, y, 0), (x, y, pr.rz(x, y) - 0.05), "#6b7280", 4))
         return faces, texts, lines
+
+    @staticmethod
+    def _wind_side(faces, q, inner, slab):
+        """Ścianka boczna warstwy obciążenia wiatrem (normalna od wnętrza warstwy)."""
+        if poly_area(q) < 1e-12:
+            return
+        n = unit(newell(q))
+        cq = centroid(q)
+        if sum(a_ * (b_ - c_) for a_, b_, c_ in zip(n, cq, inner)) < 0:
+            n = tuple(-a_ for a_ in n)
+        faces.append(dict(poly=q, fill=slab[4], outline=slab[5], n=n, cull=True, prio=0, alpha=SNOW_ALPHA,
+                          on=("w", id(slab[6]))))
 
     def scene_snow(self):
         g, s = self.sgeo, self.snow
@@ -6666,6 +6816,16 @@ class App:
         W, Hc = cv.winfo_width(), cv.winfo_height()
         if W < 50:
             return
+        if not ctx and self.nb.currentIndex() == TAB_USE:   # zakładka Użytkowe – brak modelu 3D
+            self.close_editor()
+            if self.win3d is not None:
+                self.win3d.setWindowTitle("Model 3D" + self.edit_suffix())
+            cv.create_text(W / 2, Hc / 2 - 10, text="Brak modelu 3D dla tego przypadku", font=(FONT, 13, "bold"),
+                           fill=MUTED)
+            cv.create_text(W / 2, Hc / 2 + 16, text="Obciążenia użytkowe nie mają modelu 3D – model śniegu "
+                           "lub wiatru wróci po przejściu na jego zakładkę.", font=(FONT, 9), fill=MUTED)
+            cv.update()
+            return
         mode = self.mode3d.get()
         if (self.wgeo if mode == "wiatr" else self.sgeo) is None:
             return
@@ -6773,7 +6933,7 @@ class App:
                 best[gk] = (ar, id(f_))
         rep = {v[1] for v in best.values()}
         is_rep = lambda f_: f_.get("grp") is None or id(f_) in rep
-        if mode == "wiatr" and self.arrows3d.get():
+        if False:                                    # strzałki zastąpione warstwą obciążenia (scene_wind)
             vals = [abs(f_["value"]) for _, f_, _ in drawn if f_.get("value") is not None]
             wmax = max(vals + [1e-9])
             # jedna strzałka na pole: w środku geometrycznym pola, długość ∝ |we|
@@ -6916,8 +7076,6 @@ class App:
                           "parcie (+) [kN/m²] – ku dołowi" if can else "parcie (+) [kN/m²]"))
             items.append(("box", mix((255, 255, 255), SUCT_COL, 0.6),
                           "ssanie (−) [kN/m²] – ku górze" if can else "ssanie (−) [kN/m²]"))
-            if self.arrows3d.get():
-                items.append(("arrow", "#4b5563", "strzałka – kierunek i wielkość obciążenia pola"))
             if self.dims3d.get() and g.kind != "dome":
                 items.append(("line", DIM_COL, "wymiary pól (w rzucie poziomym)"))
         else:
@@ -7183,13 +7341,17 @@ class App:
         elif isinstance(main, Hip):
             xr = main.run if xs == 0 else L - main.run
             top_pt = (xr, g.B / 2, main.h_top)
-        htot = top_pt[2] if top_pt else hparts[-1][1]
+        htot = top_pt[2] if top_pt else (hparts[-1][1] if hparts else 0.0)
 
         def hbase(u):
             if top_pt and abs(u - top_pt[2]) < 1e-9:
                 return top_pt
             return (xs, yb, u)
-        if len(hparts) > 1 or top_pt:                           # cząstkowe – bliżej budynku
+        if snow and g.upper and yb == y0:            # wysokości wyższej budowli – niewidocznej od strony dachu niższego
+            hparts, top_pt = [], None
+        if not hparts:
+            pass
+        elif len(hparts) > 1 or top_pt:                           # cząstkowe – bliżej budynku
             self._dchain(cv, P, hbase, lambda u: (xs, yb + nb * N, u), hparts, z0_, col)
             self._dchain(cv, P, hbase, lambda u: (xs, yb + nb * 2 * N, u), [(0.0, htot, "")], z0_, col,
                          lab_t=0.78)                            # opis wyżej niż opisy cząstkowe
@@ -7227,7 +7389,7 @@ class App:
             self._angle_label(cv, P, (xs + (-nx) * sh.run / 2, g.B / 2, rz(xs + (-nx) * sh.run / 2, g.B / 2) +
                                       0.03 * size), f"{f2(g.p['a90'], 1)}°", "w_a90")
         # ---- kąt dachu budowli wyższej (przy wyższej budowli)
-        if snow and g.upper and g.p["aup"] >= 0.5:
+        if snow and g.upper and g.p["aup"] >= 0.5 and facing((0, -1, 0)):   # kąt wyższej budowli – od jej strony
             up = g.upper
             sgs = up.segs()
             vis = [q for q in sgs if facing(unit((0.0, -(q[3] - q[1]), q[2] - q[0])))]
@@ -7252,7 +7414,8 @@ class App:
         col, z0_ = BDIM_COL, (0, 0, 0)
         k2 = 2 * N
         sx = lambda a, b: (a, -1) if facing((-1, 0, 0)) else (b, 1)
-        if g.annex:
+        side_ = (-1 if (g.annex.g["ya"] + g.annex.g["yb"]) / 2 < g.B / 2 else 1) if g.annex else 0
+        if g.annex and facing((0, side_, 0)):       # przybudówka – wymiary tylko, gdy jej strona jest widoczna
             a = g.annex.g
             x_, n_ = sx(a["x0"], a["x1"])
             self._dchain(cv, P, lambda u: (u, a["ya"], 0.0), lambda u: (u, a["ya"] - k2, 0.0),
