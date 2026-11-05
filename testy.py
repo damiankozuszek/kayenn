@@ -158,8 +158,8 @@ class Runner:
         self.pump(3)
         a._draw3d_now()
         bottom = [b.text() for b in a.win.findChildren(QPushButton) if b.objectName() == "big" and b.isVisibleTo(a.win)]
-        if bottom != ["Dodaj do projektu"] or not a.btn_add.isEnabled():
-            self.fail(f"na zakładce Użytkowe na dole ma być tylko „Dodaj do projektu”: {bottom}")
+        if sorted(bottom) != sorted([a.btn3d.text(), "Dodaj do projektu"]) or a.btn3d.text() not in ("Model 3D", "Zamknij model 3D"):
+            self.fail(f"na zakładce Użytkowe na dole mają być te same przyciski co na innych: {bottom}")
         if a.win3d is not None and a.win3d.isVisible() and \
                 not any("Brak modelu 3D" in " ".join(it.get("lines", [])) for it in a.cv.items.values()):
             self.fail("okno 3D na zakładce Użytkowe nie pokazuje komunikatu o braku modelu")
@@ -240,7 +240,7 @@ class Runner:
         a.nb.setCurrentIndex(m.TAB_SNOW)
         self.pump(2)
         if not a.btn3d.isVisibleTo(a.win):
-            self.fail("po powrocie na zakładkę Śnieg brak przycisku modelu 3D")
+            self.fail("brak przycisku modelu 3D na zakładce Śnieg")
 
     # ================================================================ śnieg ===
     def test_snow(self):

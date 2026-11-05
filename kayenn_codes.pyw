@@ -5079,7 +5079,6 @@ class App:
 
     def _tab_changed(self, i):
         use = i == TAB_USE
-        self.btn3d.setVisible(not use)               # obciążenia użytkowe – bez modelu 3D
         self.btn_add.setToolTip("Zapisz przyjęte obciążenia użytkowe jako nowy przypadek projektu" if use else
                                 "Zapisz bieżący model 3D i wyniki jako nowy przypadek projektu")
         if i in (TAB_SNOW, TAB_WIND):
@@ -6797,8 +6796,8 @@ class App:
                 P = patches[ip]["poly"]
                 pa = next(p for p in P if keyf(p) == ka)
                 pb = next(p for p in P if keyf(p) == kb)
-                if patches[ip]["on"] == id(g.main) and on_keepout(pa, pb):
-                    continue                       # ścianka przy attyce / przeszkodzie – zasłonięta przez nią
+                # ścianka przy attyce / przeszkodzie też rysowana: z góry jej górna część bywa widoczna ponad
+                # attyką (dach pochyły przy okapie) – bez niej prześwitywała połać
                 c = pcs[ip]
                 out = (2 * (pa[0] + pb[0]) / 2 - c[0], 2 * (pa[1] + pb[1]) / 2 - c[1], (pa[2] + pb[2]) / 2)
                 side_face([pa, pb, tp[kb], tp[ka]], out, patches[ip]["on"],
@@ -7360,12 +7359,13 @@ class App:
             return (xF, yf, u)
         if not hparts:
             pass
-        elif len(hparts) > 1 or top_pt:                           # cząstkowe – bliżej budynku
-            self._dchain(cv, P, hbase, lambda u: (xF + nF * N, yf, u), hparts, z0_, col)
-            self._dchain(cv, P, hbase, lambda u: (xF + nF * 2 * N, yf, u), [(0.0, htot, "")], z0_, col,
+        elif len(hparts) > 1 or top_pt:     # na liniach odniesienia wymiaru L: cząstkowe – N, ogólny – jak L
+            kH = max(kL, 2 * N)
+            self._dchain(cv, P, hbase, lambda u: (xF, yf + ny * N, u), hparts, z0_, col)
+            self._dchain(cv, P, hbase, lambda u: (xF, yL + ny * kH, u), [(0.0, htot, "")], z0_, col,
                          lab_t=0.78)                            # opis wyżej niż opisy cząstkowe
-        else:                                                   # jedna wysokość – pierwszy poziom
-            self._dchain(cv, P, hbase, lambda u: (xF + nF * N, yf, u), hparts, z0_, col)
+        else:                                                   # jedna wysokość – na linii odniesienia L
+            self._dchain(cv, P, hbase, lambda u: (xF, yL + ny * kL, u), hparts, z0_, col)
         # ---- kąty połaci
         if isinstance(main, Prism):
             seen = []
