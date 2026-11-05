@@ -21,6 +21,7 @@ import json
 import math
 import os
 import sys
+import time
 
 # =========================================================== wygląd ===
 FONT = "Segoe UI"
@@ -3834,6 +3835,8 @@ class ProjectWindow(QWidget):
         self.list = CaseList(self)
         sc.setWidget(self.list)
         self.scroll = sc
+        self._hold = None
+        sc.verticalScrollBar().rangeChanged.connect(self._apply_hold)
         lay.addWidget(sc, 1)
         hb = QHBoxLayout()
         b1 = QPushButton("Otwórz obciążenia normowe")
@@ -3870,6 +3873,57 @@ class ProjectWindow(QWidget):
             self.list.lay.activate()
             QTimer.singleShot(0, lambda: sb.setValue(pos))
         self.list.update()                           # znak wodny pustego projektu
+        self.update_buttons()
+
+    def keep_view(self, fn):
+        """fn() zmienia karty – lista zostaje w tym samym miejscu: zapamiętana karta widoczna u góry i jej
+        przesunięcie; przywracane od razu i po ułożeniu (raporty i podglądy ustalają wysokość z opóźnieniem)."""
+        sb = self.scroll.verticalScrollBar()
+        v = sb.value()
+        anchor = next((c for c in self.cards if c.y() + c.height() > v), None)
+        off = v - anchor.y() if anchor is not None else 0
+        fn()
+        if anchor is None:
+            return
+        # przez chwilę każda zmiana długości listy (karta bez zawartości, raport ustala wysokość) – ta sama karta
+        # w tym samym miejscu; inaczej pasek przewijania „spada” na koniec skróconej na moment listy
+        self._hold = (anchor, off, time.monotonic() + 1.2)
+        self.list.lay.activate()
+        self._apply_hold()
+        for ms in (0, 100, 400, 1250):
+            QTimer.singleShot(ms, self._apply_hold)
+
+    def _apply_hold(self, *args):
+        h = getattr(self, "_hold", None)
+        if not h:
+            return
+        anchor, off, until = h
+        if time.monotonic() > until or anchor not in self.cards:
+            self._hold = None
+            return
+        self.scroll.verticalScrollBar().setValue(anchor.y() + off)
+
+    def refresh_cases(self, cases=None):
+        """Po zmianie przypadków: tylko ich karty (rozwinięte zostają rozwinięte, lista w tym samym miejscu).
+        cases=None – wszystkie karty."""
+        def fn():
+            for c in self.cards:
+                if cases is None or c.case in cases or c.case.get("_calc") is None:
+                    c.refresh()
+        self.keep_view(fn)
+        self.update_buttons()
+
+    def insert_case(self, case):
+        """Nowy przypadek – nowa karta (zwinięta) bez przebudowy pozostałych."""
+        idx = self.app.project["cases"].index(case)
+
+        def fn():
+            card = CaseCard(self, case)
+            self.list.lay.insertWidget(idx, card)
+            self.cards.insert(idx, card)
+        self.keep_view(fn)
+        self.empty.setVisible(not self.cards)
+        self.list.update()
         self.update_buttons()
 
     def update_buttons(self):
@@ -3910,11 +3964,12 @@ class ProjectWindow(QWidget):
         self.app.project_changed()
 
     def edit_case(self, case):
-        """Edytuj – przypadek w oknie obciążeń normowych; drugi klik (Zakończ edycję) – koniec edycji."""
+        """Edytuj – przypadek w oknie obciążeń normowych; drugi klik (Zakończ edycję) – koniec edycji.
+        Lista zostaje w tym samym miejscu."""
         if self.app.edited_case() is case:
-            self.app.editor.close_codes()
+            self.keep_view(lambda: self.app.editor.close_codes())
         else:
-            self.app.edit_case(case)
+            self.keep_view(lambda: self.app.edit_case(case))
 
     def delete_case(self, case):
         B = QMessageBox.StandardButton
@@ -4626,7 +4681,7 @@ class App:
         if host._pending:
             host.recalc()
         host.project["globals"] = host._globals_of(host.get_state())
-        host.pw.rebuild()
+        host.pw.refresh_cases()
 
     def _manual_flags(self):
         """Które wartości z mapy zmieniono ręcznie: dict(snow_zone, wind_zone, A) → bool."""
@@ -5518,7 +5573,9 @@ class App:
         self.close_editor()
         self.hide_3d()
         self.win.hide()
-        self.pw.rebuild()
+        if case in self.project["cases"]:
+            self.pw.refresh_cases([case])
+        self.update_buttons()
         return True
 
     def _store_case(self, case, r, msg):
@@ -5563,7 +5620,10 @@ class App:
         msg = self._store_case(case, r, msg)
         self.project_changed()
         self.info_msg(msg)
-        self.pw.rebuild()
+        if self.pw.card_of(case) is None:
+            self.pw.insert_case(case)
+        else:
+            self.pw.refresh_cases([case])
 
     def info_msg(self, text):
         self.proj_msg.setText(text)
@@ -7120,7 +7180,7 @@ def main():
     if files:                                        # dwuklik na pliku projektu
         app.open_path(files[0])
     app.pw.rebuild()
-    app.pw.show()                                    # zawsze najpierw okno główne
+    app.pw.showMaximized()                           # zawsze najpierw okno główne, zmaksymalizowane
     sys.exit(qapp.exec())
 
 

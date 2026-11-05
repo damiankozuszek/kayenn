@@ -455,8 +455,54 @@ class Runner:
             self.fail("X w panelu edycji nie zakończył edycji (albo nie zapisał zmiany)")
         if pw.card_of(case).btn_edit.text() != "Edytuj":
             self.fail("po zakończeniu edycji przycisk karty nie wrócił do „Edytuj”")
+        from PySide6.QtTest import QTest
         if not all(c.body is not None for c in pw.cards):
             self.fail("po zakończeniu edycji rozwinięte karty się zwinęły")
+        # Edytuj → Zakończ edycję: lista zostaje w tym samym miejscu (karty rozwinięte, przewinięte do połowy)
+        sb = pw.scroll.verticalScrollBar()
+        self.pump(5)
+        QTest.qWait(300)
+        if sb.maximum() > 0:
+            sb.setValue(sb.maximum() // 2)
+            self.pump(3)
+            v0 = sb.value()
+            top = next(c for c in pw.cards if c.y() + c.height() > v0)    # karta widoczna u góry
+            rel0 = top.y() - v0
+            case = a.project["cases"][0]
+            old_btn = pw.card_of(case).btn_edit
+            self.guard("Edytuj (widok listy)", old_btn.click)
+            self.pump(5)
+            ed.v[key].set("17")
+            self.guard("recalc panelu edycji (3)", ed.recalc)
+            self.guard("Zakończ edycję (widok listy)", pw.card_of(case).btn_edit.click)
+            QTest.qWait(1400)
+            self.pump(5)
+            rel1 = top.y() - sb.value()
+            if abs(rel1 - rel0) > 2:
+                self.fail(f"po Edytuj → Zakończ edycję lista przesunęła się: karta u góry {rel0} → {rel1} px "
+                          f"(pasek {v0} → {sb.value()}, max {sb.maximum()})")
+            # jak w Windows: karty na moment bez zawartości (lista krótsza), wysokość wraca z opóźnieniem
+            QTest.qWait(300)
+            sb.setValue(sb.maximum() // 2)
+            self.pump(3)
+            v0 = sb.value()
+            top = next(c for c in pw.cards if c.y() + c.height() > v0)
+            rel0 = top.y() - v0
+            bodies = [c.body for c in pw.cards if c.body is not None]
+            from PySide6.QtCore import QTimer
+
+            def shrink():
+                for b_ in bodies:
+                    b_.setVisible(False)
+            QTimer.singleShot(300, lambda: [b_.setVisible(True) for b_ in bodies])
+            self.guard("utrzymanie widoku listy", pw.keep_view, shrink)
+            QTest.qWait(1400)
+            self.pump(5)
+            rel1 = top.y() - sb.value()
+            if abs(rel1 - rel0) > 2:
+                self.fail(f"lista nie wraca na miejsce po chwilowym skróceniu: karta u góry {rel0} → {rel1} px")
+            if pw.card_of(case).btn_edit is not old_btn:
+                self.fail("koniec edycji przebudował całą listę zamiast odświeżyć kartę przypadku")
         pw.cards[1].toggle()                             # ręcznie zwinięta – zostaje zwinięta
         a.add_or_update()
         self.pump(3)
@@ -647,6 +693,7 @@ m.App.__init__ = init
 def exec_(*a):
     a_ = apps[0]
     print("WYNIK " + json.dumps(dict(pw=a_.pw is not None and a_.pw.isVisible(), win=a_.win.isVisible(),
+                                    maxi=a_.pw.isMaximized(),
                                     cases=len(a_.pw.cards) if a_.pw else -1, dirty=a_.dirty,
                                     path=a_.project_path)), flush=True)
     return 0
@@ -665,6 +712,8 @@ except SystemExit:
             self.fail("program uruchomiony z plikiem nie wystartował", r.stdout + r.stderr)
             return
         res = json.loads(line[6:])
+        if not res.get("maxi"):
+            self.fail(f"okno główne nie otworzyło się zmaksymalizowane: {res}")
         if not res["pw"] or res["win"]:
             self.fail(f"po otwarciu pliku nie pokazano od razu okna głównego: {res}")
         if res["cases"] != n_cases or res["dirty"] or os.path.normcase(res["path"] or "") != os.path.normcase(path):

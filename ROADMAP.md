@@ -25,11 +25,9 @@ nazwę KAYENN; podział na części poniżej jest wewnętrzny i służy rozwojow
 - Zasady współpracy dla społeczności (`CONTRIBUTING.md`): zgłaszanie błędów, propozycje zmian, wymagane testy.
 - Upublicznienie repozytorium.
 
-### 1.2. Nazwa i identyfikacja wizualna
-- ~~Nadanie projektowi rozpoznawalnej nazwy~~ – **KAYENN** (nazwy wewnętrzne: KAYENN Main, KAYENN Codes,
-  KAYENN Lab – niewidoczne dla użytkownika).
-- Sprawdzenie dostępności nazwy w bazach znaków towarowych (EUIPO, UPRP) i domeny projektu.
-- ~~Opracowanie znaku graficznego~~ – napis KAYENN i ikona (litera K), folder `identyfikacja/`.
+### 1.2. Ochrona nazwy i znaku
+- Sprawdzenie dostępności nazwy KAYENN, napisu i ikony w bazach znaków towarowych (EUIPO, UPRP) oraz domeny
+  projektu.
 - Najlepiej przed szerszym udostępnieniem – późniejsza zmiana nazwy utrudnia rozpoznawalność
   i wymaga zmian w repozytoriach, pakietach i sklepach z aplikacjami.
 
@@ -59,17 +57,14 @@ uruchomieniu w każdym z nich.
 
 ---
 
-## Etap 3. KAYENN Main – okno główne programu
+## Etap 3. Wspólny format pliku projektu
 
-Jeden program (bez rozdzielania na niezależne aplikacje). **KAYENN Main** to okno główne:
-- ~~zawsze pierwsze okno po uruchomieniu (z menu Start i z pliku projektu); pusty projekt ze znakiem wodnym~~,
-- ~~przechowuje projekt i zarządza raportem (lista przypadków, kolejność, nazwy), odpowiada za wydruk~~,
-- ~~otwiera obciążenia normowe (KAYENN Codes) w oknie nad sobą; edycja przypadku w tym samym oknie~~,
-- docelowo – platforma obliczeń MES, do której kolejne części (Codes, Lab) dokładają elementy projektu.
+KAYENN Main (okno główne) jest platformą, do której kolejne części programu (Codes, Lab, a docelowo model MES)
+dokładają elementy projektu.
 
-Zadania:
-- zdefiniowanie wspólnego, udokumentowanego formatu pliku projektu, obsługującego wpisy z różnych części
-  programu (obciążenia normowe, obciążenia inżynierskie, model MES),
+- Zdefiniowanie wspólnego, udokumentowanego formatu pliku projektu `.kayenn`, obsługującego wpisy z różnych
+  części programu (obciążenia normowe, obciążenia inżynierskie, model MES) – z numerem wersji formatu
+  i odczytem plików zapisanych wcześniejszymi wersjami.
 
 ---
 
