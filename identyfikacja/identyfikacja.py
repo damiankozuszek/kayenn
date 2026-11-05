@@ -101,8 +101,11 @@ def mark(text="KAYENN", sw=9, depth=28, side=50, gap=24, square=False, bg=None, 
         o = i / steps
         g.append(f'<path d="{D}" transform="translate({-side * o:.2f},{depth * o:.2f}) {base}" fill="{SHADOW}" '
                  f'stroke="{SHADOW}" stroke-width="{sw}" stroke-linejoin="miter" stroke-miterlimit="3"/>')
-    g.append(f'<path d="{D}" transform="{base}" fill="{FILL}" stroke="{LINE}" stroke-width="{sw}" '
-             f'stroke-linejoin="miter" stroke-miterlimit="3" paint-order="stroke" fill-rule="evenodd"/>')
+    # obwódka pod wypełnieniem: dwie osobne warstwy (paint-order="stroke" nie działa np. w Qt – tam obwódka
+    # zjadałaby połowę grubości liter)
+    g.append(f'<path d="{D}" transform="{base}" fill="{LINE}" stroke="{LINE}" stroke-width="{sw}" '
+             f'stroke-linejoin="miter" stroke-miterlimit="3" fill-rule="evenodd"/>')
+    g.append(f'<path d="{D}" transform="{base}" fill="{FILL}" fill-rule="evenodd"/>')
     bgr = f'<rect x="{x0:g}" y="{y0:g}" width="{vbw:g}" height="{vbh:g}" fill="{bg}"/>' if bg else ""
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{x0:.2f} {y0:.2f} {vbw:.2f} {vbh:.2f}" '
             f'role="img" aria-label="{label or text}">{bgr}{"".join(g)}</svg>')
