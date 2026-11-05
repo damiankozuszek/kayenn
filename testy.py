@@ -334,7 +334,7 @@ class Runner:
             self.fail(f"okno główne pokazuje {len(pw.cards)} kart zamiast 2")
             return
         acts = [x.text() for x in pw.menu_bar.actions()[0].menu().actions() if not x.isSeparator()]
-        want = ["Nowy projekt", "Otwórz plik projektu…", "Zapisz", "Zapisz jako…", "Nazwa projektu…", "Zakończ"]
+        want = ["Nowy projekt", "Otwórz plik projektu…", "Zapisz", "Zapisz jako…", "Informacje o projekcie…", "Zakończ"]
         if acts != want:
             self.fail(f"menu Plik okna głównego: {acts} zamiast {want}")
         # bez nazw modułów w tytułach; okno główne – tylko nazwa projektu
@@ -450,23 +450,59 @@ class Runner:
         if pw.card_of(case).btn_edit.text() != "Edytuj":
             self.fail("po zakończeniu edycji przycisk karty nie wrócił do „Edytuj”")
         # dokument do wydruku (bez drukarki)
-        # Plik → Nazwa projektu…
-        from PySide6.QtWidgets import QInputDialog
-        old_get = QInputDialog.getText
-        QInputDialog.getText = staticmethod(lambda *a_, **k: ("  Hala   magazynowa A ", True))
+        # Plik → Informacje o projekcie…: nazwa i lokalizacja (wspólna dla wszystkich przypadków)
+        warsaw = dict(lat=52.2297, lon=21.0122, alt=100.0, name="Warszawa")
+        old_exec = m.ProjectInfoDialog.exec
+
+        def fake_exec(dlg):
+            self.shot(dlg, "12_informacje_o_projekcie")
+            dlg.name_edit.setText("  Hala   magazynowa A ")
+            dlg.set_loc(warsaw)
+            return 1
+        m.ProjectInfoDialog.exec = fake_exec
         try:
             acts = {x.text(): x for x in a.pw.menu_bar.actions()[0].menu().actions()}
-            if "Nazwa projektu…" not in acts:
-                self.fail("brak „Nazwa projektu…” w menu Plik okna głównego")
+            if "Informacje o projekcie…" not in acts:
+                self.fail("brak „Informacje o projekcie…” w menu Plik okna głównego")
             else:
                 a.dirty = False
-                self.guard("Nazwa projektu", acts["Nazwa projektu…"].trigger)
+                self.guard("Informacje o projekcie", acts["Informacje o projekcie…"].trigger)
         finally:
-            QInputDialog.getText = old_get
+            m.ProjectInfoDialog.exec = old_exec
         if a.project.get("name") != "Hala magazynowa A" or not a.dirty:
             self.fail(f"nazwa projektu: „{a.project.get('name')}”, zmiana zaznaczona: {a.dirty}")
         if a.pw.windowTitle().lstrip("*") != "Hala magazynowa A":
             self.fail(f"tytuł okna głównego inny niż nazwa projektu: „{a.pw.windowTitle()}”")
+        self.recalc("lokalizacja")
+        au = a._auto_values(warsaw)
+        if a.loc.get() != warsaw or a.v["A"].get() != "100" or a.snow_zone.get() != au["snow_zone"] or                 a.wind_zone.get() != au["wind_zone"]:
+            self.fail(f"lokalizacja nie trafiła do formularza: A={a.v['A'].get()}, strefy "
+                      f"{a.snow_zone.get()}/{a.wind_zone.get()} (mapa: {au})")
+        for c in a.project["cases"]:
+            if c["state"].get("lokalizacja") != warsaw or c["state"]["pola"].get("A") != "100":
+                self.fail(f"lokalizacja nie trafiła do przypadku „{c['name']}”")
+        from PySide6.QtWidgets import QPushButton as _QB
+        if any(b.text().startswith("Wybierz na mapie") for b in a.win.findChildren(_QB)):
+            self.fail("w zakładkach Śnieg / Wiatr został przycisk „Wybierz na mapie”")
+        lab_s = a.zone_boxes[0]._label
+        if "ręcznie" in lab_s.text() or a.loc_restore[0].isEnabled():
+            self.fail("strefa z mapy oznaczona jako zmieniona ręcznie")
+        # zmiana ręczna strefy i wysokości → czerwone nazwy pól, Przywróć
+        a.snow_zone.set("2" if au["snow_zone"] != "2" else "3")
+        a.v["A"].set("150")
+        self.recalc("zmiana ręczna")
+        labs = [lab_s] + [e._label for e in a.entries["A"]]
+        if not all("zmienione ręcznie" in l.text() and m.MANUAL_COL in l.styleSheet() for l in labs):
+            self.fail("zmiana ręczna strefy / wysokości nie oznaczyła pól: " + " | ".join(l.text() for l in labs))
+        if "ręcznie" in a.zone_boxes[1]._label.text():
+            self.fail("niezmieniona strefa wiatrowa oznaczona jako zmieniona ręcznie")
+        if not a.loc_restore[0].isEnabled():
+            self.fail("przycisk Przywróć nieaktywny po zmianie ręcznej")
+        self.shot(a.win, "13_zmienione_recznie")
+        self.guard("Przywróć", a.loc_restore[0].click)
+        self.recalc("przywrócenie")
+        if a.snow_zone.get() != au["snow_zone"] or a.v["A"].get() != "100" or                 any("ręcznie" in l.text() for l in labs):
+            self.fail("Przywróć nie przywróciło strefy / wysokości z mapy")
         if a._project_dump().get("nazwa") != "Hala magazynowa A":
             self.fail("nazwa projektu nie trafia do pliku")
         doc = self.guard("dokument wydruku", a.project_document)

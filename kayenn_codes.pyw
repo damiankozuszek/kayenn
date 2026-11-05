@@ -2584,6 +2584,8 @@ DEFAULTS = dict(A="210", s_L="12", s_B="10", s_H="5", s_alpha="25", s_alpha2="25
                 cpi="0.2", phi="0")
 
 PROJECT_EXT = ".kayenn"
+MANUAL_COL = "#c62828"
+_AUTO_CACHE = {}        # lokalizacja → strefy i wysokość n.p.m. z mapy     # nazwy pól zmienionych ręcznie względem mapy (strefy, wysokość n.p.m.)
 
 ASSUMPTIONS = """\
 KAYENN – ZAŁOŻENIA OBLICZEŃ
@@ -3929,6 +3931,65 @@ class ProjectWindow(QWidget):
             e.ignore()
 
 
+class ProjectInfoDialog(QDialog):
+    """Plik → Informacje o projekcie…: nazwa projektu i lokalizacja (wspólna dla wszystkich przypadków)."""
+
+    def __init__(self, app, parent, name, loc):
+        super().__init__(parent)
+        self.app = app
+        self.loc = loc
+        self.setWindowTitle("Informacje o projekcie")
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        self.setMinimumWidth(520)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(8)
+        g = QGridLayout()
+        g.setHorizontalSpacing(10)
+        g.setVerticalSpacing(8)
+        g.addWidget(QLabel("Nazwa projektu"), 0, 0)
+        self.name_edit = QLineEdit(name)
+        self.name_edit.setPlaceholderText("np. Hala magazynowa A")
+        self.name_edit.setStyleSheet(f"font-family:'{FONT}'; font-size:9pt;")   # tekst, nie liczba
+        g.addWidget(self.name_edit, 0, 1, 1, 2)
+        g.addWidget(QLabel("Lokalizacja"), 1, 0)
+        self.loc_label = LabelX("")
+        self.loc_label.setWordWrap(True)
+        g.addWidget(self.loc_label, 1, 1)
+        b = QPushButton("Wybierz na mapie…")
+        b.clicked.connect(lambda checked=False: self.pick())
+        g.addWidget(b, 1, 2)
+        g.setColumnStretch(1, 1)
+        lay.addLayout(g)
+        hint = QLabel("Nazwa: pasek tytułu okna i nagłówek wydruku. Lokalizacja wyznacza strefy obciążenia "
+                      "śniegiem i wiatrem oraz wysokość n.p.m. – we wszystkich przypadkach projektu.")
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+        from PySide6.QtWidgets import QDialogButtonBox
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb.button(QDialogButtonBox.StandardButton.Cancel).setText("Anuluj")
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+        self.set_loc(loc)
+
+    def set_loc(self, loc):
+        self.loc = loc
+        if loc:
+            t = (f"{loc['name']} – " if loc.get("name") else "") + f"{loc['lat']:.4f}° N, {loc['lon']:.4f}° E"
+            if loc.get("alt") is not None:
+                t += f", {max(loc['alt'], 0):.0f} m n.p.m."
+        else:
+            t = "nie wybrano"
+        self.loc_label.configure(text=t)
+
+    def pick(self):
+        loc = self.app.pick_location(self, self.loc)
+        if loc:
+            self.set_loc(loc)
+
+
 # ===================================================================
 #  APLIKACJA
 # ===================================================================
@@ -3991,7 +4052,6 @@ class App:
         self.variant = Var("")
         self.cpi_mode = Var(CPI_MODES[0])
         self.loc = Var(None)                       # lokalizacja: dict(lat, lon, alt, name) lub None
-        self.manual_zones = Var(False)
         self.mode3d = Var("śnieg")
         self.snow_case = Var("i")
         self.labels3d = Var(True)
@@ -4006,7 +4066,7 @@ class App:
 
         self.entries = {}
         self.theta_boxes, self.variant_boxes, self.case_boxes = [], [], []
-        self.zone_boxes, self.loc_labels = [], []
+        self.zone_boxes, self.loc_labels, self.loc_restore = [], [], []
         self._build()
         if self.host is self:
             self.pw = ProjectWindow(self)
@@ -4017,7 +4077,7 @@ class App:
         for var in (self.guard, self.s_diff, self.w_diff, self.snow_type, self.wind_type, self.snow_zone,
                     self.snow_ce, self.ct_mode, self.s_obst, self.s_exc, self.sx_fobst, self.sx_canopy,
                     self.sx_annex, self.sx_epar, self.sx_gpar, self.sx_pobst, self.w_mtype, self.wind_zone, self.terrain,
-                    self.theta, self.variant, self.cpi_mode, self.loc, self.manual_zones):
+                    self.theta, self.variant, self.cpi_mode, self.loc):
             var.trace(self._opt_changed)
         self.snow_case.trace(self._case_changed)
         for var in (self.labels3d, self.arrows3d, self.dims3d, self.bdims3d):
@@ -4129,8 +4189,11 @@ class App:
 
     def num(self, c, r, col, key, label, unit):
         g = c.grid
-        g.addWidget(QLabel(label), r, col * 3)
+        lb = QLabel(label)
+        lb._base = label
+        g.addWidget(lb, r, col * 3)
         e = self._mk_entry()
+        e._label = lb
         e._key = key
         e.setText(self.v[key].get())
         e.textEdited.connect(lambda t, k=key: self.v[k].set(t))
@@ -4141,8 +4204,11 @@ class App:
 
     def combo(self, c, r, col, var, label, values, width=12, span=1):
         g = c.grid
-        g.addWidget(QLabel(label), r, col * 3)
+        lb = QLabel(label)
+        lb._base = label
+        g.addWidget(lb, r, col * 3)
         cb = self._mk_combo(var, values, None if span > 1 else width)
+        cb._label = lb
         if span > 1:
             g.addWidget(cb, r, 1, 1, 5)
         else:
@@ -4150,50 +4216,23 @@ class App:
         return cb
 
     def _loc_row(self, c, kind):
-        """Wiersz „Lokalizacja”: przycisk mapy, opis punktu, przełącznik stref ręcznych."""
+        """Wiersz „Lokalizacja”: współrzędne punktu (wybór w oknie głównym: Plik → Informacje o projekcie)
+        i przycisk Przywróć – strefa i wysokość n.p.m. z mapy."""
         c.grid.addWidget(QLabel("Lokalizacja"), 1, 0)
         box = QWidget()
         h = QHBoxLayout(box)
         h.setContentsMargins(0, 0, 0, 0)
-        b = QPushButton("Wybierz na mapie…")
-        b.clicked.connect(lambda checked=False, k=kind: self.open_map(k))
-        h.addWidget(b)
         lb = LabelX("nie wybrano")
         lb.setObjectName("muted")
-        lb.setWordWrap(True)                         # długi opis punktu łamie się, nie wchodzi na przełącznik
+        lb.setWordWrap(True)
         h.addWidget(lb, 1)
-        h.addSpacing(8)
-        h.addWidget(self._mk_check("Strefy ręcznie", self.manual_zones))
+        b = QPushButton("Przywróć")
+        b.setToolTip("Strefy obciążenia i wysokość n.p.m. z lokalizacji wybranej na mapie")
+        b.clicked.connect(lambda checked=False: self.restore_location())
+        h.addWidget(b)
         c.grid.addWidget(box, 1, 1, 1, 5)
         self.loc_labels.append(lb)
-
-    def open_map(self, kind):
-        try:
-            import PySide6.QtWebEngineWidgets  # noqa: F401
-        except ImportError:
-            QMessageBox.warning(self.win, "Mapa",
-                                "Mapa wymaga modułu QtWebEngine (pełny pakiet PySide6).\n\n"
-                                "Instalacja w wierszu poleceń:\n    py -m pip install PySide6\n\n"
-                                "Możesz też podać współrzędne ręcznie.")
-            from PySide6.QtWidgets import QInputDialog
-            cur = self.loc.get()
-            txt, ok = QInputDialog.getText(self.win, "Lokalizacja", "Szerokość i długość geograficzna (np. 51.673, 21.874):",
-                                           text=f"{cur['lat']:.5f}, {cur['lon']:.5f}" if cur else "")
-            if not ok:
-                return
-            try:
-                la, lo = [float(t.replace(",", ".")) for t in txt.replace(";", " ").replace(", ", " ").split()[:2]]
-            except ValueError:
-                QMessageBox.warning(self.win, "Lokalizacja", "Nie rozpoznano współrzędnych.")
-                return
-            self.loc.set(dict(lat=la, lon=lo, alt=None, name=""))
-            return
-        dlg = MapDialog(self.win, kind, self.loc.get())
-        if dlg.exec() and dlg.result_loc:
-            loc = dlg.result_loc
-            self.loc.set(loc)
-            if loc.get("alt") is not None:
-                self.v["A"].set(f"{max(loc['alt'], 0):.0f}")
+        self.loc_restore.append(b)
 
     def text_label(self, c, r):
         lb = LabelX("")
@@ -4444,7 +4483,7 @@ class App:
             entries = [("Nowy projekt", "Ctrl+N", self.file_new),
                        ("Otwórz plik projektu…", "Ctrl+O", self.file_open), None,
                        ("Zapisz", "Ctrl+S", self.file_save), ("Zapisz jako…", "Ctrl+Shift+S", self.file_save_as),
-                       None, ("Nazwa projektu…", None, self.rename_project), None] + entries
+                       None, ("Informacje o projekcie…", None, self.project_info), None] + entries
         for entry in entries:
             if entry is None:
                 mf.addSeparator()
@@ -4465,23 +4504,116 @@ class App:
         return pw if pw is not None else self.win
 
     def project_title(self):
-        """Nazwa projektu (Plik → Nazwa projektu…), a gdy jej brak – nazwa pliku."""
+        """Nazwa projektu (Plik → Informacje o projekcie…), a gdy jej brak – nazwa pliku."""
         nm = (self.project.get("name") or "").strip()
         if nm:
             return nm
         return os.path.basename(self.project_path) if self.project_path else "nowy projekt"
 
-    def rename_project(self):
-        from PySide6.QtWidgets import QInputDialog
-        txt, ok = QInputDialog.getText(self._front(), "Nazwa projektu",
-                                       "Nazwa projektu (pasek tytułu okna i nagłówek wydruku):",
-                                       QLineEdit.EchoMode.Normal, self.project.get("name") or "")
-        if not ok:
+    def project_info(self):
+        """Plik → Informacje o projekcie…: nazwa projektu i lokalizacja (mapa)."""
+        host = self.host
+        cur = host.loc.get()
+        d = ProjectInfoDialog(host, host.pw, host.project.get("name") or "", cur)
+        if not d.exec():
             return
-        txt = " ".join(txt.split())
-        if txt != (self.project.get("name") or ""):
-            self.project["name"] = txt
-            self.project_changed()
+        changed = False
+        name = " ".join(d.name_edit.text().split())
+        if name != (host.project.get("name") or ""):
+            host.project["name"] = name
+            changed = True
+        if d.loc and d.loc != cur:
+            host.set_project_location(d.loc)
+            changed = True
+        if changed:
+            host.project_changed()
+
+    def pick_location(self, parent, cur):
+        """Wybór punktu na mapie (bez QtWebEngine – współrzędne wpisane ręcznie). None – anulowano."""
+        try:
+            import PySide6.QtWebEngineWidgets  # noqa: F401
+        except ImportError:
+            QMessageBox.warning(parent, "Mapa",
+                                "Mapa wymaga modułu QtWebEngine (pełny pakiet PySide6).\n\n"
+                                "Instalacja w wierszu poleceń:\n    py -m pip install PySide6\n\n"
+                                "Możesz też podać współrzędne ręcznie.")
+            from PySide6.QtWidgets import QInputDialog
+            txt, ok = QInputDialog.getText(parent, "Lokalizacja",
+                                           "Szerokość i długość geograficzna (np. 51.673, 21.874):",
+                                           text=f"{cur['lat']:.5f}, {cur['lon']:.5f}" if cur else "")
+            if not ok:
+                return None
+            try:
+                la, lo = [float(t.replace(",", ".")) for t in txt.replace(";", " ").replace(", ", " ").split()[:2]]
+            except ValueError:
+                QMessageBox.warning(parent, "Lokalizacja", "Nie rozpoznano współrzędnych.")
+                return None
+            return dict(lat=la, lon=lo, alt=None, name="")
+        dlg = MapDialog(parent, "snow", cur)
+        if dlg.exec() and dlg.result_loc:
+            return dlg.result_loc
+        return None
+
+    @staticmethod
+    def _auto_values(loc):
+        """Wartości z mapy: strefy (śnieg, wiatr) i wysokość n.p.m. – None, gdy nie da się ich wyznaczyć."""
+        if not loc:
+            return dict(snow_zone=None, wind_zone=None, A=None)
+        key = (loc["lat"], loc["lon"], loc.get("alt"))
+        if key not in _AUTO_CACHE:
+            zs = zone_lookup("snow", loc["lon"], loc["lat"])["zone"]
+            zw = zone_lookup("wind", loc["lon"], loc["lat"])["zone"]
+            _AUTO_CACHE[key] = dict(snow_zone=str(zs) if zs else None, wind_zone=str(zw) if zw else None,
+                                    A=f"{max(loc['alt'], 0):.0f}" if loc.get("alt") is not None else None)
+        return dict(_AUTO_CACHE[key])
+
+    def _put_location(self, loc):
+        """Lokalizacja do formularza: strefy i wysokość n.p.m. z mapy."""
+        self.loc.set(loc)
+        self.restore_location()
+
+    def restore_location(self):
+        """Przywróć: strefy i wysokość n.p.m. z mapy (cofnięcie zmian ręcznych)."""
+        au = self._auto_values(self.loc.get())
+        if au["snow_zone"]:
+            self.snow_zone.set(au["snow_zone"])
+        if au["wind_zone"]:
+            self.wind_zone.set(au["wind_zone"])
+        if au["A"] is not None:
+            self.v["A"].set(au["A"])
+
+    def set_project_location(self, loc):
+        """Nowa lokalizacja projektu: oba panele obciążeń normowych i wszystkie przypadki."""
+        host = self.host
+        for app in (host, host.editor):
+            if app is not None:
+                app._put_location(loc)
+        au = self._auto_values(loc)
+        for c in host.project["cases"]:
+            st = c["state"]
+            st["lokalizacja"] = loc
+            st["strefy_recznie"] = False
+            op = st.setdefault("opcje", {})
+            if au["snow_zone"]:
+                op["snow_zone"] = au["snow_zone"]
+            if au["wind_zone"]:
+                op["wind_zone"] = au["wind_zone"]
+            if au["A"] is not None:
+                st.setdefault("pola", {})["A"] = au["A"]
+            c["_calc"] = None                        # przeliczenie przy rozwinięciu karty / wydruku
+        if host._pending:
+            host.recalc()
+        host.project["globals"] = host._globals_of(host.get_state())
+        host.pw.rebuild()
+
+    def _manual_flags(self):
+        """Które wartości z mapy zmieniono ręcznie: dict(snow_zone, wind_zone, A) → bool."""
+        au = self._auto_values(self.loc.get())
+        fl = dict(snow_zone=bool(au["snow_zone"]) and self.snow_zone.get() != au["snow_zone"],
+                  wind_zone=bool(au["wind_zone"]) and self.wind_zone.get() != au["wind_zone"])
+        a_now = parse_num(self.v["A"].get())
+        fl["A"] = au["A"] is not None and (a_now is None or abs(a_now - float(au["A"])) > 1e-9)
+        return fl
 
     def update_title(self):
         """Okno główne: tylko nazwa projektu (ikona KAYENN przy tytule). Bez nazw modułów."""
@@ -4756,39 +4888,41 @@ class App:
             self._in_recalc = False
 
     def _apply_location(self):
-        """Strefy wyznaczane z lokalizacji (chyba że wybrano „Strefy ręcznie”)."""
+        """Lokalizacja: współrzędne w zakładkach; strefy i wysokość n.p.m. zmienione względem mapy – nazwy pól
+        na czerwono z dopiskiem „zmienione ręcznie”, przycisk Przywróć."""
         loc = self.loc.get()
         self._zinfo = {}
         if loc:
             for kind in ("snow", "wind"):
                 self._zinfo[kind] = zone_lookup(kind, loc["lon"], loc["lat"])
-            txt = (f"{loc['name']} – " if loc.get("name") else "") + f"{loc['lat']:.4f}° N, {loc['lon']:.4f}° E"
+            txt = f"{loc['lat']:.4f}° N, {loc['lon']:.4f}° E"
         else:
-            txt = "nie wybrano – strefy wybierz ręcznie"
+            txt = "nie wybrano – wybierz w oknie głównym: Plik → Informacje o projekcie"
         for lb in self.loc_labels:
             lb.configure(text=txt)
-        auto = bool(loc) and not self.manual_zones.get()
-        if auto:
-            zs, zw = self._zinfo["snow"]["zone"], self._zinfo["wind"]["zone"]
-            if zs:
-                self.snow_zone.set(str(zs))
-            if zw:
-                self.wind_zone.set(str(zw))
-        for cb, kind in zip(self.zone_boxes, ("snow", "wind")):
-            on = not (auto and self._zinfo[kind]["zone"])
-            if cb.isEnabled() != on:
-                cb.setEnabled(on)
+        fl = self._manual_flags()
+        self._manual = fl
+        marks = [(cb._label, fl[n]) for cb, n in zip(self.zone_boxes, ("snow_zone", "wind_zone"))]
+        marks += [(e._label, fl["A"]) for e in self.entries.get("A", [])]
+        for lb, on in marks:
+            t = lb._base + ("\nzmienione ręcznie" if on else "")
+            if lb.text() != t:
+                lb.setText(t)
+                lb.setStyleSheet(f"color:{MANUAL_COL};" if on else "")
+        for b in self.loc_restore:
+            b.setVisible(bool(loc))
+            b.setEnabled(any(fl.values()))
 
     def _zone_note(self, kind):
         zi = getattr(self, "_zinfo", {}).get(kind)
-        if not zi or self.manual_zones.get():
+        if not zi or getattr(self, "_manual", {}).get(kind + "_zone"):
             return ""
         if zi["zone"] is None:
             return "\n⚠ Punkt poza Polską – wybierz strefę ręcznie."
         t = ""
         for d, z in zi["near"]:
             t += f"\nGranica ze strefą {z} w odległości ok. {f2(d, 0)} km"
-            t += (" – wg NB1.7 w pasie 10 km można przyjąć średnią sₖ obu stref (zaznacz „Strefy ręcznie”)."
+            t += (" – wg NB1.7 w pasie 10 km można przyjąć średnią sₖ obu stref (strefę można zmienić ręcznie)."
                   if kind == "snow" else " – sprawdź lokalizację z mapą normy.")
         return t
 
@@ -5533,7 +5667,7 @@ class App:
               "pola": {k: v.get() for k, v in self.v.items()}}
         st["opcje"] = {n: getattr(self, n).get() for n in self.STATE_VARS}
         st["lokalizacja"] = self.loc.get()
-        st["strefy_recznie"] = bool(self.manual_zones.get())
+        st["strefy_recznie"] = any(self._manual_flags().values())
         return st
 
     def set_state(self, st):
@@ -5546,7 +5680,6 @@ class App:
                 if n in self.STATE_VARS:
                     getattr(self, n).set(val)
             self.loc.set(st.get("lokalizacja"))
-            self.manual_zones.set(bool(st.get("strefy_recznie", False)))
             self.recalc()
             th = st.get("opcje", {}).get("theta")
             vr = st.get("opcje", {}).get("variant")
