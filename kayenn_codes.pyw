@@ -6528,6 +6528,30 @@ class App:
         wmax = max([abs(z["we"]) for z in w["zones"]] + [1e-9])
         tsc = 0.07 * size / wmax                   # grubość warstwy (mniejsza niż odsunięcie wymiarów N)
         slabs = []
+        # krawędzie pól dzielone w wierzchołkach pól sąsiednich – wspólne krawędzie są wtedy identyczne
+        # (łączenie warstw na narożnikach, okapie i kalenicy bez szczelin)
+        allv = [q for z in w["zones"] if not z.get("dome") for q in z["poly"]]
+
+        def split_edges(P):
+            out = []
+            for j in range(len(P)):
+                a_, b_ = P[j], P[(j + 1) % len(P)]
+                d_ = tuple(y_ - x_ for x_, y_ in zip(a_, b_))
+                L2 = sum(c_ * c_ for c_ in d_)
+                out.append(a_)
+                if L2 < 1e-12:
+                    continue
+                ins = []
+                for q in allv:
+                    t_ = sum((qc - ac) * dc for qc, ac, dc in zip(q, a_, d_)) / L2
+                    if 1e-6 < t_ < 1 - 1e-6:
+                        foot = tuple(ac + dc * t_ for ac, dc in zip(a_, d_))
+                        if sum((qc - fc) ** 2 for qc, fc in zip(q, foot)) < 1e-10:
+                            ins.append((t_, q))
+                for t_, q in sorted(ins):
+                    if all(sum((qc - oc) ** 2 for qc, oc in zip(q, o_)) > 1e-12 for o_ in out[-1:]):
+                        out.append(q)
+            return out
         for z in w["zones"]:
             t = min(abs(z["cpe"]) / 2.0, 1.0)
             col = mix((255, 255, 255), PRESS_COL if z["cpe"] > 0 else SUCT_COL, 0.15 + 0.6 * t)
@@ -6549,6 +6573,7 @@ class App:
                 continue
             roofy = z["kind"] in ("roof", "canopy")
             d = tsc * abs(z["we"])
+            P = split_edges(P)
             zero = d < 1e-9                        # pole z obciążeniem 0 (np. cpe = −0,0) – etykieta na powierzchni
             faces.append(dict(poly=P, fill=ROOF_COL if roofy else WALL_COL, outline=ROOF_OUT if roofy else WALL_OUT,
                               n=n, cull=not canopy, kind=z["kind"], base=("w", id(z)),
@@ -6560,18 +6585,25 @@ class App:
             faces.append(dict(poly=top, fill=col, outline=edge, n=n, cull=True, label=lab, grp=grp, prio=0,
                               alpha=SNOW_ALPHA, on=("w", id(z)), value=z["we"], kind=z["kind"]))
             slabs.append((P, top, n, d, col, edge, z))
-        # ścianki boczne warstw: krawędź zewnętrzna – zamknięcie; styk pól tej samej powierzchni – uskok grubości
+        # ścianki warstw: krawędź zewnętrzna – zamknięcie; styk pól tej samej powierzchni – uskok grubości;
+        # krawędź wypukła między powierzchniami (narożnik ścian, okap, kalenica) – ukośna ścianka łącząca wierzchy
+        # obu warstw (bez szczeliny, w której prześwitywał budynek); w narożniku – trójkąt domykający;
+        # krawędź wklęsła – warstwy się przenikają, bez ścianek
         keyf = lambda p: (round(p[0], 4), round(p[1], 4), round(p[2], 4))
-        edges = {}
+        same = lambda n1, n2: sum(x_ * y_ for x_, y_ in zip(n1, n2)) > 0.999
+        edges, verts = {}, {}
         for i, sl in enumerate(slabs):
             P = sl[0]
             for j in range(len(P)):
                 j1 = (j + 1) % len(P)
                 edges.setdefault(frozenset((keyf(P[j]), keyf(P[j1]))), []).append((i, j, j1))
+                verts.setdefault(keyf(P[j]), []).append((i, j))
+        corner = set()                                 # wierzchołki krawędzi wypukłych – trójkąty domykające
         for k, lst in edges.items():
             if len(lst) >= 2:
                 (i1, a1, b1), (i2, a2, b2) = lst[0], lst[1]
-                if sum(x_ * y_ for x_, y_ in zip(slabs[i1][2], slabs[i2][2])) > 0.999:   # ta sama powierzchnia
+                n1, n2 = slabs[i1][2], slabs[i2][2]
+                if same(n1, n2):                            # ta sama powierzchnia – uskok grubości
                     if abs(slabs[i1][3] - slabs[i2][3]) < 1e-9:
                         continue
                     hi, lo = (i1, i2) if slabs[i1][3] > slabs[i2][3] else (i2, i1)
@@ -6580,11 +6612,45 @@ class App:
                     Ph, th, Pl, tl = slabs[hi][0], slabs[hi][1], slabs[lo][0], slabs[lo][1]
                     ta = next(tl[q] for q in (la, lb) if keyf(Pl[q]) == keyf(Ph[ia]))
                     tb = next(tl[q] for q in (la, lb) if keyf(Pl[q]) == keyf(Ph[ib]))
-                    self._wind_side(faces, [th[ia], th[ib], tb, ta], centroid(tl), slabs[hi])
+                    self._wind_side(faces, [th[ia], th[ib], tb, ta], centroid(th), slabs[hi])   # uskok zwrócony ku cieńszej warstwie
                     continue
-            for i, ja, jb in lst:
+                P1, P2 = slabs[i1][0], slabs[i2][0]
+                mid = tuple((x_ + y_) / 2 for x_, y_ in zip(P1[a1], P1[b1]))
+                convex = sum(n_ * (c_ - m_) for n_, c_, m_ in zip(n1, centroid(P2), mid)) < -1e-9
+                if not convex:
+                    continue
+                t1, t2 = slabs[i1][1], slabs[i2][1]
+                ka, kb = keyf(P1[a1]), keyf(P1[b1])
+                q2a = next(t2[q] for q in (a2, b2) if keyf(P2[q]) == ka)
+                q2b = next(t2[q] for q in (a2, b2) if keyf(P2[q]) == kb)
+                big = slabs[i1] if slabs[i1][3] >= slabs[i2][3] else slabs[i2]
+                self._wind_side(faces, [t1[a1], t1[b1], q2b, q2a], mid, big)
+                corner.update((ka, kb))
+                continue
+            for i, ja, jb in lst:                           # krawędź zewnętrzna – zamknięcie warstwy
                 P, top = slabs[i][0], slabs[i][1]
                 self._wind_side(faces, [P[ja], P[jb], top[jb], top[ja]], centroid(P), slabs[i])
+        for kv in corner:                                   # narożnik: trójkąt / wielokąt z wierzchów warstw
+            pts, nrm, sls = [], [], []
+            for i, j in verts.get(kv, []):
+                n = slabs[i][2]
+                if any(same(n, m_) for m_ in nrm):
+                    continue
+                nrm.append(n)
+                pts.append(slabs[i][1][j])
+                sls.append(slabs[i])
+            v = slabs[verts[kv][0][0]][0][verts[kv][0][1]]
+            if len(pts) == 2:                              # koniec krawędzi wypukłej – trójkąt z wierzchołkiem budynku
+                self._wind_side(faces, [v, pts[0], pts[1]], v, max(sls, key=lambda q: q[3]), cull=False)
+            elif len(pts) >= 3:                            # narożnik trzech powierzchni
+                nm = unit(tuple(sum(c_) for c_ in zip(*nrm)))
+                ref = unit(tuple(p_ - v_ for p_, v_ in zip(pts[0], v)))
+                ax2 = unit((nm[1] * ref[2] - nm[2] * ref[1], nm[2] * ref[0] - nm[0] * ref[2],
+                            nm[0] * ref[1] - nm[1] * ref[0]))
+                ang = lambda q: math.atan2(sum(a_ * (b_ - c_) for a_, b_, c_ in zip(ax2, q, v)),
+                                           sum(a_ * (b_ - c_) for a_, b_, c_ in zip(ref, q, v)))
+                order = sorted(range(len(pts)), key=lambda t_: ang(pts[t_]))
+                self._wind_side(faces, [pts[t_] for t_ in order], v, max(sls, key=lambda q: q[3]))
         for pt in w["points"]:
             texts.append((pt["pos"], f"{f2(pt['we'], 3, True)} kN/m²"))
         if g.kind == "dome":
@@ -6603,7 +6669,7 @@ class App:
         return faces, texts, lines
 
     @staticmethod
-    def _wind_side(faces, q, inner, slab):
+    def _wind_side(faces, q, inner, slab, cull=True):
         """Ścianka boczna warstwy obciążenia wiatrem (normalna od wnętrza warstwy)."""
         if poly_area(q) < 1e-12:
             return
@@ -6611,7 +6677,7 @@ class App:
         cq = centroid(q)
         if sum(a_ * (b_ - c_) for a_, b_, c_ in zip(n, cq, inner)) < 0:
             n = tuple(-a_ for a_ in n)
-        faces.append(dict(poly=q, fill=slab[4], outline=slab[5], n=n, cull=True, prio=0, alpha=SNOW_ALPHA,
+        faces.append(dict(poly=q, fill=slab[4], outline=slab[5], n=n, cull=cull, prio=0, alpha=SNOW_ALPHA,
                           on=("w", id(slab[6]))))
 
     def scene_snow(self):
