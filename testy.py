@@ -392,46 +392,63 @@ class Runner:
             self.fail("zmiana kolejności przypadków nie zadziałała")
         if [c.case["id"] for c in pw.cards] != [c["id"] for c in a.project["cases"]]:
             self.fail("kolejność kart różni się od kolejności przypadków")
-        # Edytuj → zmiana → Zakończ edycję (okno główne zostaje pod spodem)
+        # Edytuj → osobny panel edycji (panel dodawania działa niezależnie) → Zakończ edycję
         a.open_codes()
-        a.v["s_L"].set("21")                             # formularz sprzed edycji – ma wrócić po edycji
-        self.recalc("formularz przed edycją")
+        a.v["s_L"].set("21")                             # panel dodawania – ma zostać nietknięty
+        self.recalc("panel dodawania")
         case = a.project["cases"][0]
-        card = pw.card_of(case)
-        self.guard("edycja przypadku", card.btn_edit.click)
+        self.guard("edycja przypadku", pw.card_of(case).btn_edit.click)
         self.pump(5)
-        if not a.win.isVisible() or not pw.isVisible() or a.editing is not case:
-            self.fail("Edytuj nie otworzyło przypadku w oknie obciążeń normowych nad oknem głównym")
-        card = pw.card_of(case)
-        if card.btn_edit.text() != "Zakończ edycję":
-            self.fail(f"przycisk karty w edycji: „{card.btn_edit.text()}” zamiast „Zakończ edycję”")
-        bottom = [b.text() for b in a.win.findChildren(QPushButton) if b.objectName() == "big" and b.isVisible()]
+        ed = a.editor
+        if ed is None or ed is a or not ed.win.isVisible() or ed.editing is not case:
+            self.fail("Edytuj nie otworzyło osobnego panelu edycji")
+            return
+        if not a.win.isVisible() or not pw.isVisible() or pw.btn_codes.text() != "Zamknij obciążenia normowe":
+            self.fail("panel edycji zamknął panel dodawania albo okno główne")
+        if pw.card_of(case).btn_edit.text() != "Zakończ edycję":
+            self.fail(f"przycisk karty w edycji: „{pw.card_of(case).btn_edit.text()}” zamiast „Zakończ edycję”")
+        bottom = [b.text() for b in ed.win.findChildren(QPushButton) if b.objectName() == "big" and b.isVisible()]
         if len(bottom) != 1 or "model 3D" not in bottom[0]:
-            self.fail(f"w edycji na dole powinien być tylko przycisk modelu 3D: {bottom}")
+            self.fail(f"w panelu edycji na dole powinien być tylko przycisk modelu 3D: {bottom}")
+        bottom = [b.text() for b in a.win.findChildren(QPushButton) if b.objectName() == "big" and b.isVisible()]
+        if len(bottom) != 2:
+            self.fail(f"panel dodawania w czasie edycji: {bottom}")
+        suf = f"edycja: {case['name']}"
+        self.guard("model 3D panelu edycji", ed.show_3d)
+        self.pump(3)
+        if not ed.win.windowTitle().endswith(suf) or ed.win3d is None or not ed.win3d.windowTitle().endswith(suf):
+            self.fail(f"tytuły panelu edycji / modelu: „{ed.win.windowTitle()}”, "
+                      f"„{ed.win3d.windowTitle() if ed.win3d else None}”")
+        if a.win3d is not None and suf in a.win3d.windowTitle():
+            self.fail("model 3D panelu dodawania ma dopisek edycji")
+        self.shot(ed.win, "11_panel_edycji")
         key = "w_L" if case["extra"]["mode"] == "wiatr" else "s_L"
-        a.v[key].set("15")
-        self.recalc("edycja")
+        ed.v[key].set("15")
+        self.guard("recalc panelu edycji", ed.recalc)
+        self.pump(2)
         a.dirty = False
-        self.guard("Zakończ edycję", card.btn_edit.click)
+        self.guard("Zakończ edycję", pw.card_of(case).btn_edit.click)
         self.pump(3)
         if case["state"]["pola"].get(key) != "15" or not a.dirty:
             self.fail("Zakończ edycję nie zapisało zmiany w przypadku")
         if len(a.project["cases"]) != 2:
             self.fail("edycja dodała nowy przypadek zamiast zmienić istniejący")
-        if a.win.isVisible() or a.editing is not None or not pw.isVisible():
-            self.fail("Zakończ edycję nie zamknęło okna obciążeń normowych")
-        if a.v["s_L"].get() != "21" or not a.btn_add.isVisibleTo(a.win):
-            self.fail("po edycji formularz nie wrócił do stanu sprzed edycji (tryb dodawania)")
-        # edycja zakończona przyciskiem X
+        if ed.win.isVisible() or ed.editing is not None or (ed.win3d and ed.win3d.isVisible()):
+            self.fail("Zakończ edycję nie zamknęło panelu edycji (lub jego modelu 3D)")
+        if not a.win.isVisible() or a.v["s_L"].get() != "21":
+            self.fail("koniec edycji zmienił panel dodawania")
+        # druga edycja, zakończona przyciskiem X
         case = a.project["cases"][0]
         self.guard("edycja przypadku (2)", pw.card_of(case).btn_edit.click)
         self.pump(3)
-        a.v[key].set("16")
-        self.recalc("edycja (2)")
-        a.win.close()
+        ed.v[key].set("16")
+        self.guard("recalc panelu edycji (2)", ed.recalc)
+        ed.win.close()
         self.pump(3)
-        if a.win.isVisible() or a.editing is not None or case["state"]["pola"].get(key) != "16":
-            self.fail("X w trybie edycji nie zakończył edycji (albo nie zapisał zmiany)")
+        if ed.win.isVisible() or ed.editing is not None or case["state"]["pola"].get(key) != "16":
+            self.fail("X w panelu edycji nie zakończył edycji (albo nie zapisał zmiany)")
+        if pw.card_of(case).btn_edit.text() != "Edytuj":
+            self.fail("po zakończeniu edycji przycisk karty nie wrócił do „Edytuj”")
         # dokument do wydruku (bez drukarki)
         # Plik → Nazwa projektu…
         from PySide6.QtWidgets import QInputDialog
@@ -688,7 +705,7 @@ def main():
     r.run()
     if hasattr(r, "app"):                               # zamknięcie okien bez pytania o zapis
         r.app.dirty = False
-        for w in (r.app.win3d, r.app.pw, r.app.win):
+        for w in (r.app.win3d, r.app.pw, r.app.win) + ((r.app.editor.win, r.app.editor.win3d) if r.app.editor else ()):
             if w is not None:
                 w.hide()
         r.qapp.processEvents()
