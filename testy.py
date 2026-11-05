@@ -392,6 +392,11 @@ class Runner:
             self.fail("zmiana kolejności przypadków nie zadziałała")
         if [c.case["id"] for c in pw.cards] != [c["id"] for c in a.project["cases"]]:
             self.fail("kolejność kart różni się od kolejności przypadków")
+        # rozwinięte karty zostają rozwinięte po edycji / dodaniu przypadku
+        for c in pw.cards:
+            if c.body is None:
+                c.toggle()
+        self.pump(3)
         # Edytuj → osobny panel edycji (panel dodawania działa niezależnie) → Zakończ edycję
         a.open_codes()
         a.v["s_L"].set("21")                             # panel dodawania – ma zostać nietknięty
@@ -450,6 +455,17 @@ class Runner:
             self.fail("X w panelu edycji nie zakończył edycji (albo nie zapisał zmiany)")
         if pw.card_of(case).btn_edit.text() != "Edytuj":
             self.fail("po zakończeniu edycji przycisk karty nie wrócił do „Edytuj”")
+        if not all(c.body is not None for c in pw.cards):
+            self.fail("po zakończeniu edycji rozwinięte karty się zwinęły")
+        pw.cards[1].toggle()                             # ręcznie zwinięta – zostaje zwinięta
+        a.add_or_update()
+        self.pump(3)
+        if [c.body is not None for c in pw.cards] != [False, True, False]:
+            self.fail("po dodaniu przypadku zmienił się stan rozwinięcia kart: "
+                      f"{[c.body is not None for c in pw.cards]} zamiast [False, True, False]")
+        a.project["cases"].pop(0)                        # (nowy przypadek tylko do tego testu)
+        pw.rebuild()
+        self.pump(2)
         # dokument do wydruku (bez drukarki)
         # Plik → Informacje o projekcie…: nazwa i lokalizacja (wspólna dla wszystkich przypadków)
         warsaw = dict(lat=52.2297, lon=21.0122, alt=100.0, name="Warszawa")
@@ -548,8 +564,13 @@ class Runner:
                 self.fail(f"nie przeliczono wczytanego przypadku „{c['name']}”")
         # Otwórz plik projektu (open_path): bez znacznika zmian
         a.dirty = True
+        for c in a.pw.cards:
+            if c.body is None:
+                c.toggle()
         if not self.guard("open_path", a.open_path, path) or a.dirty or len(a.project["cases"]) != len(before["przypadki"]):
             self.fail("open_path nie wczytało projektu (lub zostawiło znacznik zmian)")
+        if any(c.body is not None for c in a.pw.cards):
+            self.fail("po otwarciu projektu lista nie jest zwinięta")
         self.count("testy pliku")
         self.ctx = "dwuklik na pliku .kayenn"
         self.guard("uruchomienie z plikiem", self.start_with_file, path, len(before["przypadki"]))

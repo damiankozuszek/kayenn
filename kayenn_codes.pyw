@@ -3848,7 +3848,12 @@ class ProjectWindow(QWidget):
         lay.addLayout(hb)
         self.cards = []
 
-    def rebuild(self):
+    def rebuild(self, keep_open=True):
+        """Karty od nowa (po dodaniu / edycji przypadku). keep_open – rozwinięte karty zostają rozwinięte
+        (i lista w tym samym miejscu); False – po otwarciu pliku / nowym projekcie: wszystko zwinięte."""
+        opened = {c.case.get("id") for c in self.cards if c.body is not None} if keep_open else set()
+        sb = self.scroll.verticalScrollBar()
+        pos = sb.value() if keep_open else 0
         for c in self.cards:
             self.list.lay.removeWidget(c)
             c.hide()
@@ -3858,7 +3863,12 @@ class ProjectWindow(QWidget):
             card = CaseCard(self, case)
             self.list.lay.insertWidget(self.list.lay.count() - 1, card)
             self.cards.append(card)
+            if case.get("id") in opened:
+                card.toggle()
         self.empty.setVisible(not self.cards)
+        if pos:
+            self.list.lay.activate()
+            QTimer.singleShot(0, lambda: sb.setValue(pos))
         self.list.update()                           # znak wodny pustego projektu
         self.update_buttons()
 
@@ -4714,7 +4724,7 @@ class App:
         self.set_editing(None)
         self.dirty = False
         self.update_title()
-        self.pw.rebuild()
+        self.pw.rebuild(keep_open=False)
         return True
 
     def file_save(self):
@@ -5711,7 +5721,7 @@ class App:
         self.project_path = None
         self._project_load(None)
         self.set_editing(None)
-        self.pw.rebuild()
+        self.pw.rebuild(keep_open=False)
         self.set_state({"pola": DEFAULTS, "opcje": dict(
             snow_type="Dwupołaciowy", wind_type="Dwuspadowy", snow_zone="1", snow_ce="Normalny",
             ct_mode=CT_MODES[0], guard=False, s_diff=False, s_obst=OBST_TYPES[0], s_exc=False,
