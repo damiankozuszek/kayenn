@@ -29,7 +29,7 @@ W programie użytkownik widzi tylko nazwę **KAYENN**. Poniższe nazwy są wewn�
 Funkcje: raport obliczeń, interaktywny model 3D z rozkładem obciążeń, mapa stref obciążenia
 z wyszukiwaniem działek, projekt z wieloma przypadkami (`.kayenn`), wydruk z podglądem.
 
-Obciążenia normowe otwiera przycisk **Otwórz obciążenia normowe** w oknie głównym – okno pojawia się nad
+Obciążenia normowe otwiera przycisk **Obciążenia normowe** w oknie głównym – okno pojawia się nad
 oknem głównym, które pozostaje otwarte.
 
 > Program jest narzędziem pomocniczym – wyniki należy weryfikować z normą.
