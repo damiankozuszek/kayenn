@@ -1,5 +1,7 @@
 # KAYENN
 
+<p align="center"><img src="identyfikacja/kayenn_napis.svg" alt="KAYENN" width="520"></p>
+
 Otwarty pakiet narzędzi do wyznaczania oddziaływań na konstrukcje budowlane.
 Nazwa pochodzi od **kN** – kiloniutona, jednostki, w której konstruktor liczy obciążenia
 (po angielsku czytanego „kej-en”).
@@ -24,6 +26,18 @@ z wyszukiwaniem działek, projekt z wieloma przypadkami (`.kayenn`), wydruk z po
 > Program jest narzędziem pomocniczym – wyniki należy weryfikować z normą.
 
 Plany rozwoju: [ROADMAP.md](ROADMAP.md).
+
+## Identyfikacja wizualna
+
+| Znak | Plik |
+|---|---|
+| Napis (znak słowny) | [`identyfikacja/kayenn_napis.svg`](identyfikacja/kayenn_napis.svg) |
+| Ikona programu – litera K | [`identyfikacja/kayenn_ikona.svg`](identyfikacja/kayenn_ikona.svg), [`kayenn.ico`](identyfikacja/kayenn.ico) |
+
+<img src="identyfikacja/kayenn_ikona_64.png" alt="Ikona KAYENN" width="64">
+
+Pismo bez łuków, pochylone o 25°, żółte wypełnienie (#FFD100), gruba czarna obwódka i lity czarny cień
+w lewo w dół. Wszystkie pliki generuje `py identyfikacja/identyfikacja.py` (wymaga PySide6).
 
 ## Uruchomienie
 

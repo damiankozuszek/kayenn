@@ -2711,7 +2711,7 @@ def _no_qt():
 
 try:
     from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, QObject, Signal, QEvent
-    from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QFontMetricsF, QKeySequence, QPainter,
+    from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QFontMetricsF, QIcon, QKeySequence, QPainter,
                                QPalette, QPen, QPolygonF)
     from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFrame,
                                    QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
@@ -2723,6 +2723,28 @@ except ImportError:
     raise
 
 AL_R = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+
+# identyfikacja wizualna (folder identyfikacja/, pliki generuje identyfikacja/identyfikacja.py)
+ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "identyfikacja")
+ICON_FILE = os.path.join(ASSETS, "kayenn.ico")
+WORDMARK_FILE = os.path.join(ASSETS, "kayenn_napis.svg")
+_wordmark_cache = []
+
+
+def wordmark_renderer():
+    """Napis KAYENN (QSvgRenderer) albo None, gdy brak pliku lub modułu QtSvg."""
+    if not _wordmark_cache:
+        r = None
+        try:
+            from PySide6.QtSvg import QSvgRenderer
+            if os.path.exists(WORDMARK_FILE):
+                r = QSvgRenderer(WORDMARK_FILE)
+                if not r.isValid():
+                    r = None
+        except ImportError:
+            pass
+        _wordmark_cache.append(r)
+    return _wordmark_cache[0]
 AL_L = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 STYLE = f"""
 QMainWindow, QDialog, QWidget#page, QWidget#win3d {{ background: {BG}; }}
@@ -3775,6 +3797,43 @@ class CaseList(QWidget):
         self.lay.insertWidget(idx, card)
         self.pw.place_case(card, idx)
 
+    def paintEvent(self, ev):
+        """Pusty projekt: znak wodny z nazwą programu w prawym dolnym rogu."""
+        if getattr(self.pw, "cards", None):
+            return
+        r = wordmark_renderer()
+        if r is None:
+            return
+        vb = r.viewBoxF()
+        w = min(300.0, self.width() * 0.45)
+        h = w * vb.height() / vb.width()
+        m, th = 24, 22
+        dpr = self.devicePixelRatioF()
+        key = (round(w), dpr)
+        if getattr(self, "_wm_key", None) != key:    # napis najpierw do obrazu – inaczej warstwy cienia
+            from PySide6.QtGui import QImage          # nakładałyby przezroczystość jedna na drugą
+            img = QImage(int(w * dpr) + 1, int(h * dpr) + 1, QImage.Format.Format_ARGB32_Premultiplied)
+            img.fill(Qt.GlobalColor.transparent)
+            q = QPainter(img)
+            q.setRenderHint(QPainter.RenderHint.Antialiasing)
+            r.render(q, QRectF(0, 0, w * dpr, h * dpr))
+            q.end()
+            img.setDevicePixelRatio(dpr)
+            self._wm_key, self._wm_img = key, img
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        p.setOpacity(0.14)
+        p.drawImage(QPointF(self.width() - w - m, self.height() - h - th - m), self._wm_img)
+        p.setOpacity(0.4)
+        f = QFont(FONT, 13)
+        f.setBold(True)
+        f.setItalic(True)
+        p.setFont(f)
+        p.setPen(QColor(MUTED))
+        p.drawText(QRectF(0, self.height() - th - m, self.width() - m, th),
+                   Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, "Manager")
+        p.end()
+
 
 class ProjectWindow(QWidget):
     """Panel projektu: menu Plik (nowy, otwórz, zapisz), lista przypadków (najmłodszy na górze),
@@ -3830,6 +3889,7 @@ class ProjectWindow(QWidget):
             self.list.lay.insertWidget(self.list.lay.count() - 1, card)
             self.cards.append(card)
         self.empty.setVisible(not self.cards)
+        self.list.update()                           # znak wodny pustego projektu
 
     def card_of(self, case):
         return next((c for c in self.cards if c.case is case), None)
@@ -3878,6 +3938,7 @@ class ProjectWindow(QWidget):
         if self.app.editing is case:
             self.app.set_editing(None)
         self.empty.setVisible(not self.cards)
+        self.list.update()
         self.app.project_changed()
 
     def closeEvent(self, e):
@@ -6773,6 +6834,8 @@ def register_file_type():
         want = {rf"Software\Classes\{PROJECT_EXT}": prog,
                 rf"Software\Classes\{prog}": "Projekt KAYENN",
                 rf"Software\Classes\{prog}\shell\open\command": cmd}
+        if os.path.exists(ICON_FILE):
+            want[rf"Software\Classes\{prog}\DefaultIcon"] = f'"{ICON_FILE}",0'
         changed = False
         for key, val in want.items():
             try:
@@ -6796,7 +6859,15 @@ def main():
         import PySide6.QtWebEngineWidgets  # noqa: F401
     except ImportError:
         pass
+    if sys.platform == "win32":
+        try:   # własny identyfikator – pasek zadań pokazuje ikonę KAYENN zamiast ikony Pythona
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("KAYENN.Codes")
+        except Exception:
+            pass
     qapp = QApplication(sys.argv)
+    if os.path.exists(ICON_FILE):
+        qapp.setWindowIcon(QIcon(ICON_FILE))
     qapp.setStyle("Fusion")
     pal = qapp.palette()
     R = QPalette.ColorRole
