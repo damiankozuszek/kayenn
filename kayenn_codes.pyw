@@ -4028,7 +4028,7 @@ class ProjectWindow(QWidget):
         app.file_menu(mb, project=True)
         lay.setMenuBar(mb)
         self.menu_bar = mb
-        self.empty = QLabel("Projekt nie zawiera przypadków. Otwórz obciążenia normowe i dodaj przypadek "
+        self.empty = QLabel("Projekt nie zawiera przypadków. Kliknij „Obciążenia normowe” i dodaj przypadek "
                             "przyciskiem „Dodaj do projektu”.")
         self.empty.setObjectName("muted")
         lay.addWidget(self.empty)
@@ -4042,7 +4042,7 @@ class ProjectWindow(QWidget):
         sc.verticalScrollBar().rangeChanged.connect(self._apply_hold)
         lay.addWidget(sc, 1)
         hb = QHBoxLayout()
-        b1 = QPushButton("Otwórz obciążenia normowe")
+        b1 = QPushButton("Obciążenia normowe")
         b1.setObjectName("big")
         self.btn_codes = b1
         b1.clicked.connect(lambda checked=False: self.app.toggle_codes())
@@ -4132,7 +4132,7 @@ class ProjectWindow(QWidget):
     def update_buttons(self):
         """Napisy przycisków zależne od okna obciążeń normowych i edytowanego przypadku."""
         app = self.app
-        self.btn_codes.setText("Zamknij obciążenia normowe" if app.win.isVisible() else "Otwórz obciążenia normowe")
+        self.btn_codes.setText("Zamknij obciążenia normowe" if app.win.isVisible() else "Obciążenia normowe")
         ed = app.edited_case()
         for c in self.cards:
             c.btn_edit.setText("Zakończ edycję" if ed is c.case else "Edytuj")
@@ -4583,7 +4583,7 @@ class App:
         self.status.setObjectName("status")
         self.status.setWordWrap(True)
         root.addWidget(self.status)
-        self.btn3d = QPushButton("Otwórz model 3D")
+        self.btn3d = QPushButton("Model 3D")
         self.btn3d.setObjectName("big")
         self.btn3d.clicked.connect(lambda checked=False: self.toggle_3d())
         self.btn_add = QPushButton("Dodaj do projektu")
@@ -5652,7 +5652,7 @@ class App:
         self._3d_geom = self.win3d.saveGeometry()
         self.close_editor()
         self.win3d.hide()
-        self.btn3d.setText("Otwórz model 3D")
+        self.btn3d.setText("Model 3D")
 
     def _build_3d(self):
         w = Win3D(self)
@@ -5699,8 +5699,13 @@ class App:
         b = QPushButton("Widok domyślny")
         b.clicked.connect(lambda checked=False: self.reset_view())
         bar2.addWidget(b)
-        lay.addLayout(bar)
-        lay.addLayout(bar2)
+        self.tb_box = QWidget()                     # cały pasek – ukryty, gdy brak modelu (zakładka Użytkowe)
+        tbl = QVBoxLayout(self.tb_box)
+        tbl.setContentsMargins(0, 0, 0, 0)
+        tbl.setSpacing(6)
+        tbl.addLayout(bar)
+        tbl.addLayout(bar2)
+        lay.addWidget(self.tb_box)
         self.cv = Canvas3D(self)
         lay.addWidget(self.cv, 1)
         self._tb_mode = None
@@ -6820,16 +6825,18 @@ class App:
             self.close_editor()
             if self.win3d is not None:
                 self.win3d.setWindowTitle("Model 3D" + self.edit_suffix())
-            cv.create_text(W / 2, Hc / 2 - 10, text="Brak modelu 3D dla tego przypadku", font=(FONT, 13, "bold"),
+            if getattr(self, "tb_box", None) is not None:
+                self.tb_box.setVisible(False)
+            cv.create_text(W / 2, Hc / 2, text="Brak modelu 3D dla tego przypadku", font=(FONT, 13, "bold"),
                            fill=MUTED)
-            cv.create_text(W / 2, Hc / 2 + 16, text="Obciążenia użytkowe nie mają modelu 3D – model śniegu "
-                           "lub wiatru wróci po przejściu na jego zakładkę.", font=(FONT, 9), fill=MUTED)
             cv.update()
             return
         mode = self.mode3d.get()
         if (self.wgeo if mode == "wiatr" else self.sgeo) is None:
             return
         if not ctx:
+            if getattr(self, "tb_box", None) is not None and not self.tb_box.isVisible():
+                self.tb_box.setVisible(True)
             self.update_toolbar(mode)
             self._title3d()
             self.close_editor()
@@ -7294,8 +7301,11 @@ class App:
         xs, nx = (0.0, -1) if facing((-1, 0, 0)) else (L, 1)
         rz = g.main.rz if snow else g.rz
         main = g.main if snow else g.shape
-        # ---- poziome, na gruncie: długość L (ogólny) wzdłuż ściany podłużnej
+        # ---- poziome, na gruncie: długość L (ogólny) wzdłuż ściany podłużnej; przybudówka po tej stronie –
+        # jej szerokość (cząstkowy) bliżej, L dalej
         kL = first(("y", ny)) * N
+        if snow and g.annex and ((g.annex.g["ya"] + g.annex.g["yb"]) / 2 < g.B / 2) == (ny < 0):
+            kL += N
         self._dchain(cv, P, lambda u: (u, yf, 0.0), lambda u: (u, yL + ny * kL, 0.0), [(0.0, L, "", pf + "L")],
                      z0_, col, lab_t=0.5 if yL == yf else 0.2)      # opis z dala od wymiarów przybudówki
         # ---- poziome, na gruncie, przy ścianie szczytowej: szerokości
@@ -7319,12 +7329,13 @@ class App:
             lv += 1
         kB = lv * N
         self._dchain(cv, P, lambda u: (xs, u, 0.0), lambda u: (xs + nx * kB, u, 0.0), overall, z0_, col)
-        # ---- pionowe, w płaszczyźnie ściany szczytowej, po dalszej stronie budynku: wysokości
-        yb, nb = (y1, 1) if yf == y0 else (y0, -1)
-        if snow and g.upper and yb == y0:
-            ze, hk = g.upper.rz(xs, y0 + 1e-9), None
+        # ---- pionowe: wysokości po drugiej stronie budynku – w płaszczyźnie dalszej ściany szczytowej, przy narożniku
+        # od strony obserwatora, odsunięte na zewnątrz (nie zasłaniają budynku)
+        xF, nF = (L, 1) if xs == 0.0 else (0.0, -1)
+        if snow and g.upper and yf == y0:
+            ze, hk = g.upper.rz(xF, y0 + 1e-9), None
         else:
-            ze = rz(xs, yb)
+            ze = rz(xF, yf)
             hk = pf + "H" if abs(ze - g.H) < 1e-6 else None
         hparts = [(0.0, ze, "", hk)]
         if not snow and g.kind == "flat" and g.hp > 0:
@@ -7335,28 +7346,26 @@ class App:
         if isinstance(main, Prism):
             ytop = max(main.prof, key=lambda q: q[1])[0] + main.oy
             if main.h_top > ze + 1e-3:
-                top_pt = (xs, ytop, main.h_top)
+                top_pt = (xF, ytop, main.h_top)
                 if g.kind == "vault":
                     hparts.append((ze, main.h_top, "", pf + "f"))
         elif isinstance(main, Hip):
-            xr = main.run if xs == 0 else L - main.run
+            xr = main.run if xF == 0 else L - main.run
             top_pt = (xr, g.B / 2, main.h_top)
         htot = top_pt[2] if top_pt else (hparts[-1][1] if hparts else 0.0)
 
         def hbase(u):
             if top_pt and abs(u - top_pt[2]) < 1e-9:
                 return top_pt
-            return (xs, yb, u)
-        if snow and g.upper and yb == y0:            # wysokości wyższej budowli – niewidocznej od strony dachu niższego
-            hparts, top_pt = [], None
+            return (xF, yf, u)
         if not hparts:
             pass
         elif len(hparts) > 1 or top_pt:                           # cząstkowe – bliżej budynku
-            self._dchain(cv, P, hbase, lambda u: (xs, yb + nb * N, u), hparts, z0_, col)
-            self._dchain(cv, P, hbase, lambda u: (xs, yb + nb * 2 * N, u), [(0.0, htot, "")], z0_, col,
+            self._dchain(cv, P, hbase, lambda u: (xF + nF * N, yf, u), hparts, z0_, col)
+            self._dchain(cv, P, hbase, lambda u: (xF + nF * 2 * N, yf, u), [(0.0, htot, "")], z0_, col,
                          lab_t=0.78)                            # opis wyżej niż opisy cząstkowe
         else:                                                   # jedna wysokość – pierwszy poziom
-            self._dchain(cv, P, hbase, lambda u: (xs, yb + nb * N, u), hparts, z0_, col)
+            self._dchain(cv, P, hbase, lambda u: (xF + nF * N, yf, u), hparts, z0_, col)
         # ---- kąty połaci
         if isinstance(main, Prism):
             seen = []
@@ -7399,25 +7408,27 @@ class App:
             self._angle_label(cv, P, (xm, my, up.rz(xm, my) + 0.01 * size), f"{f2(g.p['aup'], 1)}°", "s_aup")
         # ---- elementy dodatkowe (przy swoich krawędziach)
         if snow and g.upper and not facing((0, -1, 0)):          # uskok widoczny tylko od strony dachu niższego
-            self._dchain(cv, P, lambda u: (xs, 0.0, u), lambda u: (xs, N, u),
+            self._dchain(cv, P, lambda u: (xF, 0.0, u), lambda u: (xF + nF * N, 0.0, u),
                          [(g.H, g.H + g.p["dh"], "", "s_dh")], z0_, col)
         if snow and g.kind == "obst" and g.p["otype"] == OBST_TYPES[1]:
-            yo = g.p["yob"] + 0.25
-            self._dchain(cv, P, lambda u: (xs, yo, u), lambda u: (xs, yo + N, u),
+            yo = g.p["yob"] + 0.25 if yf == y0 else g.p["yob"]
+            self._dchain(cv, P, lambda u: (xF, yo, u), lambda u: (xF + nF * N, yo, u),
                          [(g.H, g.H + g.p["hob"], "", "s_hob")], z0_, col)
         if snow and getattr(g, "exc", None):
             self.draw_exc_dims(cv, g, P, facing, N, xs, nx)
 
     def draw_exc_dims(self, cv, g, P, facing, N, xs, nx):
         """Wymiary elementów dodatkowych dla zasp wyjątkowych (klikalne): przybudówka, zadaszenie,
-        przeszkody i attyki. Odsunięcie: pola obciążenia N, wymiary elementu 2N."""
+        przeszkody i attyki. Jeden moduł N (jak wymiary budynku); wymiary po dalszej stronie elementu
+        (wysokości i głębokości – przy dalszym końcu), przybudówka i daszek – tylko od ich strony budynku."""
         col, z0_ = BDIM_COL, (0, 0, 0)
-        k2 = 2 * N
-        sx = lambda a, b: (a, -1) if facing((-1, 0, 0)) else (b, 1)
+        k2 = N
+        sx = lambda a, b: (a, -1) if facing((-1, 0, 0)) else (b, 1)      # koniec bliższy (x)
+        sxf = lambda a, b: (b, 1) if facing((-1, 0, 0)) else (a, -1)     # koniec dalszy (x)
         side_ = (-1 if (g.annex.g["ya"] + g.annex.g["yb"]) / 2 < g.B / 2 else 1) if g.annex else 0
         if g.annex and facing((0, side_, 0)):       # przybudówka – wymiary tylko, gdy jej strona jest widoczna
             a = g.annex.g
-            x_, n_ = sx(a["x0"], a["x1"])
+            x_, n_ = sxf(a["x0"], a["x1"])                # głębokość i różnica wysokości – po dalszej stronie
             self._dchain(cv, P, lambda u: (u, a["ya"], 0.0), lambda u: (u, a["ya"] - k2, 0.0),
                          [(a["x0"], a["x1"], "", "s_xw")], z0_, col)
             self._dchain(cv, P, lambda u: (x_, u, 0.0), lambda u: (x_ + n_ * k2, u, 0.0),
@@ -7449,17 +7460,18 @@ class App:
                          [(o["x0"], o["x1"], "", "s_fw")], z0_, col)
             self._dchain(cv, P, lambda u: (x_, u, zt), lambda u: (x_ + n_ * k2, u, zt),
                          [(o["y0"], o["y1"], "", "s_fd")], z0_, col)
-            xn, sn = (o["x0"], -1) if facing((-1, 0, 0)) else (o["x1"], 1)     # wysokość – narożnik widoczny
+            xn, sn = (o["x1"], 1) if facing((-1, 0, 0)) else (o["x0"], -1)     # wysokość – narożnik dalszy (x)
             yn = o["y0"] if facing((0, -1, 0)) else o["y1"]
             self._dchain(cv, P, lambda u: (xn, yn, u), lambda u: (xn + sn * N, yn, u),
                          [(g.H, zt, "", "s_fh")], z0_, col)
         pr = g.main
-        for i, (ye, dr) in enumerate(g.eave_par[:1]):          # attyka przy okapie – wysokość
+        xF, nF = (g.L, 1) if xs == 0.0 else (0.0, -1)            # dalszy szczyt
+        for i, (ye, dr) in enumerate(g.eave_par[:1]):          # attyka przy okapie – wysokość (dalszy szczyt)
             z0 = pr.rz(0, ye)
-            self._dchain(cv, P, lambda u: (xs, ye, u), lambda u: (xs + nx * N, ye, u),
+            self._dchain(cv, P, lambda u: (xF, ye, u), lambda u: (xF + nF * N, ye, u),
                          [(z0, z0 + g.exc["pah"], "", "s_pah")], z0_, col)
-        for gx, dr in g.gable_par[:1] if not g.gable_par else \
-                [q for q in g.gable_par if (q[0] == 0.0) == facing((-1, 0, 0))][:1]:   # attyka szczytowa – wysokość
+        far_gp = [q for q in g.gable_par if (q[0] == 0.0) != facing((-1, 0, 0))]
+        for gx, dr in (far_gp or g.gable_par)[:1]:              # attyka szczytowa – wysokość (dalsza)
             ytop = max(pr.prof, key=lambda q: q[1])[0]
             zr = pr.rz(gx, ytop)
             self._dchain(cv, P, lambda u: (gx, ytop, u), lambda u: (gx - dr * N, ytop, u),
@@ -7472,7 +7484,7 @@ class App:
             self._dchain(cv, P, lambda u: (xs, u, pr.rz(xs, u)), lambda u: (xs + nx * ko, u, 0.0),
                          [(0.0, yo, "", "s_poy")], z0_, col, via=lambda u: (xs, u, 0.0))
             ox0, ox1 = g.obst_x
-            xe_, ne_ = (ox0, -1) if facing((-1, 0, 0)) else (ox1, 1)     # koniec przeszkody od strony obserwatora
+            xe_, ne_ = (ox1, 1) if facing((-1, 0, 0)) else (ox0, -1)     # koniec przeszkody dalszy
             yb_ = yo if za >= zb else yo + TW_OBST
             self._dchain(cv, P, lambda u: (xe_, yb_, u), lambda u: (xe_ + ne_ * N, yb_, u),
                          [(max(za, zb), zt, "", "s_poh")], z0_, col)

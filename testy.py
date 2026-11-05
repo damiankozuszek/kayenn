@@ -394,7 +394,7 @@ class Runner:
         if a.btn3d.width() != a.btn_add.width():
             self.fail(f"przyciski różnej szerokości: {a.btn3d.width()} / {a.btn_add.width()}")
         a.hide_3d()
-        if a.btn3d.text() != "Otwórz model 3D":
+        if a.btn3d.text() != "Model 3D":
             self.fail(f"przycisk po zamknięciu modelu 3D: „{a.btn3d.text()}”")
         a.show_3d()
         if not a.pw.isVisible() or not a.win.isVisible():
@@ -444,7 +444,7 @@ class Runner:
         self.guard("Zamknij obciążenia normowe", pw.btn_codes.click)
         self.pump(2)
         if a.win.isVisible() or not pw.isVisible() or (a.win3d and a.win3d.isVisible()) or \
-                pw.btn_codes.text() != "Otwórz obciążenia normowe":
+                pw.btn_codes.text() != "Obciążenia normowe":
             self.fail("„Zamknij obciążenia normowe” nie zamknęło okna (albo zamknęło okno główne)")
         self.guard("Otwórz obciążenia normowe", pw.btn_codes.click)
         self.pump(2)
@@ -452,7 +452,7 @@ class Runner:
             self.fail("„Otwórz obciążenia normowe” nie otworzyło okna")
         a.win.close()                                    # X – zamyka tylko okno obciążeń normowych
         self.pump(2)
-        if a.win.isVisible() or not pw.isVisible() or pw.btn_codes.text() != "Otwórz obciążenia normowe":
+        if a.win.isVisible() or not pw.isVisible() or pw.btn_codes.text() != "Obciążenia normowe":
             self.fail("X w oknie obciążeń normowych nie zamknął samego okna")
         # zamknięcie okna głównego = koniec programu, z pytaniem o zapis; „Anuluj” – okno zostaje
         self.answer, q0 = B.Cancel, self.questions
@@ -529,7 +529,7 @@ class Runner:
         if pw.card_of(case).btn_edit.text() != "Zakończ edycję":
             self.fail(f"przycisk karty w edycji: „{pw.card_of(case).btn_edit.text()}” zamiast „Zakończ edycję”")
         bottom = [b.text() for b in ed.win.findChildren(QPushButton) if b.objectName() == "big" and b.isVisible()]
-        if len(bottom) != 1 or "model 3D" not in bottom[0]:
+        if len(bottom) != 1 or "Model 3D" not in bottom[0]:
             self.fail(f"w panelu edycji na dole powinien być tylko przycisk modelu 3D: {bottom}")
         bottom = [b.text() for b in a.win.findChildren(QPushButton) if b.objectName() == "big" and b.isVisible()]
         if len(bottom) != 2:
