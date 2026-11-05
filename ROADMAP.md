@@ -1,17 +1,17 @@
 # KAYENN – plan rozwoju (Road Map)
 
-Kierunki rozwoju pakietu KAYENN (od kN – kiloniutona, czytanego po angielsku „kej-en”), uporządkowane
+Kierunki rozwoju programu KAYENN (od kN – kiloniutona, czytanego po angielsku „kej-en”), uporządkowane
 od zadań możliwych do realizacji w najbliższym czasie do planów długoterminowych. Kolejność etapów nie jest
 sztywna – poszczególne zadania mogą być realizowane równolegle.
 
-Moduły pakietu:
+KAYENN to jeden program – docelowo do obliczeń metodą elementów skończonych (MES). Użytkownik widzi tylko
+nazwę KAYENN; podział na części poniżej jest wewnętrzny i służy rozwojowi kodu:
 
-| Moduł | Zakres |
+| Część | Zakres |
 |---|---|
-| **KAYENN Manager** | projekt, raport obliczeniowy, wydruk – moduł podstawowy |
+| **KAYENN Main** | okno główne: projekt, raport obliczeniowy, wydruk; platforma obliczeń MES |
 | **KAYENN Codes** | obciążenia wg norm: śnieg, wiatr, obciążenia użytkowe |
 | **KAYENN Lab** | obciążenia wyznaczane metodami inżynierskimi |
-| **KAYENN FEM** | obliczenia metodą elementów skończonych (MES) |
 
 ---
 
@@ -26,10 +26,10 @@ Moduły pakietu:
 - Upublicznienie repozytorium.
 
 ### 1.2. Nazwa i identyfikacja wizualna
-- ~~Nadanie projektowi rozpoznawalnej nazwy~~ – **KAYENN**; nazwy modułów: KAYENN Manager,
-  KAYENN Codes, KAYENN Lab, KAYENN FEM.
+- ~~Nadanie projektowi rozpoznawalnej nazwy~~ – **KAYENN** (nazwy wewnętrzne: KAYENN Main, KAYENN Codes,
+  KAYENN Lab – niewidoczne dla użytkownika).
 - Sprawdzenie dostępności nazwy w bazach znaków towarowych (EUIPO, UPRP) i domeny projektu.
-- Opracowanie znaku graficznego (logo, ikona aplikacji).
+- ~~Opracowanie znaku graficznego~~ – napis KAYENN i ikona (litera K), folder `identyfikacja/`.
 - Najlepiej przed szerszym udostępnieniem – późniejsza zmiana nazwy utrudnia rozpoznawalność
   i wymaga zmian w repozytoriach, pakietach i sklepach z aplikacjami.
 
@@ -59,24 +59,17 @@ uruchomieniu w każdym z nich.
 
 ---
 
-## Etap 3. Wydzielenie modułu KAYENN Manager
+## Etap 3. KAYENN Main – okno główne programu
 
-Rozdzielenie obecnego programu na dwie niezależne aplikacje współpracujące na wspólnym pliku projektu.
-
-**KAYENN Manager** – moduł podstawowy całego pakietu:
-- przechowuje informacje o projekcie i zarządza raportem obliczeniowym (lista przypadków, kolejność, nazwy),
-- odpowiada za wydruk raportu,
-- uruchomiony samodzielnie (z menu Start, skrótu itp.) otwiera pustą listę z możliwością nadania nazwy
-  projektowi,
-- pozwala otworzyć moduł KAYENN Codes i kontynuować w nim pracę, a docelowo – uruchamiać pozostałe
-  moduły.
-
-**Moduły narzędziowe** (KAYENN Codes i kolejne) służą do obliczeń, których wyniki zapisywane są
-w KAYENN Manager.
+Jeden program (bez rozdzielania na niezależne aplikacje). **KAYENN Main** to okno główne:
+- ~~zawsze pierwsze okno po uruchomieniu (z menu Start i z pliku projektu); pusty projekt ze znakiem wodnym~~,
+- ~~przechowuje projekt i zarządza raportem (lista przypadków, kolejność, nazwy), odpowiada za wydruk~~,
+- ~~otwiera obciążenia normowe (KAYENN Codes) w oknie nad sobą; edycja przypadku w tym samym oknie~~,
+- docelowo – platforma obliczeń MES, do której kolejne części (Codes, Lab) dokładają elementy projektu.
 
 Zadania:
-- zdefiniowanie wspólnego, udokumentowanego formatu pliku projektu, obsługującego wpisy z różnych modułów,
-- mechanizm komunikacji między modułami (otwarcie przypadku do edycji, przekazanie wyników),
+- zdefiniowanie wspólnego, udokumentowanego formatu pliku projektu, obsługującego wpisy z różnych części
+  programu (obciążenia normowe, obciążenia inżynierskie, model MES),
 
 ---
 
@@ -87,10 +80,11 @@ Zadania:
 
 ---
 
-## Etap 5. Moduł KAYENN Lab
+## Etap 5. KAYENN Lab – obciążenia inżynierskie
 
-Nowy moduł z narzędziami do wyznaczania obciążeń metodami inżynierskimi – jako uzupełnienie modułu
-KAYENN Codes, który w całości odwzorowuje podejście normowe.
+Nowa część programu z narzędziami do wyznaczania obciążeń metodami inżynierskimi – jako uzupełnienie
+KAYENN Codes, które w całości odwzorowuje podejście normowe. Otwierana z okna głównego, tak jak obciążenia
+normowe.
 
 Pierwsze narzędzie – **kalkulator obciążeń stałych**:
 - wyznaczanie obciążenia od układu warstw (np. posadzki, stropu, dachu) na podstawie materiałów i grubości,
@@ -114,9 +108,9 @@ Kolejne narzędzia będą dodawane w miarę potrzeb użytkowników.
 
 ## Etap 7. Kierunki długoterminowe
 
-### 7.1. Moduł KAYENN FEM
-- Moduł obliczeń metodą elementów skończonych, rozwijany jako kolejna gałąź pakietu, obok modułów
-  obciążeń i współpracujący ze KAYENN Manager.
+### 7.1. Obliczenia MES w KAYENN Main
+- Obliczenia metodą elementów skończonych rozwijane bezpośrednio w oknie głównym (KAYENN Main) – na modelu
+  zbudowanym z elementów dodanych przez pozostałe części programu (obciążenia normowe, inżynierskie).
 
 ### 7.2. Profesjonalna dystrybucja
 Jeśli wsparcie społeczności pokryje stałe koszty i pojawi się takie zapotrzebowanie, projekt będzie

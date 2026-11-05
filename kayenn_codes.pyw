@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-KAYENN Codes – śnieg i wiatr
-============================
-Obciążenie śniegiem dachów wg PN-EN 1991-1-3 (+AC, Ap1, Załącznik krajowy)
-Oddziaływanie wiatru na budynki i wiaty wg PN-EN 1991-1-4:2008 (+AC, Ap1..Ap3, Załącznik krajowy)
+KAYENN
+======
+Program dla konstruktorów (od kN – kiloniuton, czytane po angielsku „kej-en”).
 
-Moduł pakietu KAYENN (od kN – kiloniuton, czytane po angielsku „kej-en”).
+Nazwy wewnętrzne (użytkownik ich nie widzi):
+  KAYENN Main  – okno główne: projekt, lista przypadków, wydruk (ProjectWindow)
+  KAYENN Codes – obciążenia normowe, okno nad oknem głównym (MainWindow):
+                 śnieg wg PN-EN 1991-1-3 (+AC, Ap1, NA), wiatr wg PN-EN 1991-1-4:2008 (+AC, Ap1..Ap3, NA)
 
 Uruchomienie: dwuklik (Windows) lub  python3 kayenn_codes.pyw
 Wymaga Pythona 3 i biblioteki PySide6:  py -m pip install PySide6
@@ -2584,8 +2586,8 @@ DEFAULTS = dict(A="210", s_L="12", s_B="10", s_H="5", s_alpha="25", s_alpha2="25
 PROJECT_EXT = ".kayenn"
 
 ASSUMPTIONS = """\
-KAYENN CODES – ZAŁOŻENIA OBLICZEŃ
-=================================
+KAYENN – ZAŁOŻENIA OBLICZEŃ
+===========================
 
 ŚNIEG – PN-EN 1991-1-3:2005 z poprawkami AC:2009, Ap1:2010
 • s = μᵢ·Cₑ·Cₜ·sₖ (5.2); obciążenie działa pionowo na rzut poziomy dachu.
@@ -3223,15 +3225,19 @@ class EditorLine(QLineEdit):
 
 
 class MainWindow(QMainWindow):
+    """Okno obciążeń normowych (wewnętrznie: KAYENN Codes) – nad oknem głównym. X zamyka tylko to okno
+    (w trybie edycji przypadku – kończy edycję)."""
+
     def __init__(self, app):
         super().__init__()
         self.app = app
 
     def closeEvent(self, e):
-        if self.app.quit_app():
+        if getattr(self.app, "_quitting", False):
             e.accept()
-        else:
-            e.ignore()
+            return
+        e.ignore()
+        self.app.close_codes()
 
 
 class _Relay(QObject):
@@ -3503,6 +3509,7 @@ class CaseCard(QFrame):
         b = QPushButton("Edytuj")
         b.clicked.connect(lambda checked=False: self.pw.edit_case(self.case))
         hd.addWidget(b)
+        self.btn_edit = b
         b = QPushButton("Usuń")
         b.clicked.connect(lambda checked=False: self.pw.delete_case(self.case))
         hd.addWidget(b)
@@ -3527,7 +3534,7 @@ class CaseCard(QFrame):
         from PySide6.QtWidgets import QMenu
         m = QMenu(self)
         a1 = m.addAction("Zmień nazwę")
-        a2 = m.addAction("Edytuj")
+        a2 = m.addAction("Zakończ edycję" if self.app.editing is self.case else "Edytuj")
         a3 = m.addAction("Usuń")
         act = m.exec(self.mapToGlobal(pos))
         if act is a1:
@@ -3599,29 +3606,7 @@ class CaseCard(QFrame):
         calc = self.case["_calc"]
         ex = self.case["extra"]
         tg = ex.setdefault("toggles", {})
-        if calc["mode"] != "wiatr":
-            bar.addWidget(QLabel("Przypadek śniegu"))
-            cb = QComboBox()
-            cb.addItems([c["name"] for c in calc["snow"]["cases"]])
-            cb.setCurrentText(calc["snow_case"])
-            cb.currentTextChanged.connect(lambda t: self.set_option("snow_case", t))
-            bar.addWidget(cb)
-        else:
-            op = self.case["state"].get("opcje", {})
-            bar.addWidget(QLabel("Kierunek θ"))
-            cb = QComboBox()
-            cb.addItems([f"{t}°" for t in wind_thetas(calc["wgeo"])])
-            cb.setCurrentText(op.get("theta", "0°"))
-            cb.currentTextChanged.connect(lambda t: self.set_option("theta", t))
-            bar.addWidget(cb)
-            vl = [l for l, _ in wind_variants(calc["wgeo"], calc["wind"]["theta"])]
-            if vl:
-                bar.addWidget(QLabel("Wariant"))
-                cb = QComboBox()
-                cb.addItems(vl)
-                cb.setCurrentText(op.get("variant", vl[0]))
-                cb.currentTextChanged.connect(lambda t: self.set_option("variant", t))
-                bar.addWidget(cb)
+        # tu tylko widok i wymiary budynku (klik na wymiarze w podglądzie); pozostałe zmiany – przycisk Edytuj
         for key, lab in (("labels3d", "Etykiety"), ("arrows3d", "Strzałki"), ("dims3d", "Wymiary pól"),
                          ("bdims3d", "Wymiary budynku")):
             if key == "arrows3d" and calc["mode"] != "wiatr":
@@ -3669,15 +3654,6 @@ class CaseCard(QFrame):
     def view_changed(self, view):
         self.case["extra"]["view"] = dict(view)
         self.app.project_changed()
-
-    def set_option(self, key, val):
-        if key == "snow_case":
-            self.case["extra"]["snow_case"] = val
-        else:
-            self.case["state"].setdefault("opcje", {})[key] = val
-        self.app.recapture_case(self.case)
-        self.app.project_changed()
-        self.refresh()
 
     def edit_value(self, key):
         """Zmiana wymiaru klikniętego na podglądzie – przeliczenie przypadku."""
@@ -3798,7 +3774,7 @@ class CaseList(QWidget):
         self.pw.place_case(card, idx)
 
     def paintEvent(self, ev):
-        """Pusty projekt: znak wodny z nazwą programu w prawym dolnym rogu."""
+        """Pusty projekt: znak wodny – napis KAYENN w prawym dolnym rogu."""
         if getattr(self.pw, "cards", None):
             return
         r = wordmark_renderer()
@@ -3807,7 +3783,7 @@ class CaseList(QWidget):
         vb = r.viewBoxF()
         w = min(300.0, self.width() * 0.45)
         h = w * vb.height() / vb.width()
-        m, th = 24, 22
+        m, th = 24, 0
         dpr = self.devicePixelRatioF()
         key = (round(w), dpr)
         if getattr(self, "_wm_key", None) != key:    # napis najpierw do obrazu – inaczej warstwy cienia
@@ -3824,26 +3800,19 @@ class CaseList(QWidget):
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         p.setOpacity(0.14)
         p.drawImage(QPointF(self.width() - w - m, self.height() - h - th - m), self._wm_img)
-        p.setOpacity(0.4)
-        f = QFont(FONT, 13)
-        f.setBold(True)
-        f.setItalic(True)
-        p.setFont(f)
-        p.setPen(QColor(MUTED))
-        p.drawText(QRectF(0, self.height() - th - m, self.width() - m, th),
-                   Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, "Manager")
         p.end()
 
 
 class ProjectWindow(QWidget):
-    """Panel projektu: menu Plik (nowy, otwórz, zapisz), lista przypadków (najmłodszy na górze),
-    Przejdź do edytora / Drukuj. Zamknięcie okna kończy program (jak Plik → Zakończ)."""
+    """Okno główne (wewnętrznie: KAYENN Main) – pierwsze okno po uruchomieniu: menu Plik (nowy, otwórz, zapisz),
+    lista przypadków (najmłodszy na górze), Otwórz / Zamknij obciążenia normowe, Drukuj.
+    Zamknięcie okna kończy program (jak Plik → Zakończ)."""
 
     def __init__(self, app):
         super().__init__(None, Qt.WindowType.Window)
         self.app = app
         self.setObjectName("page")
-        self.setWindowTitle("Panel projektu – KAYENN Manager")
+        self.setWindowTitle("KAYENN")
         self.resize(1100, 860)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 10, 10, 10)
@@ -3853,8 +3822,8 @@ class ProjectWindow(QWidget):
         app.file_menu(mb, project=True)
         lay.setMenuBar(mb)
         self.menu_bar = mb
-        self.empty = QLabel("Projekt nie zawiera przypadków. Dodaj je przyciskiem „Dodaj do projektu” w Panelu "
-                            "edycji.")
+        self.empty = QLabel("Projekt nie zawiera przypadków. Otwórz obciążenia normowe i dodaj przypadek "
+                            "przyciskiem „Dodaj do projektu”.")
         self.empty.setObjectName("muted")
         lay.addWidget(self.empty)
         sc = QScrollArea()
@@ -3865,11 +3834,10 @@ class ProjectWindow(QWidget):
         self.scroll = sc
         lay.addWidget(sc, 1)
         hb = QHBoxLayout()
-        b1 = QPushButton("Przejdź do edytora")
+        b1 = QPushButton("Otwórz obciążenia normowe")
         b1.setObjectName("big")
-        b1.setToolTip("Powrót do Panelu edycji")
-        self.btn_editor = b1
-        b1.clicked.connect(lambda checked=False: self.app.close_project_window())
+        self.btn_codes = b1
+        b1.clicked.connect(lambda checked=False: self.app.toggle_codes())
         b2 = QPushButton("Drukuj")
         b2.setObjectName("big")
         b2.clicked.connect(lambda checked=False: self.app.print_project())
@@ -3890,6 +3858,15 @@ class ProjectWindow(QWidget):
             self.cards.append(card)
         self.empty.setVisible(not self.cards)
         self.list.update()                           # znak wodny pustego projektu
+        self.update_buttons()
+
+    def update_buttons(self):
+        """Napisy przycisków zależne od okna obciążeń normowych i edytowanego przypadku."""
+        app = self.app
+        codes = app.win.isVisible() and app.editing is None
+        self.btn_codes.setText("Zamknij obciążenia normowe" if codes else "Otwórz obciążenia normowe")
+        for c in self.cards:
+            c.btn_edit.setText("Zakończ edycję" if app.editing is c.case else "Edytuj")
 
     def card_of(self, case):
         return next((c for c in self.cards if c.case is case), None)
@@ -3921,7 +3898,11 @@ class ProjectWindow(QWidget):
         self.app.project_changed()
 
     def edit_case(self, case):
-        self.app.edit_case(case)
+        """Edytuj – przypadek w oknie obciążeń normowych; drugi klik (Zakończ edycję) – koniec edycji."""
+        if self.app.editing is case:
+            self.app.close_codes()
+        else:
+            self.app.edit_case(case)
 
     def delete_case(self, case):
         B = QMessageBox.StandardButton
@@ -3936,13 +3917,13 @@ class ProjectWindow(QWidget):
             card.hide()
             card.deleteLater()
         if self.app.editing is case:
-            self.app.set_editing(None)
+            self.app.end_edit(save=False)
         self.empty.setVisible(not self.cards)
         self.list.update()
         self.app.project_changed()
 
     def closeEvent(self, e):
-        if self.app.quit_app():                      # zamknięcie Panelu projektu = koniec programu
+        if self.app.quit_app():                      # zamknięcie okna głównego = koniec programu
             e.accept()
         else:
             e.ignore()
@@ -4002,14 +3983,18 @@ class App:
         self.dims3d = Var(True)
         self.bdims3d = Var(True)
         self.project = {"cases": [], "next": 1, "globals": None, "name": ""}   # przypadki (najmłodszy pierwszy)
-        self.editing = None                        # przypadek edytowany w Panelu edycji
-        self.pw = None                             # Panel projektu
+        self.editing = None                        # przypadek edytowany w oknie obciążeń normowych
+        self.pw = None                             # okno główne (KAYENN Main)
+        self._pre_edit = None                      # formularz sprzed edycji przypadku
         self._ctx = None
 
         self.entries = {}
         self.theta_boxes, self.variant_boxes, self.case_boxes = [], [], []
         self.zone_boxes, self.loc_labels = [], []
         self._build()
+        self.pw = ProjectWindow(self)
+        # okno obciążeń normowych należy do okna głównego – zawsze nad nim
+        self.win.setParent(self.pw, self.win.windowFlags() | Qt.WindowType.Window)
         for k, var in self.v.items():
             var.trace(lambda k=k: self._var_changed(k))
         for var in (self.guard, self.s_diff, self.w_diff, self.snow_type, self.wind_type, self.snow_zone,
@@ -4243,7 +4228,7 @@ class App:
         w = MainWindow(self)
         self.win = w
         mb = w.menuBar()
-        self.file_menu(mb, project=False)            # Panel edycji: tylko Plik → Zakończ
+        self.file_menu(mb, project=False)            # okno obciążeń normowych: tylko Plik → Zakończ
         mh = mb.addMenu("Pomoc")
         act = mh.addAction("Założenia do obliczeń")
         act.triggered.connect(lambda checked=False: self.show_assumptions())
@@ -4262,17 +4247,13 @@ class App:
         self.status.setObjectName("status")
         self.status.setWordWrap(True)
         root.addWidget(self.status)
-        self.btn3d = QPushButton("◆  Pokaż model 3D")
+        self.btn3d = QPushButton("Otwórz model 3D")
         self.btn3d.setObjectName("big")
         self.btn3d.clicked.connect(lambda checked=False: self.toggle_3d())
-        self.btn_add = QPushButton("＋  Dodaj do projektu")
+        self.btn_add = QPushButton("Dodaj do projektu")
         self.btn_add.setObjectName("big")
         self.btn_add.setToolTip("Zapisz bieżący model 3D i wyniki jako nowy przypadek projektu")
         self.btn_add.clicked.connect(lambda checked=False: self.add_or_update())
-        self.btn_proj = QPushButton("☰  Przejdź do projektu")
-        self.btn_proj.setObjectName("big")
-        self.btn_proj.setToolTip("Panel projektu – lista przypadków, zapis i odczyt pliku projektu, wydruk")
-        self.btn_proj.clicked.connect(lambda checked=False: self.open_project_window())
         self.proj_msg = QLabel("")
         self.proj_msg.setObjectName("muted")
         self.proj_msg.setWordWrap(True)
@@ -4280,9 +4261,9 @@ class App:
         root.addWidget(self.proj_msg)
         hb = QHBoxLayout()
         hb.setSpacing(6)
-        for b_ in (self.btn3d, self.btn_add, self.btn_proj):
+        for b_ in (self.btn3d, self.btn_add):
             b_.setMinimumWidth(10)
-            hb.addWidget(b_, 1)                      # trzy przyciski o równej szerokości
+            hb.addWidget(b_, 1)                      # przyciski o równej szerokości (w edycji – tylko model 3D)
         root.addLayout(hb)
         w.setCentralWidget(central)
 
@@ -4438,7 +4419,7 @@ class App:
 
     # ------------------------------------------------------------ projekty ---
     def file_menu(self, mb, project):
-        """Menu Plik. Panel projektu: Nowy projekt, Otwórz, Zapisz, Zapisz jako, Zakończ; Panel edycji: Zakończ."""
+        """Menu Plik. Okno główne: Nowy projekt, Otwórz, Zapisz, Zapisz jako, Zakończ; obciążenia normowe: Zakończ."""
         mf = mb.addMenu("Plik")
         entries = [("Zakończ", None, self.on_close)]
         if project:
@@ -4458,9 +4439,12 @@ class App:
         return mf
 
     def _front(self):
-        """Okno, nad którym pokazywać okna dialogowe (widoczny panel)."""
+        """Okno, nad którym pokazywać okna dialogowe (aktywne okno programu, inaczej okno główne)."""
+        aw = QApplication.activeWindow()
+        if aw is not None and aw in (self.win, getattr(self, "pw", None)):
+            return aw
         pw = getattr(self, "pw", None)
-        return pw if pw is not None and pw.isVisible() else self.win
+        return pw if pw is not None else self.win
 
     def project_title(self):
         """Nazwa projektu (Plik → Nazwa projektu…), a gdy jej brak – nazwa pliku."""
@@ -4472,7 +4456,7 @@ class App:
     def rename_project(self):
         from PySide6.QtWidgets import QInputDialog
         txt, ok = QInputDialog.getText(self._front(), "Nazwa projektu",
-                                       "Nazwa projektu (pasek tytułu Panelu projektu i nagłówek wydruku):",
+                                       "Nazwa projektu (pasek tytułu okna i nagłówek wydruku):",
                                        QLineEdit.EchoMode.Normal, self.project.get("name") or "")
         if not ok:
             return
@@ -4482,16 +4466,15 @@ class App:
             self.project_changed()
 
     def update_title(self):
-        name = os.path.basename(self.project_path) if self.project_path else "nowy projekt"
+        """Okno główne: tylko nazwa projektu (ikona KAYENN przy tytule). Bez nazw modułów."""
         ed = getattr(self, "editing", None)
         star = "*" if self.dirty else ""
-        self.win.setWindowTitle(f"{star}{name} – Panel edycji – KAYENN Codes"
-                                + (f" – edycja: {ed['name']}" if ed else ""))
+        self.win.setWindowTitle("Obciążenia normowe" + (f" – edycja: {ed['name']}" if ed else ""))
         if getattr(self, "pw", None) is not None:
-            self.pw.setWindowTitle(f"{star}{self.project_title()} – Panel projektu – KAYENN Manager")
+            self.pw.setWindowTitle(f"{star}{self.project_title()}")
 
     def _ask_save(self):
-        """Pytanie o zapis – tylko gdy zmienił się projekt (przypadki), nie formularz Panelu edycji.
+        """Pytanie o zapis – tylko gdy zmienił się projekt (przypadki), nie formularz obciążeń normowych.
         True – można kontynuować; False – anulowano."""
         if not self.dirty or (not self.project_path and not self.project["cases"] and not self.project.get("name")):
             return True
@@ -4508,6 +4491,8 @@ class App:
         """Koniec programu (Plik → Zakończ lub zamknięcie panelu). False – użytkownik anulował."""
         if getattr(self, "_quitting", False):
             return True
+        if not self.end_edit():                      # niezapisana edycja przypadku – najpierw do projektu
+            return False
         if not self._ask_save():
             return False
         self._quitting = True
@@ -4518,7 +4503,7 @@ class App:
         return True
 
     def file_open(self):
-        if not self._ask_save():
+        if not self.end_edit() or not self._ask_save():
             return
         path, _ = QFileDialog.getOpenFileName(self._front(), "Otwórz projekt",
                                               os.path.dirname(self.project_path or ""),
@@ -4539,11 +4524,11 @@ class App:
         self.project_path = os.path.abspath(path)
         self.set_state(st)
         self._project_load(st.get("projekt"))
+        self._pre_edit = None
         self.set_editing(None)
         self.dirty = False
         self.update_title()
-        if self.pw is not None and self.pw.isVisible():
-            self.pw.rebuild()
+        self.pw.rebuild()
         return True
 
     def file_save(self):
@@ -4670,7 +4655,7 @@ class App:
         return active
 
     def schedule(self):
-        # zmiany formularza Panelu edycji nie oznaczają projektu jako zmienionego (pytanie o zapis dopiero
+        # zmiany formularza obciążeń normowych nie oznaczają projektu jako zmienionego (pytanie o zapis dopiero
         # po dodaniu / zmianie przypadku – project_changed)
         if self._pending:
             return
@@ -4959,7 +4944,7 @@ class App:
         self.win3d.show()
         self.win3d.raise_()
         self.win3d.activateWindow()
-        self.btn3d.setText("✕  Zamknij model 3D")
+        self.btn3d.setText("Zamknij model 3D")
         self.draw3d()
 
     def hide_3d(self):
@@ -4968,11 +4953,11 @@ class App:
         self._3d_geom = self.win3d.saveGeometry()
         self.close_editor()
         self.win3d.hide()
-        self.btn3d.setText("◆  Pokaż model 3D")
+        self.btn3d.setText("Otwórz model 3D")
 
     def _build_3d(self):
         w = Win3D(self)
-        w.setWindowTitle("KAYENN Codes – model 3D")
+        w.setWindowTitle("Model 3D")
         w.setMinimumSize(640, 480)
         self.win3d = w
         lay = QVBoxLayout(w)
@@ -5136,7 +5121,7 @@ class App:
             self.update_title()
 
     def _in_case(self, st, extra, fn):
-        """Wykonuje fn() z formularzem chwilowo ustawionym na dane przypadku, potem przywraca Panel edycji."""
+        """Wykonuje fn() z formularzem chwilowo ustawionym na dane przypadku, potem przywraca formularz."""
         self.close_editor()
         if self._pending:
             self.recalc()
@@ -5160,7 +5145,7 @@ class App:
             self.draw3d()
 
     def _grab_current(self, mode):
-        """Bieżące obliczenia Panelu edycji (wyniki, model, dane do późniejszej edycji)."""
+        """Bieżące obliczenia formularza obciążeń normowych (wyniki, model, dane do późniejszej edycji)."""
         return dict(ok=bool(getattr(self, "_w_ok" if mode == "wiatr" else "_s_ok", False)),
                     err=self.status.text(), state=self.get_state(),
                     calc=dict(sgeo=self.sgeo, snow=self.snow, wgeo=self.wgeo, wind=self.wind, mode=mode,
@@ -5259,13 +5244,110 @@ class App:
         cv.render(pm)
         return pm
 
-    # --- przyciski Panelu edycji
+    # --- przyciski okna obciążeń normowych
     def set_editing(self, case):
         self.editing = case
-        self.btn_add.setText("⟳  Aktualizuj" if case is not None else "＋  Dodaj do projektu")
-        self.btn_add.setToolTip(f"Zapisz zmiany w przypadku „{case['name']}”" if case is not None else
-                                "Zapisz bieżący model 3D i wyniki jako nowy przypadek projektu")
+        self.btn_add.setVisible(case is None)        # w edycji przypadku na dole tylko model 3D
         self.update_title()
+        self.update_buttons()
+
+    def update_buttons(self):
+        if getattr(self, "pw", None) is not None:
+            self.pw.update_buttons()
+
+    # --- okno obciążeń normowych (KAYENN Codes) nad oknem głównym
+    def toggle_codes(self):
+        if self.win.isVisible():
+            self.close_codes()
+        else:
+            self.open_codes()
+
+    def open_codes(self):
+        if not self.win.isVisible():
+            if not getattr(self, "_codes_placed", False):     # pierwszy raz – nad oknem głównym
+                g = self.pw.frameGeometry()
+                scr = self.pw.screen().availableGeometry()
+                self.win.move(max(g.x() + 40, scr.x()), max(g.y() + 30, scr.y()))
+                self._codes_placed = True
+            self.win.show()
+        self.win.raise_()
+        self.win.activateWindow()
+        self.update_buttons()
+
+    def close_codes(self):
+        """Zamknięcie okna obciążeń normowych (X, Zamknij obciążenia normowe, Zakończ edycję).
+        False – użytkownik został przy edycji."""
+        if not self.end_edit():
+            return False
+        self.close_editor()
+        self.hide_3d()
+        self.win.hide()
+        self.update_buttons()
+        return True
+
+    def end_edit(self, save=True):
+        """Koniec edycji przypadku: zmiany trafiają do przypadku, formularz wraca do stanu sprzed edycji.
+        False – dane niepoprawne i użytkownik wybrał powrót do edycji."""
+        case = self.editing
+        if case is None:
+            return True
+        if save:
+            if self._pending:
+                self.recalc()
+            self.close_editor()
+            mode = self.mode3d.get()
+            r = self._grab_current(mode)
+            if not r["ok"]:
+                B = QMessageBox.StandardButton
+                box = QMessageBox(QMessageBox.Icon.Warning, "Edycja przypadku",
+                                  f"Dane przypadku „{case['name']}” są niepoprawne – zmian nie można zapisać:\n"
+                                  + (r["err"] or "sprawdź dane budynku."), B.Discard | B.Cancel, self._front())
+                box.button(B.Discard).setText("Odrzuć zmiany")
+                box.button(B.Cancel).setText("Wróć do edycji")
+                if box.exec() != B.Discard:
+                    return False
+            else:
+                extra = self._main_extra()
+                old = json.dumps([case.get("state"), {k: case["extra"].get(k) for k in extra}], sort_keys=True,
+                                 default=str)
+                new = json.dumps([r["state"], extra], sort_keys=True, default=str)
+                if old != new:
+                    case["extra"] = extra
+                    self.info_msg(self._store_case(case, r, f"Zaktualizowano: „{case['name']}”."))
+                    self.project_changed()
+        pre, self._pre_edit = self._pre_edit, None
+        self.set_editing(None)
+        if pre is not None:                          # formularz sprzed edycji
+            dirty = self.dirty
+            self.set_state(pre["state"])
+            self.dirty = dirty
+            self.nb.setCurrentIndex(pre["tab"])
+            self.mode3d.set(pre["mode"])
+            if self.snow and pre["snow_case"] in [c["name"] for c in self.snow["cases"]]:
+                self.snow_case.set(pre["snow_case"])
+            for k, v in pre["view"].items():
+                setattr(self, k, v)
+            for k, v in pre["toggles"].items():
+                getattr(self, k).set(v)
+            self.draw3d()
+        self.pw.rebuild()
+        return True
+
+    def _store_case(self, case, r, msg):
+        """Wyniki do przypadku + wspólne dane projektu (lokalizacja, A) we wszystkich przypadkach."""
+        self._apply_result(case, r)
+        g = self._globals_of(r["state"])
+        if self.project.get("globals") not in (None, g):             # zmiana lokalizacji / wysokości n.p.m.
+            n_ = 0
+            for c in self.project["cases"]:
+                if c is not case and self._globals_of(c["state"]) != g:
+                    self._put_globals(c["state"], g)
+                    c["_calc"] = None                                 # przeliczenie przy otwarciu / wydruku
+                    n_ += 1
+            if n_:
+                msg += f" Lokalizację i wysokość n.p.m. zmieniono we wszystkich przypadkach ({n_})."
+        self.project["globals"] = g
+        return msg
 
     def add_or_update(self):
         if self._pending:
@@ -5290,61 +5372,27 @@ class App:
         else:
             case["extra"] = extra
             msg = f"Zaktualizowano: „{case['name']}”."
-        self._apply_result(case, r)
-        g = self._globals_of(r["state"])
-        if self.project.get("globals") not in (None, g):             # zmiana lokalizacji / wysokości n.p.m.
-            n_ = 0
-            for c in self.project["cases"]:
-                if c is not case and self._globals_of(c["state"]) != g:
-                    self._put_globals(c["state"], g)
-                    c["_calc"] = None                                 # przeliczenie przy otwarciu / wydruku
-                    n_ += 1
-            if n_:
-                msg += f" Lokalizację i wysokość n.p.m. zmieniono we wszystkich przypadkach ({n_})."
-        self.project["globals"] = g
+        msg = self._store_case(case, r, msg)
         self.project_changed()
         self.info_msg(msg)
-        if self.pw is not None and self.pw.isVisible():
-            self.pw.rebuild()
+        self.pw.rebuild()
 
     def info_msg(self, text):
         self.proj_msg.setText(text)
         self.proj_msg.setVisible(bool(text))
         QTimer.singleShot(6000, lambda t=text: self.proj_msg.text() == t and self.proj_msg.setVisible(False))
 
-    def open_project_window(self):
+    def edit_case(self, case):
+        """Edytuj – przypadek w oknie obciążeń normowych nad oknem głównym. Zmiany trafiają do przypadku
+        po zakończeniu edycji (Zakończ edycję lub X); formularz wraca wtedy do stanu sprzed edycji."""
+        if self.editing is not None and not self.end_edit():
+            return
+        self.close_editor()
         if self._pending:
             self.recalc()
-        self.close_editor()
-        if self.pw is None:
-            self.pw = ProjectWindow(self)
-        self.pw.rebuild()
-        self.update_title()
-        self._3d_was_open = self.win3d is not None and self.win3d.isVisible()
-        if self._3d_was_open:
-            self.hide_3d()
-        g = self.win.frameGeometry()
-        if not self.pw.isVisible():
-            self.pw.move(max(g.x(), 0), max(g.y(), 0))
-        self.pw.show()
-        self.pw.raise_()
-        self.pw.activateWindow()
-        self.win.hide()
-
-    def close_project_window(self):
-        """„Przejdź do edytora” – z Panelu projektu do Panelu edycji (koniec trybu edycji przypadku)."""
-        self.set_editing(None)
-        if self.pw is not None and self.pw.isVisible() and not self.win.isVisible():
-            g = self.pw.frameGeometry()               # Panel edycji w miejscu Panelu projektu
-            self.win.move(max(g.x(), 0), max(g.y(), 0))
-        self.win.show()
-        self.win.raise_()
-        if self.pw is not None:
-            self.pw.hide()
-
-    def edit_case(self, case):
-        """Przypadek do Panelu edycji – wszystkie dane można zmienić, potem „Aktualizuj”."""
-        self.close_editor()
+        self._pre_edit = dict(state=self.get_state(), tab=self.nb.currentIndex(), mode=self.mode3d.get(),
+                              snow_case=self.snow_case.get(), view={k: getattr(self, k) for k in VIEW_KEYS},
+                              toggles={k: bool(getattr(self, k).get()) for k in TOGGLE_KEYS})
         ex = case["extra"]
         dirty = self.dirty
         self.set_state(case["state"])
@@ -5360,16 +5408,9 @@ class App:
             if k in TOGGLE_KEYS:
                 getattr(self, k).set(bool(v))
         self.set_editing(case)
-        self.update_title()
-        self.win.show()
-        self.win.raise_()
-        self.win.activateWindow()
-        if self.pw is not None:
-            self.pw.hide()
-        if getattr(self, "_3d_was_open", False):
-            self.show_3d()
+        self.open_codes()
         self.draw3d()
-        self.info_msg(f"Edycja: „{case['name']}”. Zmiany zapisze przycisk „Aktualizuj”.")
+        self.info_msg(f"Edycja: „{case['name']}”. Zmiany trafią do projektu po zakończeniu edycji.")
 
     # --- zapis / odczyt
     def _project_dump(self):
@@ -5453,7 +5494,7 @@ class App:
 
     # ============================================== sceny i rysowanie modelu 3D ===
     def get_state(self):
-        st = {"program": "KAYENN Codes", "wersja": 1,
+        st = {"program": "KAYENN", "wersja": 1,
               "pola": {k: v.get() for k, v in self.v.items()}}
         st["opcje"] = {n: getattr(self, n).get() for n in self.STATE_VARS}
         st["lokalizacja"] = self.loc.get()
@@ -5484,13 +5525,12 @@ class App:
         self.update_title()
 
     def file_new(self):
-        if not self._ask_save():
+        if not self.end_edit() or not self._ask_save():
             return
         self.project_path = None
         self._project_load(None)
         self.set_editing(None)
-        if self.pw is not None and self.pw.isVisible():
-            self.pw.rebuild()
+        self.pw.rebuild()
         self.set_state({"pola": DEFAULTS, "opcje": dict(
             snow_type="Dwupołaciowy", wind_type="Dwuspadowy", snow_zone="1", snow_ce="Normalny",
             ct_mode=CT_MODES[0], guard=False, s_diff=False, s_obst=OBST_TYPES[0], s_exc=False,
@@ -5997,7 +6037,7 @@ class App:
 
     def _draw3d_now(self):
         cv = self.cv
-        ctx = self._ctx                                  # rysowanie zapisanego przypadku (Panel projektu / wydruk)
+        ctx = self._ctx                                  # rysowanie zapisanego przypadku (okno główne / wydruk)
         if cv is None or (not ctx and not self.win3d.isVisible()):
             return
         cv.delete("all")
@@ -6009,7 +6049,7 @@ class App:
             return
         if not ctx:
             self.update_toolbar(mode)
-            self.win3d.setWindowTitle("KAYENN Codes – model 3D – " + ("wiatr" if mode == "wiatr" else "śnieg"))
+            self.win3d.setWindowTitle("Model 3D – " + ("wiatr" if mode == "wiatr" else "śnieg"))
             self.close_editor()
         self._edit_keys = {}
         key = (mode, getattr(self, "_scene_ver", 0), self.snow_case.get() if mode != "wiatr" else None)
@@ -6862,7 +6902,7 @@ def main():
     if sys.platform == "win32":
         try:   # własny identyfikator – pasek zadań pokazuje ikonę KAYENN zamiast ikony Pythona
             import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("KAYENN.Codes")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("KAYENN")
         except Exception:
             pass
     qapp = QApplication(sys.argv)
@@ -6883,12 +6923,13 @@ def main():
     app = App(qapp)
     scr = qapp.primaryScreen().availableGeometry()
     app.win.resize(640, min(960, scr.height() - 60))
+    app.pw.resize(min(1100, scr.width() - 80), min(860, scr.height() - 60))
+    app.pw.move(scr.x() + 30, scr.y() + 20)
     files = [a for a in sys.argv[1:] if not a.startswith("-") and os.path.isfile(a)]
-    if files and app.open_path(files[0]):           # dwuklik na pliku projektu – od razu Panel projektu
-        app.win.move(scr.x() + 40, scr.y() + 30)
-        app.open_project_window()
-    else:
-        app.win.show()
+    if files:                                        # dwuklik na pliku projektu
+        app.open_path(files[0])
+    app.pw.rebuild()
+    app.pw.show()                                    # zawsze najpierw okno główne
     sys.exit(qapp.exec())
 
 

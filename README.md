@@ -2,26 +2,33 @@
 
 <p align="center"><img src="identyfikacja/kayenn_napis.svg" alt="KAYENN" width="520"></p>
 
-Otwarty pakiet narzędzi do wyznaczania oddziaływań na konstrukcje budowlane.
-Nazwa pochodzi od **kN** – kiloniutona, jednostki, w której konstruktor liczy obciążenia
-(po angielsku czytanego „kej-en”).
+Otwarty program dla konstruktorów. Nazwa pochodzi od **kN** – kiloniutona, jednostki, w której
+konstruktor liczy obciążenia (po angielsku czytanego „kej-en”).
 
-## Moduły
+Docelowo KAYENN będzie programem do obliczeń metodą elementów skończonych (MES). Po uruchomieniu użytkownik
+widzi puste okno projektu i dodaje do niego kolejne elementy układanki – np. obciążenia normowe, obciążenia
+wyznaczane metodami inżynierskimi – które razem tworzą pełny obraz projektu.
 
-| Moduł | Zakres | Stan |
+## Budowa programu
+
+W programie użytkownik widzi tylko nazwę **KAYENN**. Poniższe nazwy są wewnętrzne – porządkują rozwój kodu.
+
+| Część | Zakres | Stan |
 |---|---|---|
-| **KAYENN Manager** | projekt, raport obliczeniowy, wydruk | obecnie zintegrowany z KAYENN Codes (Panel projektu) |
-| **KAYENN Codes** | obciążenia wg norm: śnieg, wiatr | dostępny |
-| **KAYENN Lab** | obciążenia wyznaczane metodami inżynierskimi | planowany |
-| **KAYENN FEM** | obliczenia metodą elementów skończonych | planowany |
+| **KAYENN Main** | okno główne: projekt, lista przypadków, raport, wydruk; docelowo obliczenia MES | dostępne |
+| **KAYENN Codes** | obciążenia normowe: śnieg, wiatr | dostępne |
+| **KAYENN Lab** | obciążenia wyznaczane metodami inżynierskimi | planowane |
 
-### KAYENN Codes
+### Obciążenia normowe (KAYENN Codes)
 
 - **śnieg** – PN-EN 1991-1-3 (+AC, Ap1, Załącznik krajowy), w tym zaspy wyjątkowe (Załącznik B wg NB1.3),
 - **wiatr** – PN-EN 1991-1-4:2008 (+AC, Ap1…Ap3, Załącznik krajowy) – budynki i wiaty.
 
 Funkcje: raport obliczeń, interaktywny model 3D z rozkładem obciążeń, mapa stref obciążenia
 z wyszukiwaniem działek, projekt z wieloma przypadkami (`.kayenn`), wydruk z podglądem.
+
+Obciążenia normowe otwiera przycisk **Otwórz obciążenia normowe** w oknie głównym – okno pojawia się nad
+oknem głównym, które pozostaje otwarte.
 
 > Program jest narzędziem pomocniczym – wyniki należy weryfikować z normą.
 

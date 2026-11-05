@@ -119,8 +119,10 @@ class Runner:
         self.qapp.setFont(QFont(m.FONT, 9))
         self.qapp.setStyleSheet(m.STYLE.replace("@CHECK@", m._check_image()))
         self.app = m.App(self.qapp)
+        self.app.pw.resize(1100, 860)
+        self.app.pw.show()
         self.app.win.resize(640, 960)
-        self.app.win.show()
+        self.app.open_codes()
         self.app.show_3d()
         self.app.win3d.resize(960, 720)
         self.pump()
@@ -281,16 +283,28 @@ class Runner:
             a.snow_type.set("Płaski" if v == "13" else "Dwupołaciowy")
             self.recalc("zmiana formularza")
         if a.dirty:
-            self.fail("zmiana formularza Panelu edycji oznaczyła projekt jako zmieniony")
+            self.fail("zmiana formularza obciążeń normowych oznaczyła projekt jako zmieniony")
         q0 = self.questions
         if not a._ask_save() or self.questions != q0:
             self.fail("program pyta o zapis, choć nie dodano żadnego przypadku")
-        # menu i przyciski Panelu edycji
+        # menu i przyciski okna obciążeń normowych: dwa przyciski, same napisy
         acts = [x.text() for x in a.win.menuBar().actions()[0].menu().actions() if not x.isSeparator()]
         if acts != ["Zakończ"]:
-            self.fail(f"menu Plik Panelu edycji: {acts} zamiast tylko „Zakończ”")
-        if "Przejdź do projektu" not in a.btn_proj.text():
-            self.fail(f"przycisk „{a.btn_proj.text()}” zamiast „Przejdź do projektu”")
+            self.fail(f"menu Plik obciążeń normowych: {acts} zamiast tylko „Zakończ”")
+        from PySide6.QtWidgets import QPushButton
+        bottom = [b.text() for b in a.win.findChildren(QPushButton) if b.objectName() == "big" and b.isVisible()]
+        if sorted(bottom) != sorted(["Zamknij model 3D", "Dodaj do projektu"]):
+            self.fail(f"przyciski obciążeń normowych: {bottom}")
+        if a.btn3d.width() != a.btn_add.width():
+            self.fail(f"przyciski różnej szerokości: {a.btn3d.width()} / {a.btn_add.width()}")
+        a.hide_3d()
+        if a.btn3d.text() != "Otwórz model 3D":
+            self.fail(f"przycisk po zamknięciu modelu 3D: „{a.btn3d.text()}”")
+        a.show_3d()
+        if not a.pw.isVisible() or not a.win.isVisible():
+            self.fail("okno główne i okno obciążeń normowych powinny być widoczne razem")
+        if a.pw.btn_codes.text() != "Zamknij obciążenia normowe":
+            self.fail(f"przycisk okna głównego: „{a.pw.btn_codes.text()}”")
         a.nb.setCurrentIndex(1)
         a.mode3d.set("wiatr")
         self.pump()
@@ -314,29 +328,42 @@ class Runner:
         if a._ask_save() or self.questions != q0 + 1:
             self.fail("po dodaniu przypadku program nie pyta o zapis (lub ignoruje „Anuluj”)")
         self.answer = B.Yes
-        self.guard("otwarcie okna projektu", a.open_project_window)
         self.pump(5)
         pw = a.pw
-        if pw is None or not pw.isVisible() or a.win.isVisible():
-            self.fail("okno projektu nie zastąpiło okna głównego")
-            return
         if len(pw.cards) != 2:
-            self.fail(f"okno projektu pokazuje {len(pw.cards)} kart zamiast 2")
+            self.fail(f"okno główne pokazuje {len(pw.cards)} kart zamiast 2")
             return
         acts = [x.text() for x in pw.menu_bar.actions()[0].menu().actions() if not x.isSeparator()]
         want = ["Nowy projekt", "Otwórz plik projektu…", "Zapisz", "Zapisz jako…", "Nazwa projektu…", "Zakończ"]
         if acts != want:
-            self.fail(f"menu Plik Panelu projektu: {acts} zamiast {want}")
-        if pw.btn_editor.text() != "Przejdź do edytora":
-            self.fail(f"przycisk „{pw.btn_editor.text()}” zamiast „Przejdź do edytora”")
-        if "Panel projektu" not in pw.windowTitle() or "Panel edycji" not in a.win.windowTitle():
-            self.fail(f"tytuły okien: „{pw.windowTitle()}”, „{a.win.windowTitle()}”")
-        # zamknięcie Panelu projektu = koniec programu, z pytaniem o zapis; „Anuluj” – panel zostaje
+            self.fail(f"menu Plik okna głównego: {acts} zamiast {want}")
+        # bez nazw modułów w tytułach; okno główne – tylko nazwa projektu
+        titles = [pw.windowTitle(), a.win.windowTitle()] + ([a.win3d.windowTitle()] if a.win3d else [])
+        for t in titles:
+            if any(x in t for x in ("Codes", "Manager", "Main", "Panel")):
+                self.fail(f"nazwa modułu w tytule okna: „{t}”")
+        if pw.windowTitle().lstrip("*") != a.project_title():
+            self.fail(f"tytuł okna głównego: „{pw.windowTitle()}” zamiast samej nazwy projektu")
+        # Zamknij / Otwórz obciążenia normowe – okno główne zostaje
+        self.guard("Zamknij obciążenia normowe", pw.btn_codes.click)
+        self.pump(2)
+        if a.win.isVisible() or not pw.isVisible() or (a.win3d and a.win3d.isVisible()) or \
+                pw.btn_codes.text() != "Otwórz obciążenia normowe":
+            self.fail("„Zamknij obciążenia normowe” nie zamknęło okna (albo zamknęło okno główne)")
+        self.guard("Otwórz obciążenia normowe", pw.btn_codes.click)
+        self.pump(2)
+        if not a.win.isVisible() or pw.btn_codes.text() != "Zamknij obciążenia normowe":
+            self.fail("„Otwórz obciążenia normowe” nie otworzyło okna")
+        a.win.close()                                    # X – zamyka tylko okno obciążeń normowych
+        self.pump(2)
+        if a.win.isVisible() or not pw.isVisible() or pw.btn_codes.text() != "Otwórz obciążenia normowe":
+            self.fail("X w oknie obciążeń normowych nie zamknął samego okna")
+        # zamknięcie okna głównego = koniec programu, z pytaniem o zapis; „Anuluj” – okno zostaje
         self.answer, q0 = B.Cancel, self.questions
         pw.close()
         self.pump(2)
         if not pw.isVisible() or self.questions != q0 + 1:
-            self.fail("zamknięcie Panelu projektu ze zmianami nie zapytało o zapis albo zignorowało „Anuluj”")
+            self.fail("zamknięcie okna głównego ze zmianami nie zapytało o zapis albo zignorowało „Anuluj”")
         self.answer = B.Yes
         self.guard("rozwinięcie karty śniegu", pw.cards[0].toggle)
         self.pump(5)
@@ -349,21 +376,14 @@ class Runner:
                 self.fail("pusty podgląd 3D w karcie")
             self.guard("przełącznik w karcie", card._toggle, "dims3d", False)
             self.guard("przełącznik w karcie", card._toggle, "dims3d", True)
-            cases = [c["name"] for c in card.case["_calc"]["snow"]["cases"]]
-            for c in cases[1:2]:
-                self.guard("zmiana przypadku śniegu w karcie", card.set_option, "snow_case", c)
-                self.pump(3)
+            from PySide6.QtWidgets import QComboBox
+            if card.body.findChildren(QComboBox):
+                self.fail("w karcie można zmienić przypadek / kierunek / wariant – tylko przez Edytuj")
             self.guard("widok domyślny w karcie", pw.cards[0]._reset_view)
         self.guard("zwinięcie karty", pw.cards[0].toggle)
         self.guard("rozwinięcie karty wiatru", pw.cards[1].toggle)
         self.pump(5)
         self.shot(pw, "6_projekt_wiatr")
-        card = pw.cards[1]
-        if card.body is not None:
-            th = [f"{t}°" for t in m.wind_thetas(card.case["_calc"]["wgeo"])]
-            if len(th) > 1:
-                self.guard("zmiana θ w karcie", card.set_option, "theta", th[1])
-                self.pump(3)
         self.guard("przeciąganie karty myszą", self.drag_cards, pw)
         # przenoszenie (zmiana kolejności)
         ids = [c["id"] for c in a.project["cases"]]
@@ -372,28 +392,46 @@ class Runner:
             self.fail("zmiana kolejności przypadków nie zadziałała")
         if [c.case["id"] for c in pw.cards] != [c["id"] for c in a.project["cases"]]:
             self.fail("kolejność kart różni się od kolejności przypadków")
-        # Edytuj → Aktualizuj
+        # Edytuj → zmiana → Zakończ edycję (okno główne zostaje pod spodem)
+        a.open_codes()
+        a.v["s_L"].set("21")                             # formularz sprzed edycji – ma wrócić po edycji
+        self.recalc("formularz przed edycją")
         case = a.project["cases"][0]
-        self.guard("edycja przypadku", pw.edit_case, case)
+        card = pw.card_of(case)
+        self.guard("edycja przypadku", card.btn_edit.click)
         self.pump(5)
-        if not a.win.isVisible() or a.editing is not case:
-            self.fail("Edytuj nie przeniosło przypadku do okna głównego")
-        if "Aktualizuj" not in a.btn_add.text():
-            self.fail(f"przycisk po Edytuj: „{a.btn_add.text()}” zamiast „Aktualizuj”")
+        if not a.win.isVisible() or not pw.isVisible() or a.editing is not case:
+            self.fail("Edytuj nie otworzyło przypadku w oknie obciążeń normowych nad oknem głównym")
+        card = pw.card_of(case)
+        if card.btn_edit.text() != "Zakończ edycję":
+            self.fail(f"przycisk karty w edycji: „{card.btn_edit.text()}” zamiast „Zakończ edycję”")
+        bottom = [b.text() for b in a.win.findChildren(QPushButton) if b.objectName() == "big" and b.isVisible()]
+        if len(bottom) != 1 or "model 3D" not in bottom[0]:
+            self.fail(f"w edycji na dole powinien być tylko przycisk modelu 3D: {bottom}")
         key = "w_L" if case["extra"]["mode"] == "wiatr" else "s_L"
         a.v[key].set("15")
         self.recalc("edycja")
-        self.guard("aktualizacja przypadku", a.add_or_update)
-        if case["state"]["pola"].get(key) != "15":
-            self.fail("Aktualizuj nie zapisało zmiany w przypadku")
+        a.dirty = False
+        self.guard("Zakończ edycję", card.btn_edit.click)
+        self.pump(3)
+        if case["state"]["pola"].get(key) != "15" or not a.dirty:
+            self.fail("Zakończ edycję nie zapisało zmiany w przypadku")
         if len(a.project["cases"]) != 2:
-            self.fail("Aktualizuj dodało nowy przypadek zamiast zmienić istniejący")
-        self.guard("ponowne otwarcie projektu", a.open_project_window)
+            self.fail("edycja dodała nowy przypadek zamiast zmienić istniejący")
+        if a.win.isVisible() or a.editing is not None or not pw.isVisible():
+            self.fail("Zakończ edycję nie zamknęło okna obciążeń normowych")
+        if a.v["s_L"].get() != "21" or not a.btn_add.isVisibleTo(a.win):
+            self.fail("po edycji formularz nie wrócił do stanu sprzed edycji (tryb dodawania)")
+        # edycja zakończona przyciskiem X
+        case = a.project["cases"][0]
+        self.guard("edycja przypadku (2)", pw.card_of(case).btn_edit.click)
         self.pump(3)
-        self.guard("Przejdź do edytora", a.pw.btn_editor.click)
+        a.v[key].set("16")
+        self.recalc("edycja (2)")
+        a.win.close()
         self.pump(3)
-        if not a.win.isVisible() or a.pw.isVisible() or a.editing is not None or "Dodaj" not in a.btn_add.text():
-            self.fail("„Przejdź do edytora” nie wróciło do Panelu edycji w trybie dodawania")
+        if a.win.isVisible() or a.editing is not None or case["state"]["pola"].get(key) != "16":
+            self.fail("X w trybie edycji nie zakończył edycji (albo nie zapisał zmiany)")
         # dokument do wydruku (bez drukarki)
         # Plik → Nazwa projektu…
         from PySide6.QtWidgets import QInputDialog
@@ -402,7 +440,7 @@ class Runner:
         try:
             acts = {x.text(): x for x in a.pw.menu_bar.actions()[0].menu().actions()}
             if "Nazwa projektu…" not in acts:
-                self.fail("brak „Nazwa projektu…” w menu Plik Panelu projektu")
+                self.fail("brak „Nazwa projektu…” w menu Plik okna głównego")
             else:
                 a.dirty = False
                 self.guard("Nazwa projektu", acts["Nazwa projektu…"].trigger)
@@ -410,8 +448,8 @@ class Runner:
             QInputDialog.getText = old_get
         if a.project.get("name") != "Hala magazynowa A" or not a.dirty:
             self.fail(f"nazwa projektu: „{a.project.get('name')}”, zmiana zaznaczona: {a.dirty}")
-        if not a.pw.windowTitle().lstrip("*").startswith("Hala magazynowa A – Panel projektu"):
-            self.fail(f"tytuł Panelu projektu bez nazwy projektu: „{a.pw.windowTitle()}”")
+        if a.pw.windowTitle().lstrip("*") != "Hala magazynowa A":
+            self.fail(f"tytuł okna głównego inny niż nazwa projektu: „{a.pw.windowTitle()}”")
         if a._project_dump().get("nazwa") != "Hala magazynowa A":
             self.fail("nazwa projektu nie trafia do pliku")
         doc = self.guard("dokument wydruku", a.project_document)
@@ -492,8 +530,8 @@ class Runner:
         self.count("testy wydruku")
 
     def start_with_file(self, path, n_cases):
-        """Uruchomienie programu z plikiem w argumencie (jak dwuklik) w osobnym procesie: od razu Panel projektu
-        z przypadkami, Panel edycji ukryty. Skojarzenie w rejestrze w teście wyłączone."""
+        """Uruchomienie programu z plikiem w argumencie (jak dwuklik) w osobnym procesie: okno główne
+        z przypadkami, okno obciążeń normowych ukryte. Skojarzenie w rejestrze w teście wyłączone."""
         import subprocess
         code = r'''
 import importlib.machinery, importlib.util, json, sys
@@ -530,7 +568,7 @@ except SystemExit:
             return
         res = json.loads(line[6:])
         if not res["pw"] or res["win"]:
-            self.fail(f"po otwarciu pliku nie pokazano od razu Panelu projektu: {res}")
+            self.fail(f"po otwarciu pliku nie pokazano od razu okna głównego: {res}")
         if res["cases"] != n_cases or res["dirty"] or os.path.normcase(res["path"] or "") != os.path.normcase(path):
             self.fail(f"po otwarciu pliku: {res} (oczekiwano {n_cases} przypadków, bez zmian)")
         self.count("testy uruchomienia z plikiem")
