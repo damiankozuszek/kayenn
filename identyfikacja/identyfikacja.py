@@ -108,13 +108,10 @@ def mark(text="KAYENN", sw=9, depth=28, side=50, gap=24, square=False, bg=None, 
             f'role="img" aria-label="{label or text}">{bgr}{"".join(g)}</svg>')
 
 
-def icon(size):
-    """Ikona: litera K. W małych rozmiarach grubsza obwódka i krótszy cień – żeby K było czytelne."""
-    if size <= 24:
-        return mark("K", sw=16, depth=12, side=20, square=True, label="KAYENN")
-    if size <= 48:
-        return mark("K", sw=12, depth=18, side=32, square=True, label="KAYENN")
-    return mark("K", sw=9, depth=22, side=40, square=True, label="KAYENN")
+def icon(size=None):
+    """Ikona: litera K dokładnie jak w napisie (te same proporcje, obwódka i cień), w kwadratowym polu.
+    Wszystkie rozmiary to to samo SVG – tylko przeskalowane."""
+    return mark("K", square=True, label="KAYENN")
 
 
 ICON_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
