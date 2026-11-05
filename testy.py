@@ -470,6 +470,7 @@ class Runner:
             rel0 = top.y() - v0
             case = a.project["cases"][0]
             old_btn = pw.card_of(case).btn_edit
+            old_canvas = pw.card_of(case).canvas
             self.guard("Edytuj (widok listy)", old_btn.click)
             self.pump(5)
             ed.v[key].set("17")
@@ -501,6 +502,9 @@ class Runner:
             rel1 = top.y() - sb.value()
             if abs(rel1 - rel0) > 2:
                 self.fail(f"lista nie wraca na miejsce po chwilowym skróceniu: karta u góry {rel0} → {rel1} px")
+            if pw.card_of(case).canvas is not old_canvas:
+                self.fail("koniec edycji utworzył nowy podgląd 3D w karcie (mignięcie listy) zamiast go odświeżyć")
+            self.guard("kółko nad podglądem w karcie", self.wheel_over_canvas, pw)
             if pw.card_of(case).btn_edit is not old_btn:
                 self.fail("koniec edycji przebudował całą listę zamiast odświeżyć kartę przypadku")
         pw.cards[1].toggle()                             # ręcznie zwinięta – zostaje zwinięta
@@ -620,6 +624,41 @@ class Runner:
         self.count("testy pliku")
         self.ctx = "dwuklik na pliku .kayenn"
         self.guard("uruchomienie z plikiem", self.start_with_file, path, len(before["przypadki"]))
+
+    def wheel_over_canvas(self, pw):
+        """Kółko nad podglądem 3D w karcie: nieaktywny – przewija listę; po kliknięciu – zoom; kliknięcie obok –
+        znowu przewija listę."""
+        from PySide6.QtCore import QPoint, QPointF, Qt
+        from PySide6.QtGui import QWheelEvent
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QApplication
+        card = next(c for c in pw.cards if c.body is not None)
+        cv = card.canvas
+        pw.scroll.ensureWidgetVisible(cv, 0, 0)
+        self.pump(3)
+
+        def wheel():
+            """True – podgląd przejął kółko; False – przepuścił je dalej (Qt przekaże je liście przypadków)."""
+            pos = QPointF(cv.width() / 2, 60)
+            ev = QWheelEvent(pos, cv.mapToGlobal(pos), QPoint(0, 0), QPoint(0, 120), Qt.MouseButton.NoButton,
+                             Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
+            QApplication.sendEvent(cv, ev)
+            self.pump(2)
+            return ev.isAccepted()
+        z0 = cv.view["zoom"]
+        if wheel() or cv.view["zoom"] != z0:
+            self.fail("kółko nad nieaktywnym podglądem w karcie powiększa model zamiast przewijać listę")
+        QTest.mouseClick(cv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(cv.width() // 2, 60))
+        self.pump(2)
+        if not cv.is_active():
+            self.fail("kliknięcie nie aktywowało podglądu w karcie")
+        if not wheel() or cv.view["zoom"] == z0:
+            self.fail("kółko nad aktywnym podglądem nie powiększa modelu")
+        self.shot(card, "14_podglad_aktywny")
+        QTest.mouseClick(card.name, Qt.MouseButton.LeftButton)
+        self.pump(2)
+        if cv.is_active():
+            self.fail("kliknięcie poza podglądem go nie wyłączyło")
 
     def check_owned(self):
         from PySide6.QtWidgets import QApplication

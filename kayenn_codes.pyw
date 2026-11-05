@@ -3355,8 +3355,52 @@ def html_body(doc):
     return doc[a:b if b > a else len(doc)]
 
 
+class _CanvasDeactivator(QObject):
+    """Kliknięcie poza aktywnym podglądem karty – podgląd nieaktywny (kółko znowu przewija listę)."""
+
+    def eventFilter(self, obj, e):
+        a = CaseCanvas.active
+        if a is not None and e.type() == QEvent.Type.MouseButtonPress and isinstance(obj, QWidget)                 and obj is not a and not a.isAncestorOf(obj):
+            a.set_active(False)
+        return False
+
+
 class CaseCanvas(Canvas3D):
-    """Podgląd 3D zapisanego przypadku – obrót, przesuwanie, zoom i edycja wymiarów jak w oknie 3D."""
+    """Podgląd 3D zapisanego przypadku – obrót, przesuwanie, zoom i edycja wymiarów jak w oknie 3D.
+    Kółko i gesty działają dopiero po kliknięciu w podgląd (aktywny – obwódka); wcześniej kółko przewija listę
+    przypadków. Kliknięcie poza podglądem – nieaktywny."""
+
+    active = None                                    # aktywny podgląd (najwyżej jeden)
+    _deactivator = None
+
+    def set_active(self, on):
+        if on:
+            if CaseCanvas._deactivator is None:
+                CaseCanvas._deactivator = _CanvasDeactivator()
+                QApplication.instance().installEventFilter(CaseCanvas._deactivator)
+            if CaseCanvas.active is not None and CaseCanvas.active is not self:
+                CaseCanvas.active.set_active(False)
+            CaseCanvas.active = self
+        elif CaseCanvas.active is self:
+            CaseCanvas.active = None
+        self._scene_key = None                       # podpowiedź w rogu zależy od stanu podglądu
+        self.redraw()
+
+    def is_active(self):
+        return CaseCanvas.active is self
+
+    def paintEvent(self, ev):
+        super().paintEvent(ev)
+        if self.is_active():
+            p = QPainter(self)
+            p.setPen(QPen(QColor(ACCENT), 2))
+            p.drawRect(QRectF(1, 1, self.width() - 2, self.height() - 2))
+            p.end()
+
+    def hideEvent(self, e):
+        if self.is_active():                         # karta zwinięta / usunięta – bez przerysowania
+            CaseCanvas.active = None
+        super().hideEvent(e)
 
     def __init__(self, app, card):
         super().__init__(app)
@@ -3379,6 +3423,8 @@ class CaseCanvas(Canvas3D):
         self.redraw()
 
     def mousePressEvent(self, e):
+        if not self.is_active():
+            self.set_active(True)
         x, y = self._xy(e)
         b = e.button()
         shift = bool(e.modifiers() & Qt.KeyboardModifier.ShiftModifier)
@@ -3419,6 +3465,9 @@ class CaseCanvas(Canvas3D):
             self.card.view_changed(self.view)
 
     def wheelEvent(self, e):
+        if not self.is_active():
+            e.ignore()                               # podgląd nieaktywny – kółko przewija listę przypadków
+            return
         ad, pd = e.angleDelta(), e.pixelDelta()
         dx, dy = ad.x(), ad.y()
         if e.modifiers() & Qt.KeyboardModifier.ControlModifier:
@@ -3434,6 +3483,9 @@ class CaseCanvas(Canvas3D):
         self.card.view_changed(self.view)
 
     def event(self, e):
+        if not self.is_active() and e.type() in (QEvent.Type.NativeGesture, QEvent.Type.Gesture):
+            e.ignore()                               # gesty – dopiero po kliknięciu w podgląd
+            return False
         if e.type() == QEvent.Type.NativeGesture and e.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
             self.view["zoom"] = clamp(self.view["zoom"] * (1.0 + e.value()), 0.3, 5)
             self.redraw()
@@ -3630,17 +3682,27 @@ class CaseCard(QFrame):
         self.report.setHtml(self.case.get("report", ""))
         bl.addWidget(self.report)
         self.body = body
+        self._body_mode = calc["mode"]
         self.layout().addWidget(body)
 
     def refresh(self):
-        """Po przeliczeniu przypadku: nagłówek, raport i model."""
+        """Po przeliczeniu przypadku: nagłówek, raport i model – w tych samych elementach (bez zmiany wysokości
+        karty na moment przebudowy, czyli bez mignięcia listy). Inny rodzaj obciążenia – karta od nowa."""
         self._update_info()
-        if self.body is not None:
+        if self.body is None:
+            return
+        self.app.ensure_calc(self.case)
+        if self.case["_calc"]["mode"] != self._body_mode:
             self.layout().removeWidget(self.body)
             self.body.hide()
             self.body.deleteLater()
             self.body = None
             self._build_body()
+            return
+        self.canvas.view.update({k: v for k, v in (self.case["extra"].get("view") or {}).items() if k in VIEW_KEYS})
+        self.canvas._scene_key = None
+        self.canvas.redraw()
+        self.report.setHtml(self.case.get("report", ""))
 
     def _toggle(self, key, on):
         self.case["extra"].setdefault("toggles", {})[key] = bool(on)
@@ -6481,10 +6543,12 @@ class App:
                            text="⚠ Błędne dane budynku – pokazano ostatni poprawny model")
         if ctx == "img":
             return
+        card_view = ctx == "view" and not (isinstance(cv, CaseCanvas) and cv.is_active())
         cv.create_text(W - 10, Hc - 8, anchor="se", justify="right", fill="#8a929c", font=(FONT, 8),
-                       text="Lewy przycisk – obrót\nŚrodkowy (lub Shift + lewy) – przesuwanie\n"
-                            "Kółko – powiększenie\nPanel dotykowy: dwa palce – przesuwanie, "
-                            "rozsunięcie – powiększenie\nKliknięcie wymiaru – zmiana")
+                       text=("Kliknij podgląd, aby powiększać kółkiem i gestami\n" if card_view else "")
+                       + "Lewy przycisk – obrót\nŚrodkowy (lub Shift + lewy) – przesuwanie\n"
+                         "Kółko – powiększenie\nPanel dotykowy: dwa palce – przesuwanie, "
+                         "rozsunięcie – powiększenie\nKliknięcie wymiaru – zmiana")
 
     def _label(self, cv, x, y, text, outline="", dodge=False, poly=None):
         """Etykieta z tłem. Gdy zachodzi na wcześniej narysowany opis: z dodge=True przesunięta w najbliższe
