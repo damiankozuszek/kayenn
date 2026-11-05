@@ -68,10 +68,11 @@ dokładają elementy projektu.
 
 ---
 
-## Etap 4. Obciążenia użytkowe
+## Etap 4. Obciążenia użytkowe – przypadki w projekcie
 
-- Trzecia zakładka modułu KAYENN Codes, obok śniegu i wiatru: obciążenia użytkowe wg PN-EN 1991-1-1
-  wraz z Załącznikiem krajowym.
+- Dodawanie obciążeń użytkowych (zakładka Użytkowe) do projektu: karta przypadku z opisem kategorii,
+  przedziałem normowym i przyjętymi wartościami, raport i wydruk.
+- Współczynniki redukcyjne αA (6.1) i αn (6.2) oraz zastępcze obciążenie od ścian działowych (6.3.1.2(8)).
 
 ---
 

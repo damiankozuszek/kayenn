@@ -21,6 +21,8 @@ W programie użytkownik widzi tylko nazwę **KAYENN**. Poniższe nazwy są wewn�
 
 ### Obciążenia normowe (KAYENN Codes)
 
+- **obciążenia użytkowe** – PN-EN 1991-1-1 (+AC, Ap1, Ap2, Załącznik krajowy): kategorie powierzchni A–K
+  i obciążenia poziome ścian (6.4) z przedziałami normowymi i wartościami zalecanymi,
 - **śnieg** – PN-EN 1991-1-3 (+AC, Ap1, Załącznik krajowy), w tym zaspy wyjątkowe (Załącznik B wg NB1.3),
 - **wiatr** – PN-EN 1991-1-4:2008 (+AC, Ap1…Ap3, Załącznik krajowy) – budynki i wiaty.
 

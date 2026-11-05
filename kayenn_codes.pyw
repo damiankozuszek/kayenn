@@ -2585,6 +2585,114 @@ DEFAULTS = dict(A="210", s_L="12", s_B="10", s_H="5", s_alpha="25", s_alpha2="25
                 cpi="0.2", phi="0")
 
 PROJECT_EXT = ".kayenn"
+
+# Obciążenia użytkowe wg PN-EN 1991-1-1:2004 (+AC:2009, Ap1:2010, Ap2:2011), Załącznik krajowy NA:
+# NB1 – wartości z Tablicy 6.2 nie mniejsze niż dolne granice; poza tym wartości zalecane (podkreślone w normie).
+# q = (od, do, zalecana) – obciążenie równomierne [kN/m²] (6.4: liniowe [kN/m]); Q – skupione [kN];
+# low_min – dolna granica obowiązująca (NB1).
+TAB_USE, TAB_SNOW, TAB_WIND = 0, 1, 2
+_C_DESC = "Powierzchnie, na których mogą gromadzić się ludzie (z wyłączeniem powierzchni kategorii A, B i D). "
+USE_GROUPS = [
+    ("6.3.1", "6.3.1 – Powierzchnie mieszkalne, socjalne, handlowe i administracyjne", "Tablice 6.1 i 6.2", [
+        dict(code="A1", name="A – stropy", q=(1.5, 2.0, 2.0), Q=(2.0, 3.0, 2.0), low_min=True,
+             desc="Powierzchnie mieszkalne: pokoje w budynkach mieszkalnych i w domach, pokoje i sale w szpitalach, "
+                  "sypialnie w hotelach i hostelach, kuchnie i toalety."),
+        dict(code="A2", name="A – schody", q=(2.0, 4.0, 2.0), Q=(2.0, 4.0, 2.0), low_min=True,
+             desc="Schody w budynkach i pomieszczeniach kategorii A (powierzchnie mieszkalne)."),
+        dict(code="A3", name="A – balkony", q=(2.5, 4.0, 2.5), Q=(2.0, 3.0, 2.0), low_min=True,
+             desc="Balkony w budynkach i pomieszczeniach kategorii A (powierzchnie mieszkalne)."),
+        dict(code="B", name="B – powierzchnie biurowe", q=(2.0, 3.0, 3.0), Q=(1.5, 4.5, 4.5), low_min=True,
+             desc="Powierzchnie biurowe."),
+        dict(code="C1", name="C1 – powierzchnie ze stołami", q=(2.0, 3.0, 3.0), Q=(3.0, 4.0, 4.0), low_min=True,
+             desc=_C_DESC + "C1: powierzchnie ze stołami itd., np. powierzchnie w szkołach, kawiarniach, "
+                  "restauracjach, stołówkach, czytelniach, recepcjach."),
+        dict(code="C2", name="C2 – powierzchnie z zamocowanymi siedzeniami", q=(3.0, 4.0, 4.0), Q=(2.5, 7.0, 4.0),
+             low_min=True,
+             desc=_C_DESC + "C2: powierzchnie z zamocowanymi siedzeniami, np. w kościołach, teatrach, kinach, salach "
+                  "konferencyjnych, salach wykładowych, salach zebrań, poczekalniach, poczekalniach dworcowych."),
+        dict(code="C3", name="C3 – powierzchnie bez przeszkód dla ruchu ludzi", q=(3.0, 5.0, 5.0), Q=(4.0, 7.0, 4.0),
+             low_min=True,
+             desc=_C_DESC + "C3: powierzchnie bez przeszkód utrudniających poruszanie się ludzi, np. w muzeach, "
+                  "salach wystaw itd., oraz powierzchnie ogólnie dostępne w budynkach publicznych "
+                  "i administracyjnych, hotelach, szpitalach, podjazdach kolejowych."),
+        dict(code="C4", name="C4 – powierzchnie z aktywnością fizyczną", q=(4.5, 5.0, 5.0), Q=(3.5, 7.0, 7.0),
+             low_min=True,
+             desc=_C_DESC + "C4: powierzchnie, na których jest możliwa aktywność fizyczna, np. sale tańców, sale "
+                  "gimnastyczne, sceny. Jeśli wymagają uwzględnienia efekty dynamiczne – patrz EN 1990."),
+        dict(code="C5", name="C5 – powierzchnie dostępne dla tłumu", q=(5.0, 7.5, 5.0), Q=(3.5, 4.5, 4.5),
+             low_min=True,
+             desc=_C_DESC + "C5: powierzchnie ogólnie dostępne dla tłumu, np. w budynkach użyteczności publicznej "
+                  "takich jak sale koncertowe, sale sportowe łącznie z trybunami, tarasy oraz powierzchnie dojść "
+                  "i perony kolejowe. Jeśli wymagają uwzględnienia efekty dynamiczne – patrz EN 1990."),
+        dict(code="D1", name="D1 – sklepy detaliczne", q=(4.0, 5.0, 4.0), Q=(3.5, 7.0, 4.0), low_min=True,
+             desc="Powierzchnie handlowe. D1: powierzchnie w sklepach sprzedaży detalicznej."),
+        dict(code="D2", name="D2 – domy towarowe", q=(4.0, 5.0, 5.0), Q=(3.5, 7.0, 7.0), low_min=True,
+             desc="Powierzchnie handlowe. D2: powierzchnie w domach towarowych."),
+    ]),
+    ("6.3.2", "6.3.2 – Powierzchnie składowania i działalności przemysłowej", "Tablice 6.3 i 6.4", [
+        dict(code="E1", name="E1 – powierzchnie składowania", q=(7.5, 7.5, 7.5), Q=(7.0, 7.0, 7.0),
+             desc="Powierzchnie, na których mogą być gromadzone towary, łącznie z powierzchniami dostępu, "
+                  "np. powierzchnie składowania, z włączeniem składowania książek i innych dokumentów.",
+             note="Wartości mogą wymagać zwiększenia odpowiednio do rodzaju składowanych materiałów "
+                  "(ciężary objętościowe – Załącznik A)."),
+        dict(code="E2", name="E2 – użytkowanie przemysłowe", q=None, Q=None,
+             desc="Powierzchnie użytkowania przemysłowego.",
+             note="Norma nie podaje wartości – obciążenia ustala się indywidualnie dla danej działalności; "
+                  "podnośniki widłowe wg 6.3.2.3 (Tablice 6.5 i 6.6), pojazdy transportowe wg 6.3.2.4."),
+    ]),
+    ("6.3.3", "6.3.3 – Garaże i powierzchnie ruchu pojazdów (z wyłączeniem mostów)", "Tablice 6.7 i 6.8", [
+        dict(code="F", name="F – pojazdy lekkie (≤ 30 kN)", q=(1.5, 2.5, 2.5), Q=(10.0, 20.0, 20.0),
+             desc="Powierzchnie ruchu i parkowania dla pojazdów lekkich (≤ 30 kN ciężaru brutto, z liczbą miejsc "
+                  "≤ 8 poza kierowcą), np. garaże, powierzchnie ruchu i parkowania w budynkach.",
+             note="Qₖ – obciążenie osi na dwóch kwadratach o boku 100 mm w rozstawie 1,80 m (Rysunek 6.2)."),
+        dict(code="G", name="G – pojazdy średnie (30–160 kN)", q=(5.0, 5.0, 5.0), Q=(40.0, 90.0, 90.0),
+             desc="Powierzchnie ruchu i parkowania dla pojazdów średnich (> 30 kN, ≤ 160 kN całkowitego ciężaru "
+                  "pojazdu na dwóch osiach), np. drogi dostępu, strefy dostaw, strefy dostępne dla wozów straży "
+                  "pożarnej (≤ 160 kN całkowitego ciężaru pojazdu).",
+             note="Qₖ – obciążenie osi na dwóch kwadratach o boku 200 mm w rozstawie 1,80 m (Rysunek 6.2)."),
+    ]),
+    ("6.3.4", "6.3.4 – Dachy", "Tablice 6.9–6.11", [
+        dict(code="H", name="H – dachy bez dostępu", q=(0.0, 1.0, 0.4), Q=(0.9, 1.5, 1.0),
+             desc="Dachy bez dostępu, z wyjątkiem zwykłego utrzymania i napraw.",
+             note="Wartości odniesione do rzutu dachu. Nie wymaga się uwzględniania jednocześnie obciążeń "
+                  "użytkowych, obciążeń śniegiem i oddziaływań wiatru (3.3.2(1)). qₖ i Qₖ sprawdza się "
+                  "niezależnie (6.3.4.2(3))."),
+        dict(code="I", name="I – dachy z dostępem (użytkowanie jak kat. A do G)", q=None, Q=None, like=True,
+             desc="Dachy z dostępem, użytkowane zgodnie z kategoriami A do G – obciążenia jak dla wybranego "
+                  "sposobu użytkowania (Tablice 6.2, 6.4 i 6.8)."),
+        dict(code="K1", name="K – lądowisko helikopterów HC1", q=None, Q=(20.0, 20.0, 20.0),
+             desc="Dachy z dostępem z przeznaczeniem do specjalnych usług – powierzchnie lądowania helikopterów. "
+                  "Klasa HC1: obciążenie od helikoptera przy starcie Q ≤ 20 kN.",
+             note="Obciążona powierzchnia 0,2 × 0,2 m; współczynnik dynamiczny φ = 1,40 (6.3.4.2(6))."),
+        dict(code="K2", name="K – lądowisko helikopterów HC2", q=None, Q=(60.0, 60.0, 60.0),
+             desc="Dachy z dostępem z przeznaczeniem do specjalnych usług – powierzchnie lądowania helikopterów. "
+                  "Klasa HC2: obciążenie od helikoptera przy starcie 20 kN < Q ≤ 60 kN.",
+             note="Obciążona powierzchnia 0,3 × 0,3 m; współczynnik dynamiczny φ = 1,40 (6.3.4.2(6))."),
+    ]),
+    ("6.4", "6.4 – Obciążenia poziome ścian działowych i ograniczających (barier)", "Tablica 6.12", [
+        dict(code="HA", name="kategorie A, B i C1", q=(0.2, 1.0, 0.5), line=True,
+             desc="Obciążenie liniowe przyłożone na wysokości ściany działowej lub ograniczającej, nie wyższej "
+                  "niż 1,20 m – powierzchnie kategorii A, B i C1."),
+        dict(code="HC", name="kategorie C2 do C4 i D", q=(0.8, 1.0, 1.0), line=True,
+             desc="Obciążenie liniowe przyłożone na wysokości ściany działowej lub ograniczającej, nie wyższej "
+                  "niż 1,20 m – powierzchnie kategorii C2 do C4 i D."),
+        dict(code="HC5", name="kategoria C5", q=(3.0, 5.0, 3.0), line=True,
+             desc="Obciążenie liniowe przyłożone na wysokości ściany działowej lub ograniczającej, nie wyższej "
+                  "niż 1,20 m – powierzchnie kategorii C5. Także powierzchnie, na których może gromadzić się "
+                  "znaczny tłum ludzi (stadiony, trybuny, sceny, sale zebrań, pokoje konferencyjne – 6.4(2))."),
+        dict(code="HE", name="kategoria E", q=(0.8, 2.0, 2.0), line=True,
+             desc="Obciążenie liniowe przyłożone na wysokości ściany działowej lub ograniczającej, nie wyższej "
+                  "niż 1,20 m – powierzchnie kategorii E.",
+             note="Obciążenia poziome zależą od sposobu użytkowania – wartość jest minimalna i należy ją sprawdzić "
+                  "dla określonego sposobu użytkowania."),
+        dict(code="HFG", name="kategorie F i G (bariery parkingów)", q=None, line=True,
+             desc="Bariery i ściany ograniczające na parkingach samochodowych – Załącznik B.",
+             note="Siła pozioma od uderzenia pojazdu F = 0,5·m·v² / (δc + δb), na długości 1,5 m bariery (B(2)). "
+                  "Dla pojazdów ≤ 2500 kg i sztywnych barier F = 150 kN (B(3)), na wysokości 375 mm nad stropem "
+                  "(B(5))."),
+    ]),
+]
+USE_LIKE = [e for gk, _, _, es in USE_GROUPS[:3] for e in es]     # kategoria I – użytkowanie jak A do G
 MANUAL_COL = "#c62828"
 _AUTO_CACHE = {}        # lokalizacja → strefy i wysokość n.p.m. z mapy     # nazwy pól zmienionych ręcznie względem mapy (strefy, wysokość n.p.m.)
 
@@ -2772,6 +2880,7 @@ QLineEdit[bad="true"] {{ background: {ERR_BG}; border-color: #e08a8a; }}
 QTextBrowser {{ border: 1px solid #e3e6ea; background: {CARD}; }}
 QTreeWidget {{ border: 1px solid #e3e6ea; }}
 QPushButton#big {{ font-weight: bold; padding: 6px; }}
+QPushButton:disabled {{ color: #a3a8b0; }}
 QFrame#editor {{ background: {BDIM_COL}; border-radius: 3px; }}
 QFrame#card[lifted="true"] {{ border: 2px solid {ACCENT}; }}
 QFrame#dropSlot {{ border: 2px dashed #93b4f5; border-radius: 5px; background: #eef3fe; }}
@@ -3565,6 +3674,10 @@ class CaseCard(QFrame):
         b.clicked.connect(lambda checked=False: self.pw.edit_case(self.case))
         hd.addWidget(b)
         self.btn_edit = b
+        b = QPushButton("Duplikuj")
+        b.setToolTip("Kopia przypadku tuż pod nim")
+        b.clicked.connect(lambda checked=False: self.pw.duplicate_case(self.case))
+        hd.addWidget(b)
         b = QPushButton("Usuń")
         b.clicked.connect(lambda checked=False: self.pw.delete_case(self.case))
         hd.addWidget(b)
@@ -3590,8 +3703,11 @@ class CaseCard(QFrame):
         m = QMenu(self)
         a1 = m.addAction("Zmień nazwę")
         a2 = m.addAction("Zakończ edycję" if self.app.edited_case() is self.case else "Edytuj")
+        a4 = m.addAction("Duplikuj")
         a3 = m.addAction("Usuń")
         act = m.exec(self.mapToGlobal(pos))
+        if act is a4:
+            self.pw.duplicate_case(self.case)
         if act is a1:
             self.rename()
         elif act is a2:
@@ -4033,6 +4149,19 @@ class ProjectWindow(QWidget):
         else:
             self.keep_view(lambda: self.app.edit_case(case))
 
+    def duplicate_case(self, case):
+        """Duplikuj – kopia przypadku tuż pod nim, nazwa z dopiskiem „ - kopia”."""
+        from datetime import datetime
+        proj = self.app.project
+        n = proj["next"]
+        proj["next"] = n + 1
+        cp = json.loads(json.dumps({k: case.get(k) for k in ("state", "extra", "report")}, default=str))
+        cp.update(id=n, name=f"{case['name']} - kopia", created=datetime.now().strftime("%Y-%m-%d %H:%M"),
+                  _calc=case.get("_calc"))
+        proj["cases"].insert(proj["cases"].index(case) + 1, cp)
+        self.insert_case(cp)
+        self.app.project_changed()
+
     def delete_case(self, case):
         B = QMessageBox.StandardButton
         if QMessageBox.question(self, "Usuń przypadek", f"Usunąć „{case['name']}” z projektu?",
@@ -4449,6 +4578,9 @@ class App:
         root.addLayout(hb)
         w.setCentralWidget(central)
 
+        # ================= UŻYTKOWE
+        self._build_use_page()
+
         # ================= ŚNIEG
         lay = self._page("  ❄  Śnieg  ")
         c = self.card(lay, "Teren")
@@ -4549,6 +4681,7 @@ class App:
             c, ("Pole", "Pow. [m²]", "ze [m]", "cpe", "we [kN/m²]", "netto min", "netto max"),
             (66, 64, 54, 56, 76, 76, 76), 0, (0,))
         self.nb.currentChanged.connect(self._tab_changed)
+        self.nb.setCurrentIndex(TAB_SNOW)                 # na start – śnieg (model 3D od razu dostępny)
 
         for w_ in (self.s_ex, self.s_diff_cb, self.s_obst_lb, self.s_obst_cb, self.s_exc_cb, self.w_ex):
             w_.setVisible(False)
@@ -4920,9 +5053,183 @@ class App:
         d.activateWindow()
 
     def _tab_changed(self, i):
-        if i in (0, 1):
-            self.mode3d.set("śnieg" if i == 0 else "wiatr")
+        use = i == TAB_USE
+        for b in (self.btn3d, self.btn_add):
+            b.setEnabled(not use)
+            b.setToolTip("Obciążenia użytkowe – bez modelu 3D i bez dodawania do projektu (na razie)" if use else
+                         ("" if b is self.btn3d else "Zapisz bieżący model 3D i wyniki jako nowy przypadek projektu"))
+        if i in (TAB_SNOW, TAB_WIND):
+            self.mode3d.set("śnieg" if i == TAB_SNOW else "wiatr")
             self.draw3d()
+
+    # ------------------------------------------------------------ obciążenia użytkowe ---
+    def _build_use_page(self):
+        """Zakładka „Użytkowe” (PN-EN 1991-1-1): rodzaj powierzchni → kategoria (→ użytkowanie dachu kat. I) →
+        opis, przedział normowy z wartością zalecaną, wartość przyjęta (domyślnie zalecana)."""
+        lay = self._page("  ▦  Użytkowe  ")
+        c = self.card(lay, "Powierzchnia")
+        g = c.grid
+        self.use_group = QComboBox()
+        self.use_group.addItems([t for _, t, _, _ in USE_GROUPS])
+        self.use_cat = QComboBox()
+        self.use_like = QComboBox()
+        self.use_like.addItems([e["name"] for e in USE_LIKE])
+        self.use_like_lb = QLabel("Użytkowanie jak")
+        g.addWidget(QLabel("Rodzaj powierzchni"), 1, 0)
+        g.addWidget(self.use_group, 1, 1, 1, 5)
+        g.addWidget(QLabel("Kategoria"), 2, 0)
+        g.addWidget(self.use_cat, 2, 1, 1, 5)
+        g.addWidget(self.use_like_lb, 3, 0)
+        g.addWidget(self.use_like, 3, 1, 1, 5)
+        self.use_desc = LabelX("")
+        self.use_desc.setWordWrap(True)
+        g.addWidget(self.use_desc, 4, 0, 1, 6)
+        c = self.card(lay, "Wartości wg normy")
+        self.use_norm = QLabel("")
+        self.use_norm.setTextFormat(Qt.TextFormat.RichText)
+        self.use_norm.setWordWrap(True)
+        c.grid.addWidget(self.use_norm, 1, 0, 1, 6)
+        c = self.card(lay, "Wartość przyjęta")
+        self.use_q_lb, self.use_q = QLabel("qₖ"), self._mk_entry()
+        self.use_Q_lb, self.use_Q = QLabel("Qₖ"), self._mk_entry()
+        self.use_q_un, self.use_Q_un = self._unit("kN/m²"), self._unit("kN")
+        c.grid.addWidget(self.use_q_lb, 1, 0)
+        c.grid.addWidget(self.use_q, 1, 1, 1, 1, AL_R)
+        c.grid.addWidget(self.use_q_un, 1, 2)
+        c.grid.addWidget(self.use_Q_lb, 2, 0)
+        c.grid.addWidget(self.use_Q, 2, 1, 1, 1, AL_R)
+        c.grid.addWidget(self.use_Q_un, 2, 2)
+        self.use_check = LabelX("")
+        self.use_check.setWordWrap(True)
+        c.grid.addWidget(self.use_check, 3, 0, 1, 6)
+        lay.addStretch(1)
+        self.use_group.currentIndexChanged.connect(lambda i: self._use_fill_cats())
+        self.use_cat.currentIndexChanged.connect(lambda i: self._use_show(reset=True))
+        self.use_like.currentIndexChanged.connect(lambda i: self._use_show(reset=True))
+        for e in (self.use_q, self.use_Q):
+            e.textEdited.connect(lambda t: self._use_check())
+        self._use_fill_cats()
+
+    def _use_fill_cats(self):
+        gi = max(self.use_group.currentIndex(), 0)
+        self.use_cat.blockSignals(True)
+        self.use_cat.clear()
+        self.use_cat.addItems([e["name"] for e in USE_GROUPS[gi][3]])
+        self.use_cat.blockSignals(False)
+        self._use_show(reset=True)
+
+    def _use_entry(self):
+        """(wybrana pozycja, pozycja z wartościami – dla kat. I: wybrane użytkowanie, źródło)."""
+        gk, _, tab, es = USE_GROUPS[max(self.use_group.currentIndex(), 0)]
+        e = es[max(self.use_cat.currentIndex(), 0)]
+        if e.get("like"):
+            v = USE_LIKE[max(self.use_like.currentIndex(), 0)]
+            src = next(t for k, _, t, es_ in USE_GROUPS if v in es_)
+            return e, v, f"Tablica 6.9 (kategoria I) → {src}"
+        return e, e, tab
+
+    @staticmethod
+    def _use_fmt(v):
+        t = f"{v:.2f}".rstrip("0")
+        return (t + "0" if t.endswith(".") else t).replace(".", ",")
+
+    def _use_show(self, reset=False):
+        e, v, src = self._use_entry()
+        like = bool(e.get("like"))
+        self.use_like.setVisible(like)
+        self.use_like_lb.setVisible(like)
+        desc = e["desc"] + (f"\nUżytkowanie: {v['name']}. {v['desc']}" if like else "")
+        self.use_desc.configure(text=desc)
+        line = bool(v.get("line"))
+        qu = "kN/m" if line else "kN/m²"
+        f = self._use_fmt
+        rows = []
+        for sym, rng, un, what in (("q<sub>k</sub>", v.get("q"), qu,
+                                    "obciążenie liniowe (poziome)" if line else "obciążenie równomiernie rozłożone"),
+                                   ("Q<sub>k</sub>", v.get("Q"), "kN", "obciążenie skupione")):
+            if not rng:
+                continue
+            lo, hi, rec = rng
+            if abs(lo - hi) < 1e-9:
+                rows.append(f"<b>{sym} = {f(rec)} {un}</b> – {what} (wartość jedyna)")
+            else:
+                rows.append(f"{sym}: od {f(lo)} do {f(hi)} {un} – {what}; "
+                            f"<b>wartość zalecana {f(rec)} {un}</b>")
+        if not rows:
+            rows.append("Norma nie podaje wartości liczbowych.")
+        notes = [n for n in (v.get("note"), e.get("note") if e is not v else None) if n]
+        if v.get("low_min"):
+            notes.append("Załącznik krajowy (NB1): wartości nie mniejsze niż dolne granice przedziałów Tablicy 6.2. "
+                         "Jeśli jest to konieczne (np. schody, balkony), wartości zwiększa się (6.3.1.2(2)).")
+        html_ = "<br>".join(rows) + f"<br><span style='color:{MUTED}'>PN-EN 1991-1-1, {src}" + \
+            "".join(f"<br>{html.escape(n)}" for n in notes) + "</span>"
+        self.use_norm.setText(html_)
+        has_q, has_Q = bool(v.get("q")) or v.get("q") is None and not v.get("Q"), bool(v.get("Q"))
+        self._use_has = (has_q, has_Q)
+        for w_ in (self.use_q_lb, self.use_q, self.use_q_un):
+            w_.setVisible(has_q)
+        for w_ in (self.use_Q_lb, self.use_Q, self.use_Q_un):
+            w_.setVisible(has_Q)
+        self.use_q_un.setText(qu)
+        if reset:
+            self.use_q.setText(f"{v['q'][2]:g}" if v.get("q") else "")
+            self.use_Q.setText(f"{v['Q'][2]:g}" if v.get("Q") else "")
+        self._use_check()
+
+    def _use_check(self):
+        """Wartość przyjęta względem przedziału normowego."""
+        e, v, _ = self._use_entry()
+        msgs, bad = [], False
+        has = getattr(self, "_use_has", (True, True))
+        for ent, rng, sym, on in ((self.use_q, v.get("q"), "qₖ", has[0]), (self.use_Q, v.get("Q"), "Qₖ", has[1])):
+            if not on:
+                continue
+            t = ent.text().strip()
+            if not t:
+                continue
+            x = parse_num(t)
+            if x is None or x < 0:
+                msgs.append(f"{sym}: niepoprawna wartość.")
+                bad = True
+                continue
+            if not rng:
+                continue
+            lo, hi, rec = rng
+            if x < lo - 1e-9:
+                msgs.append(f"{sym} = {self._use_fmt(x)} – poniżej dolnej granicy {self._use_fmt(lo)}"
+                            + (" (niedopuszczalne wg Załącznika krajowego NB1)." if v.get("low_min") else "."))
+                bad = True
+            elif x > hi + 1e-9:
+                msgs.append(f"{sym} = {self._use_fmt(x)} – powyżej przedziału normowego (wartość zwiększona).")
+            elif abs(x - rec) > 1e-9:
+                msgs.append(f"{sym} = {self._use_fmt(x)} – w przedziale normowym, inna niż zalecana.")
+        self.use_check.configure(text=" ".join(msgs))
+        self.use_check.setStyleSheet(f"color:{MANUAL_COL};" if bad else f"color:{MUTED};")
+        for ent in (self.use_q, self.use_Q):
+            x = parse_num(ent.text()) if ent.text().strip() else 0.0
+            self._mark_bad(ent, x is None)
+
+    def _use_state(self):
+        e, v, _ = self._use_entry()
+        return dict(grupa=USE_GROUPS[max(self.use_group.currentIndex(), 0)][0], kategoria=e["code"],
+                    uzytkowanie=v["code"] if e.get("like") else None, qk=self.use_q.text().strip(),
+                    Qk=self.use_Q.text().strip())
+
+    def _use_set_state(self, d):
+        if not d:
+            return
+        gi = next((i for i, g_ in enumerate(USE_GROUPS) if g_[0] == d.get("grupa")), None)
+        if gi is None:
+            return
+        self.use_group.setCurrentIndex(gi)
+        ci = next((i for i, e in enumerate(USE_GROUPS[gi][3]) if e["code"] == d.get("kategoria")), 0)
+        self.use_cat.setCurrentIndex(ci)
+        li = next((i for i, e in enumerate(USE_LIKE) if e["code"] == d.get("uzytkowanie")), None)
+        if li is not None:
+            self.use_like.setCurrentIndex(li)
+        self.use_q.setText(str(d.get("qk", "")))
+        self.use_Q.setText(str(d.get("Qk", "")))
+        self._use_check()
 
     # ----------------------------------------------------------- formularz ---
     def fill_slots(self, slots, fields, diff_on):
@@ -5710,7 +6017,7 @@ class App:
         dirty = self.dirty
         self.set_state(case["state"])
         self.dirty = dirty
-        self.nb.setCurrentIndex(1 if ex.get("mode") == "wiatr" else 0)
+        self.nb.setCurrentIndex(TAB_WIND if ex.get("mode") == "wiatr" else TAB_SNOW)
         self.mode3d.set(ex.get("mode", "śnieg"))
         if self.snow and ex.get("snow_case") in [c["name"] for c in self.snow["cases"]]:
             self.snow_case.set(ex["snow_case"])
@@ -5813,6 +6120,7 @@ class App:
         st["opcje"] = {n: getattr(self, n).get() for n in self.STATE_VARS}
         st["lokalizacja"] = self.loc.get()
         st["strefy_recznie"] = any(self._manual_flags().values())
+        st["uzytkowe"] = self._use_state()
         return st
 
     def set_state(self, st):
@@ -5825,6 +6133,7 @@ class App:
                 if n in self.STATE_VARS:
                     getattr(self, n).set(val)
             self.loc.set(st.get("lokalizacja"))
+            self._use_set_state(st.get("uzytkowe"))
             self.recalc()
             th = st.get("opcje", {}).get("theta")
             vr = st.get("opcje", {}).get("variant")
@@ -6510,6 +6819,7 @@ class App:
         # wymiary przed etykietami: opisy wymiarów zostają na liniach wymiarowych, etykiety obciążeń je omijają;
         # opisy kątów na końcu – omijają etykiety (jak dotąd)
         self._defer_angles = []
+        self._dim_used = set()                   # strony z niebieskimi wymiarami na gruncie: ("x"/"y", ±1)
         try:
             if mode == "śnieg" and self.dims3d.get():
                 self.draw_snow_dims(cv, g, P, facing, size)
@@ -6789,25 +7099,28 @@ class App:
         self._dim_box(cv, x, y, text, BDIM_COL, "#fff7ed", key)
 
     def draw_bdims(self, cv, mode, g, P, facing, size):
-        """Wymiary budynku (klikalne). Poziome – na gruncie, pionowe – w płaszczyźnie ściany szczytowej.
-        Wymiary ogólne odsunięte od budynku o kO (łączą się w narożu), cząstkowe bliżej – o kI.
-        Linie odniesienia zawsze dochodzą do punktów bazowych."""
+        """Wymiary budynku (klikalne). Poziome – na gruncie, pionowe – w płaszczyźnie ściany szczytowej, po dalszej
+        stronie budynku (nie zasłaniają go). Kolejność od budynku: niebieskie wymiary pól, cząstkowe wymiary
+        budynku, ogólne – każda linia na pierwszym wolnym poziomie (moduł N = DIM_STEP · rozmiar modelu); strona
+        bez niebieskich wymiarów – wymiary budynku bliżej. Linie odniesienia zawsze dochodzą do punktów bazowych."""
         col = BDIM_COL
         snow = mode == "śnieg"
         pf = "s_" if snow else "w_"
         z0_ = (0, 0, 0)
         N = DIM_STEP * size
-        kI, kO = 2 * N, 3 * N                    # cząstkowe – 2N, ogólne – 3N (pola obciążenia – N)
+        used = getattr(self, "_dim_used", set())
+        first = lambda side: 2 if side in used else 1           # pierwszy wolny poziom przy danej stronie
         if g.kind == "dome":
             sh = g.shape
             yf, ny = (0.0, -1) if facing((0, -1, 0)) else (sh.D, 1)
             xs, nx = (0.0, -1) if facing((-1, 0, 0)) else (sh.D, 1)
-            self._dchain(cv, P, lambda u: (u, sh.rho, 0.0), lambda u: (u, yf + ny * kO, 0.0),
+            self._dchain(cv, P, lambda u: (u, sh.rho, 0.0), lambda u: (u, yf + ny * first(("y", ny)) * N, 0.0),
                          [(0.0, sh.D, "", "w_D")], z0_, col)
-            base = lambda u: (xs, sh.rho, u) if u <= sh.H + 1e-9 else (sh.rho, sh.rho, u)
-            self._dchain(cv, P, base, lambda u: (xs + nx * kI, sh.rho, u),
+            xb, nb = (sh.D, 1) if nx < 0 else (0.0, -1)          # wysokości po drugiej stronie kopuły
+            base = lambda u: (xb, sh.rho, u) if u <= sh.H + 1e-9 else (sh.rho, sh.rho, u)
+            self._dchain(cv, P, base, lambda u: (xb + nb * N, sh.rho, u),
                          [(0.0, sh.H, "", "w_H"), (sh.H, sh.H + sh.f, "", "w_f")], z0_, col)
-            self._dchain(cv, P, base, lambda u: (xs + nx * kO, sh.rho, u), [(0.0, sh.H + sh.f, "")], z0_, col,
+            self._dchain(cv, P, base, lambda u: (xb + nb * 2 * N, sh.rho, u), [(0.0, sh.H + sh.f, "")], z0_, col,
                          lab_t=0.78)
             return
         L = g.L
@@ -6824,7 +7137,8 @@ class App:
         rz = g.main.rz if snow else g.rz
         main = g.main if snow else g.shape
         # ---- poziome, na gruncie: długość L (ogólny) wzdłuż ściany podłużnej
-        self._dchain(cv, P, lambda u: (u, yf, 0.0), lambda u: (u, yL + ny * kO, 0.0), [(0.0, L, "", pf + "L")],
+        kL = first(("y", ny)) * N
+        self._dchain(cv, P, lambda u: (u, yf, 0.0), lambda u: (u, yL + ny * kL, 0.0), [(0.0, L, "", pf + "L")],
                      z0_, col, lab_t=0.5 if yL == yf else 0.2)      # opis z dala od wymiarów przybudówki
         # ---- poziome, na gruncie, przy ścianie szczytowej: szerokości
         if snow and g.upper:
@@ -6839,15 +7153,20 @@ class App:
         if snow and g.kind == "obst" and g.p["otype"] == OBST_TYPES[1]:
             part = [(0.0, g.p["yob"], "", "s_yob")]
             pbase = lambda u: (xs, u, g.H)
+        lv = first(("x", nx))
         if part:
-            self._dchain(cv, P, pbase, lambda u: (xs + nx * kI, u, 0.0), part, z0_, col,
+            kP = lv * N
+            self._dchain(cv, P, pbase, lambda u: (xs + nx * kP, u, 0.0), part, z0_, col,
                          via=lambda u: (xs, u, 0.0))
-        self._dchain(cv, P, lambda u: (xs, u, 0.0), lambda u: (xs + nx * kO, u, 0.0), overall, z0_, col)
-        # ---- pionowe, w płaszczyźnie ściany szczytowej: wysokości
-        if snow and g.upper and yf == y0:
+            lv += 1
+        kB = lv * N
+        self._dchain(cv, P, lambda u: (xs, u, 0.0), lambda u: (xs + nx * kB, u, 0.0), overall, z0_, col)
+        # ---- pionowe, w płaszczyźnie ściany szczytowej, po dalszej stronie budynku: wysokości
+        yb, nb = (y1, 1) if yf == y0 else (y0, -1)
+        if snow and g.upper and yb == y0:
             ze, hk = g.upper.rz(xs, y0 + 1e-9), None
         else:
-            ze = rz(xs, yf)
+            ze = rz(xs, yb)
             hk = pf + "H" if abs(ze - g.H) < 1e-6 else None
         hparts = [(0.0, ze, "", hk)]
         if not snow and g.kind == "flat" and g.hp > 0:
@@ -6869,13 +7188,13 @@ class App:
         def hbase(u):
             if top_pt and abs(u - top_pt[2]) < 1e-9:
                 return top_pt
-            return (xs, yf, u)
+            return (xs, yb, u)
         if len(hparts) > 1 or top_pt:                           # cząstkowe – bliżej budynku
-            self._dchain(cv, P, hbase, lambda u: (xs, yf + ny * kI, u), hparts, z0_, col)
-            self._dchain(cv, P, hbase, lambda u: (xs, yf + ny * kO, u), [(0.0, htot, "")], z0_, col,
+            self._dchain(cv, P, hbase, lambda u: (xs, yb + nb * N, u), hparts, z0_, col)
+            self._dchain(cv, P, hbase, lambda u: (xs, yb + nb * 2 * N, u), [(0.0, htot, "")], z0_, col,
                          lab_t=0.78)                            # opis wyżej niż opisy cząstkowe
-        else:                                                   # jedna wysokość – jako wymiar ogólny
-            self._dchain(cv, P, hbase, lambda u: (xs, yf + ny * kO, u), hparts, z0_, col)
+        else:                                                   # jedna wysokość – pierwszy poziom
+            self._dchain(cv, P, hbase, lambda u: (xs, yb + nb * N, u), hparts, z0_, col)
         # ---- kąty połaci
         if isinstance(main, Prism):
             seen = []
@@ -6917,7 +7236,7 @@ class App:
             xm = L / 2
             self._angle_label(cv, P, (xm, my, up.rz(xm, my) + 0.01 * size), f"{f2(g.p['aup'], 1)}°", "s_aup")
         # ---- elementy dodatkowe (przy swoich krawędziach)
-        if snow and g.upper:
+        if snow and g.upper and not facing((0, -1, 0)):          # uskok widoczny tylko od strony dachu niższego
             self._dchain(cv, P, lambda u: (xs, 0.0, u), lambda u: (xs, N, u),
                          [(g.H, g.H + g.p["dh"], "", "s_dh")], z0_, col)
         if snow and g.kind == "obst" and g.p["otype"] == OBST_TYPES[1]:
@@ -7004,6 +7323,8 @@ class App:
         s = self.snow
         case = next((c for c in s["cases"] if c["name"] == self.snow_case.get()), s["cases"][0])
         N_ = DIM_STEP * size
+        if getattr(g, "upper", None) and facing((0, -1, 0)):     # dach niższy za wyższą budowlą – bez wymiarów
+            return
         for ax, a0, a1, z, segs in case.get("xdim", []):     # zasięg zasp na elementach dodatkowych
             segs = [(u0, u1, "") for u0, u1 in segs if u1 - u0 > 1e-6]
             if not segs:
@@ -7130,6 +7451,8 @@ class App:
         # ściany: na gruncie, wzdłuż ściany bocznej
         segs = [(z["srange"][0], z["srange"][1], z["name"]) for z in w["zones"] if "srange" in z]
         if segs:
+            side = ("x", 1 if out[0] > 0 else -1) if abs(out[0]) > abs(out[1]) else ("y", 1 if out[1] > 0 else -1)
+            getattr(self, "_dim_used", set()).add(side)
             self._dchain(cv, P, lambda u: (*to(u, tside), 0.0),
                          lambda u: (to(u, tside)[0] + out[0] * k1, to(u, tside)[1] + out[1] * k1, 0.0), segs, lab, col)
         if g.kind in ("can1", "can2"):

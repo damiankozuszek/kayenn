@@ -146,10 +146,60 @@ class Runner:
         self.guard(f"recalc: {what}", self.app.recalc)
         self.pump(1)
 
+    # ============================================================= użytkowe ===
+    def test_use(self):
+        """Zakładka Użytkowe: wszystkie pozycje (także dachy kat. I – każde użytkowanie), wartość domyślna =
+        zalecana, kontrola dolnej granicy (NB1), zapis i odczyt stanu; bez modelu 3D i dodawania."""
+        m, a = self.m, self.app
+        if a.nb.tabText(m.TAB_USE).strip().split()[-1] != "Użytkowe" or "Śnieg" not in a.nb.tabText(m.TAB_SNOW):
+            self.fail(f"kolejność zakładek: {[a.nb.tabText(i) for i in range(a.nb.count())]}")
+        a.nb.setCurrentIndex(m.TAB_USE)
+        self.pump(2)
+        if a.btn3d.isEnabled() or a.btn_add.isEnabled():
+            self.fail("na zakładce Użytkowe przyciski modelu 3D / dodawania są aktywne")
+        n = 0
+        for gi, (gk, gt, tab, es) in enumerate(m.USE_GROUPS):
+            a.use_group.setCurrentIndex(gi)
+            for ci, e in enumerate(es):
+                a.use_cat.setCurrentIndex(ci)
+                likes = range(len(m.USE_LIKE)) if e.get("like") else [None]
+                for li in likes:
+                    if li is not None:
+                        a.use_like.setCurrentIndex(li)
+                    self.pump(1)
+                    _, v, _ = a._use_entry()
+                    n += 1
+                    if not a.use_desc.text() or not a.use_norm.text():
+                        self.fail(f"{gt} / {e['name']}: brak opisu albo wartości normowych")
+                    for ent, key in ((a.use_q, "q"), (a.use_Q, "Q")):
+                        rng = v.get(key)
+                        if rng and abs(m.parse_num(ent.text()) - rng[2]) > 1e-9:
+                            self.fail(f"{e['name']}: wartość domyślna {ent.text()} ≠ zalecana {rng[2]}")
+                    if v.get("q") and v.get("low_min"):
+                        a.use_q.setText(f"{v['q'][0] - 0.1:g}")
+                        a._use_check()
+                        if "NB1" not in a.use_check.text():
+                            self.fail(f"{e['name']}: wartość poniżej dolnej granicy bez ostrzeżenia")
+        self.count("pozycje obciążeń użytkowych", n)
+        a.use_group.setCurrentIndex(3)
+        a.use_cat.setCurrentIndex(next(i for i, e in enumerate(m.USE_GROUPS[3][3]) if e.get("like")))
+        a.use_like.setCurrentIndex(4)
+        a.use_q.setText("6.5")
+        st = a.get_state()
+        a.use_group.setCurrentIndex(0)
+        a.set_state(st)
+        if a._use_state() != st["uzytkowe"]:
+            self.fail(f"stan zakładki Użytkowe nie wraca po odczycie: {a._use_state()} ≠ {st['uzytkowe']}")
+        self.shot(a.win, "0_uzytkowe")
+        a.nb.setCurrentIndex(m.TAB_SNOW)
+        self.pump(2)
+        if not a.btn3d.isEnabled():
+            self.fail("po powrocie na zakładkę Śnieg przycisk modelu 3D nieaktywny")
+
     # ================================================================ śnieg ===
     def test_snow(self):
         m, a = self.m, self.app
-        a.nb.setCurrentIndex(0)
+        a.nb.setCurrentIndex(m.TAB_SNOW)
         a.mode3d.set("śnieg")
         self.pump()
         all_secs = sorted({k for secs in m.EXC_SECTIONS.values() for k, _, _ in secs})
@@ -218,7 +268,7 @@ class Runner:
     # ================================================================ wiatr ===
     def test_wind(self):
         m, a = self.m, self.app
-        a.nb.setCurrentIndex(1)
+        a.nb.setCurrentIndex(m.TAB_WIND)
         a.mode3d.set("wiatr")
         self.pump()
         for wtype in m.WIND_TYPES:
@@ -305,13 +355,13 @@ class Runner:
             self.fail("okno główne i okno obciążeń normowych powinny być widoczne razem")
         if a.pw.btn_codes.text() != "Zamknij obciążenia normowe":
             self.fail(f"przycisk okna głównego: „{a.pw.btn_codes.text()}”")
-        a.nb.setCurrentIndex(1)
+        a.nb.setCurrentIndex(m.TAB_WIND)
         a.mode3d.set("wiatr")
         self.pump()
         self.shot(a.win, "1_glowne_wiatr")
         self.shot(a.win3d, "3_okno3d_wiatr")
         self.guard("dodanie przypadku (wiatr)", a.add_or_update)
-        a.nb.setCurrentIndex(0)
+        a.nb.setCurrentIndex(m.TAB_SNOW)
         a.mode3d.set("śnieg")
         self.pump()
         self.shot(a.win, "1_glowne_snieg")
@@ -384,6 +434,26 @@ class Runner:
         self.guard("rozwinięcie karty wiatru", pw.cards[1].toggle)
         self.pump(5)
         self.shot(pw, "6_projekt_wiatr")
+        # Duplikuj – kopia tuż pod oryginałem, nazwa z dopiskiem „ - kopia”
+        orig = a.project["cases"][0]
+        btns = [b.text() for b in pw.card_of(orig).findChildren(QPushButton)]
+        i_e, i_d, i_u = (btns.index(t) if t in btns else -1 for t in ("Edytuj", "Duplikuj", "Usuń"))
+        if not (0 <= i_e < i_d < i_u):
+            self.fail(f"przyciski karty: {btns} (Duplikuj ma być między Edytuj a Usuń)")
+        a.dirty = False
+        self.guard("Duplikuj", next(b for b in pw.card_of(orig).findChildren(QPushButton)
+                                   if b.text() == "Duplikuj").click)
+        self.pump(3)
+        cp = a.project["cases"][1] if len(a.project["cases"]) > 2 else None
+        if cp is None or cp["name"] != orig["name"] + " - kopia" or cp["state"] != orig["state"] or                 cp["id"] == orig["id"] or not a.dirty or [c.case for c in pw.cards] != a.project["cases"]:
+            self.fail("Duplikuj nie utworzył kopii tuż pod przypadkiem (nazwa „… - kopia”, te same dane)")
+        else:
+            cp["state"]["pola"]["s_L"] = "99"
+            if orig["state"]["pola"].get("s_L") == "99":
+                self.fail("kopia przypadku współdzieli dane z oryginałem")
+            a.project["cases"].remove(cp)
+            pw.rebuild()
+            self.pump(2)
         self.guard("przeciąganie karty myszą", self.drag_cards, pw)
         # przenoszenie (zmiana kolejności)
         ids = [c["id"] for c in a.project["cases"]]
@@ -845,7 +915,7 @@ except SystemExit:
             self.guard("uruchomienie aplikacji", self.setup)
             if not hasattr(self, "app"):
                 return
-            for name, fn in (("śnieg", self.test_snow), ("wiatr", self.test_wind), ("stan", self.test_state),
+            for name, fn in (("użytkowe", self.test_use), ("śnieg", self.test_snow), ("wiatr", self.test_wind), ("stan", self.test_state),
                              ("projekt", self.test_project)):
                 t1 = time.time()
                 self.ctx = name
