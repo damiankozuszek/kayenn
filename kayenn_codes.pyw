@@ -1980,7 +1980,7 @@ def wind_variants(g, theta):
         return [("pole I: ssanie (−0,2)", ("n", "n")), ("pole I: parcie (+0,2)", ("n", "p"))]
     if k in ("can1", "can2"):
         return [("maksimum (+, ku dołowi)", ("max", "max")), ("minimum (−, ku górze)", ("min", "min"))]
-    if (k in ("mono", "hip") and theta == 0) or (k == "multi" and theta == 0 and
+    if (k == "mono" and theta == 0) or (k == "hip" and theta in (0, 90)) or (k == "multi" and theta == 0 and
                                                  g.p["mtype"] == MULTI_TYPES[1]):
         return [("F, G, H: ssanie (−)", ("n", "n")), ("F, G, H: parcie (+)", ("p", "n"))]
     if (k == "duo" and theta in (0, 180)) or (k == "multi" and theta == 0):
@@ -6548,10 +6548,12 @@ class App:
                                   kind=z["kind"]))
                 continue
             roofy = z["kind"] in ("roof", "canopy")
-            faces.append(dict(poly=P, fill=ROOF_COL if roofy else WALL_COL, outline=ROOF_OUT if roofy else WALL_OUT,
-                              n=n, cull=not canopy, kind=z["kind"], base=("w", id(z))))
             d = tsc * abs(z["we"])
-            if d < 1e-9:
+            zero = d < 1e-9                        # pole z obciążeniem 0 (np. cpe = −0,0) – etykieta na powierzchni
+            faces.append(dict(poly=P, fill=ROOF_COL if roofy else WALL_COL, outline=ROOF_OUT if roofy else WALL_OUT,
+                              n=n, cull=not canopy, kind=z["kind"], base=("w", id(z)),
+                              label=lab if zero else None, grp=grp if zero else None))
+            if zero:
                 continue
             top = [tuple(a_ + nn * d for a_, nn in zip(q, n)) for q in P]
             edge = mix((255, 255, 255), PRESS_COL if z["cpe"] > 0 else SUCT_COL, 0.85)
@@ -7521,7 +7523,7 @@ class App:
         spans = [sp for sp in case.get("spans", []) if sp[1] - sp[0] > 1e-6]
         if not spans:
             return
-        xs, nx = (0.0, -1) if facing((-1, 0, 0)) else (g.L, 1)
+        xs, nx = (g.L, 1) if facing((-1, 0, 0)) else (0.0, -1)        # dalszy szczyt – po drugiej stronie budynku
         pr = g.main
         col = SDIM_COL
         lo_, hi_ = min(sp[0] for sp in spans), max(sp[1] for sp in spans)
