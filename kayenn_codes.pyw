@@ -3326,7 +3326,7 @@ class MapDialog(QDialog):
 
 class Win3D(QWidget):
     def __init__(self, app):
-        super().__init__(None, Qt.WindowType.Window)
+        super().__init__(app.pw, Qt.WindowType.Window)  # należy do okna głównego: nad nim, wspólny przycisk na pasku
         self.app = app
         self.setObjectName("win3d")
 
@@ -3985,9 +3985,7 @@ class ProjectInfoDialog(QDialog):
         self.loc_label.configure(text=t)
 
     def pick(self):
-        loc = self.app.pick_location(self, self.loc)
-        if loc:
-            self.set_loc(loc)
+        self.app.pick_location(self, self.loc, self.set_loc)
 
 
 # ===================================================================
@@ -4513,10 +4511,21 @@ class App:
     def project_info(self):
         """Plik → Informacje o projekcie…: nazwa projektu i lokalizacja (mapa)."""
         host = self.host
+        d = getattr(host, "_info_dlg", None)
+        if d is not None:                            # już otwarte – na wierzch
+            d.raise_()
+            d.activateWindow()
+            return
         cur = host.loc.get()
         d = ProjectInfoDialog(host, host.pw, host.project.get("name") or "", cur)
-        if not d.exec():
-            return
+        d.setModal(False)                            # nie blokuje pozostałych okien
+        host._info_dlg = d
+        d.accepted.connect(lambda: host._apply_info(d, cur))
+        d.finished.connect(lambda r: (setattr(host, "_info_dlg", None), d.deleteLater()))
+        d.show()
+
+    def _apply_info(self, d, cur):
+        host = self.host
         changed = False
         name = " ".join(d.name_edit.text().split())
         if name != (host.project.get("name") or ""):
@@ -4528,8 +4537,9 @@ class App:
         if changed:
             host.project_changed()
 
-    def pick_location(self, parent, cur):
-        """Wybór punktu na mapie (bez QtWebEngine – współrzędne wpisane ręcznie). None – anulowano."""
+    def pick_location(self, parent, cur, done):
+        """Wybór punktu na mapie (bez QtWebEngine – współrzędne wpisane ręcznie); wynik → done(loc).
+        Mapa nie blokuje pozostałych okien."""
         try:
             import PySide6.QtWebEngineWidgets  # noqa: F401
         except ImportError:
@@ -4542,17 +4552,19 @@ class App:
                                            "Szerokość i długość geograficzna (np. 51.673, 21.874):",
                                            text=f"{cur['lat']:.5f}, {cur['lon']:.5f}" if cur else "")
             if not ok:
-                return None
+                return
             try:
                 la, lo = [float(t.replace(",", ".")) for t in txt.replace(";", " ").replace(", ", " ").split()[:2]]
             except ValueError:
                 QMessageBox.warning(parent, "Lokalizacja", "Nie rozpoznano współrzędnych.")
-                return None
-            return dict(lat=la, lon=lo, alt=None, name="")
+                return
+            done(dict(lat=la, lon=lo, alt=None, name=""))
+            return
         dlg = MapDialog(parent, "snow", cur)
-        if dlg.exec() and dlg.result_loc:
-            return dlg.result_loc
-        return None
+        dlg.setModal(False)
+        dlg.accepted.connect(lambda: dlg.result_loc and done(dlg.result_loc))
+        dlg.finished.connect(lambda r: dlg.deleteLater())
+        dlg.show()
 
     @staticmethod
     def _auto_values(loc):
@@ -5659,7 +5671,8 @@ class App:
         dlg.resize(min(1000, scr.width() - 80), scr.height() - 80)
         dlg.paintRequested.connect(lambda p: doc.print_(p))
         self._preview = dlg                               # (testy: dostęp do okna podglądu)
-        dlg.exec()
+        dlg.setModal(False)                               # nie blokuje pozostałych okien
+        dlg.show()
 
     # ============================================== sceny i rysowanie modelu 3D ===
     def get_state(self):

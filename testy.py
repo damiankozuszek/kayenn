@@ -422,6 +422,7 @@ class Runner:
         if a.win3d is not None and suf in a.win3d.windowTitle():
             self.fail("model 3D panelu dodawania ma dopisek edycji")
         self.shot(ed.win, "11_panel_edycji")
+        self.guard("okna należą do okna głównego", self.check_owned)
         key = "w_L" if case["extra"]["mode"] == "wiatr" else "s_L"
         ed.v[key].set("15")
         self.guard("recalc panelu edycji", ed.recalc)
@@ -452,14 +453,19 @@ class Runner:
         # dokument do wydruku (bez drukarki)
         # Plik → Informacje o projekcie…: nazwa i lokalizacja (wspólna dla wszystkich przypadków)
         warsaw = dict(lat=52.2297, lon=21.0122, alt=100.0, name="Warszawa")
-        old_exec = m.ProjectInfoDialog.exec
+        from PySide6.QtWidgets import QDialog as _QD
+        old_show = m.ProjectInfoDialog.show
+        seen_info = {}
 
-        def fake_exec(dlg):
+        def fake_show(dlg):
+            old_show(dlg)
+            self.pump(2)
+            seen_info["modal"] = dlg.isModal() or self.qapp.activeModalWidget() is not None
             self.shot(dlg, "12_informacje_o_projekcie")
             dlg.name_edit.setText("  Hala   magazynowa A ")
             dlg.set_loc(warsaw)
-            return 1
-        m.ProjectInfoDialog.exec = fake_exec
+            dlg.accept()
+        m.ProjectInfoDialog.show = fake_show
         try:
             acts = {x.text(): x for x in a.pw.menu_bar.actions()[0].menu().actions()}
             if "Informacje o projekcie…" not in acts:
@@ -468,7 +474,9 @@ class Runner:
                 a.dirty = False
                 self.guard("Informacje o projekcie", acts["Informacje o projekcie…"].trigger)
         finally:
-            m.ProjectInfoDialog.exec = old_exec
+            m.ProjectInfoDialog.show = old_show
+        if seen_info.get("modal"):
+            self.fail("okno „Informacje o projekcie” blokuje pozostałe okna")
         if a.project.get("name") != "Hala magazynowa A" or not a.dirty:
             self.fail(f"nazwa projektu: „{a.project.get('name')}”, zmiana zaznaczona: {a.dirty}")
         if a.pw.windowTitle().lstrip("*") != "Hala magazynowa A":
@@ -546,6 +554,21 @@ class Runner:
         self.ctx = "dwuklik na pliku .kayenn"
         self.guard("uruchomienie z plikiem", self.start_with_file, path, len(before["przypadki"]))
 
+    def check_owned(self):
+        from PySide6.QtWidgets import QApplication
+        """Stała zasada: jeden przycisk programu na pasku zadań – każde widoczne okno (panele, modele 3D,
+        okna dialogowe) należy do okna głównego, więc jest nad nim i minimalizuje się razem z nim."""
+        pw = self.app.pw
+        for w in QApplication.topLevelWidgets():
+            if not w.isVisible() or w is pw or not w.isWindow():
+                continue
+            p = w.parentWidget()
+            while p is not None and p is not pw:
+                p = p.parentWidget()
+            if p is not pw:
+                self.fail(f"okno „{w.windowTitle()}” ({type(w).__name__}) nie należy do okna głównego – "
+                          "osobny przycisk na pasku zadań, może schować się pod oknem głównym")
+
     def print_preview(self):
         """Drukuj → okno podglądu wydruku (QPrintPreviewDialog) z wyrenderowanymi stronami; zapis do PDF."""
         from PySide6 import QtPrintSupport
@@ -553,10 +576,12 @@ class Runner:
         a = self.app
         seen = {}
         cls = QtPrintSupport.QPrintPreviewDialog
-        old_exec = cls.exec
+        old_show = cls.show
 
-        def fake_exec(dlg):
-            dlg.show()
+        def fake_show(dlg):
+            old_show(dlg)
+            if dlg.isModal():
+                self.fail("podgląd wydruku blokuje pozostałe okna")
             self.pump(10)
             seen["title"] = dlg.windowTitle()
             self.shot(dlg, "10_podglad_wydruku")
@@ -567,12 +592,11 @@ class Runner:
             dlg.paintRequested.emit(pr)                  # to samo, co drukowanie z podglądu
             seen["pdf"] = os.path.getsize(pdf) if os.path.exists(pdf) else 0
             dlg.close()
-            return 0
-        cls.exec = fake_exec
+        cls.show = fake_show
         try:
             a.print_project()
         finally:
-            cls.exec = old_exec
+            cls.show = old_show
         if "title" not in seen:
             self.fail("Drukuj nie otworzyło podglądu wydruku")
             return
