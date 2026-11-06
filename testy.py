@@ -430,7 +430,8 @@ class Runner:
             self.fail(f"okno główne pokazuje {len(pw.cards)} kart zamiast 2")
             return
         acts = [x.text() for x in pw.menu_bar.actions()[0].menu().actions() if not x.isSeparator()]
-        want = ["Nowy projekt", "Otwórz plik projektu…", "Zapisz", "Zapisz jako…", "Informacje o projekcie…", "Zakończ"]
+        want = ["Nowy projekt", "Otwórz plik projektu…", "Zapisz", "Zapisz jako…", "Informacje o projekcie…", "Drukuj…",
+                "Zakończ"]
         if acts != want:
             self.fail(f"menu Plik okna głównego: {acts} zamiast {want}")
         # bez nazw modułów w tytułach; okno główne – tylko nazwa projektu
@@ -826,6 +827,17 @@ class Runner:
             self.fail(f"tytuł podglądu: „{seen['title']}”")
         if seen.get("pdf", 0) < 10000:
             self.fail(f"wydruk z podglądu do PDF ma tylko {seen.get('pdf')} B")
+        # podgląd otwarty dłużej: drukarka nie może zniknąć po wyjściu z print_project (dawniej – awaria programu)
+        import gc
+        from PySide6.QtPrintSupport import QPrintPreviewWidget
+        a.print_project()
+        self.pump(5)
+        gc.collect()
+        pv = a._preview.findChild(QPrintPreviewWidget)
+        pv.updatePreview()
+        self.pump(10)
+        a._preview.close()
+        self.pump(5)
         self.count("testy wydruku")
 
     def start_with_file(self, path, n_cases):
@@ -950,6 +962,206 @@ except SystemExit:
         top.toggle()
         self.count("testy przeciągania")
 
+    # ======================================================= obciążenia własne ===
+    def test_lab(self):
+        """Obciążenia własne (KAYENN Lab): przycisk okna głównego, pozycje ręczne i z bazy materiałów, wymiary,
+        kontrola jednostek, dodanie do projektu, edycja, wydruk, zapis/odczyt; baza materiałów: wyszukiwarka,
+        edycja, duplikowanie, usuwanie (w pliku tymczasowym, nie w bazie użytkownika)."""
+        m, a = self.m, self.app
+        pw = a.pw
+        m.MAT_USER_OVERRIDE = os.path.join(tempfile.mkdtemp(prefix="kayenn_mat_"), "materialy.txt")
+        items, bad = m.mat_load(m.MAT_DEFAULT)
+        if len(items) < 2000 or bad:
+            self.fail(f"baza materiałów z pakietu: {len(items)} pozycji, błędnych wierszy {bad}")
+        # aktualizacja programu: nowsza baza z pakietu – nowe pozycje dopisane do kopii użytkownika
+        m.mat_save(m.MAT_USER_OVERRIDE, [dict(name="moja pozycja", value="1", unit="kN", cat="Własne", src="")])
+        os.utime(m.MAT_USER_OVERRIDE, (1, 1))
+        n_new = m.mat_sync()
+        got, _ = m.mat_load(m.MAT_USER_OVERRIDE)
+        if n_new != len(items) or len(got) != len(items) + 1 or m.mat_sync() != 0:
+            self.fail(f"synchronizacja bazy użytkownika z bazą programu: dopisano {n_new}, w pliku {len(got)}")
+        os.remove(m.MAT_USER_OVERRIDE)
+        if pw.btn_lab.text() != "Obciążenia własne":
+            self.fail(f"przycisk okna głównego: „{pw.btn_lab.text()}”")
+        self.guard("Obciążenia własne", pw.btn_lab.click)
+        self.pump()
+        lw = getattr(a, "lab", None)
+        if lw is None or not lw.isVisible():
+            self.fail("przycisk „Obciążenia własne” nie otworzył okna")
+            return
+        if pw.btn_lab.text() != "Zamknij obciążenia własne":
+            self.fail(f"przycisk po otwarciu: „{pw.btn_lab.text()}”")
+        if lw.btn_main.isEnabled():
+            self.fail("pusta lista – „Dodaj do projektu” nie powinien być dostępny")
+        row = self.guard("ręczne obciążenie", lw.add_manual)
+        row.val.setText("1,5")
+        # kN/m² – tylko szerokość i głębokość; kN – bez opcji
+        vis = lambda r_: [k for k, (box, ch, e) in r_.dims.items() if not box.isHidden()]
+        if vis(row) != ["b", "d"]:
+            self.fail(f"opcje dla kN/m²: {vis(row)}")
+        row.unit.setCurrentIndex(3)
+        if vis(row) or row.item["jedn"] != "kN":
+            self.fail(f"opcje dla kN: {vis(row)}")
+        # ręcznie kN/m³: trzy wymiary i „Dodaj do bazy” (zapis w bazie użytkownika)
+        row.unit.setCurrentIndex(0)
+        if vis(row) != ["t", "b", "d"] or row.btn_db is None or row.btn_db.isHidden():
+            self.fail(f"ręczne kN/m³: opcje {vis(row)}, Dodaj do bazy niewidoczne")
+        row.name.setText("beton testowy KAYENN")
+        self.guard("Dodaj do bazy", row.btn_db.click)
+        dd = getattr(row, "_add_dlg", None)
+        if dd is None or dd.isModal() or dd.e_src.text() != m.MAT_USER_SRC or dd.e_cat.currentText() != "Beton i zaprawa":
+            self.fail("okno „Dodaj do bazy”: brak, modalne, źródło lub podpowiedź kategorii "
+                      f"({dd.e_cat.currentText() if dd else None})")
+        else:
+            dd.e_src.setText("moje źródło")
+            self.guard("zapis do bazy", dd.btn_ok.click)
+        got, _ = m.mat_load(m.MAT_USER_OVERRIDE) if os.path.exists(m.MAT_USER_OVERRIDE) else ([], 0)
+        i_new = next((i for i, x in enumerate(got) if x["name"] == "beton testowy KAYENN"), None)
+        if i_new is None or got[i_new]["cat"] != "Beton i zaprawa" or got[i_new]["src"] != "moje źródło" \
+                or got[i_new - 1]["cat"] != "Beton i zaprawa" or "Własne" in [x["cat"] for x in got]:
+            self.fail("„Dodaj do bazy”: pozycja nie trafiła na koniec swojej kategorii")
+        row.name.setText("Obciążenie 1")
+        row.unit.setCurrentIndex(1)
+        if vis(row) != ["b", "d"] or row.btn_db.isHidden():
+            self.fail(f"opcje dla kN/m²: {vis(row)}, Dodaj do bazy niewidoczne")
+        # mnożnik pozycji (np. 12 belek): 1,5 kN/m² × 12 = 18
+        row.mult.setText("12")
+        r_ = m.lab_item_calc(row.item)
+        if not r_["ok"] or abs(r_["val"] - 18.0) > 1e-9 or "mnożnik" not in r_["formula"]:
+            self.fail(f"mnożnik pozycji: {r_}")
+        row.mult.setText("abc")
+        if m.lab_item_calc(row.item)["ok"]:
+            self.fail("niepoprawny mnożnik przyjęty")
+        row.mult.setText("")
+        # przyciski dodawania pod ostatnią pozycją
+        lay = lw.list.lay
+        if lay.indexOf(lw.add_bar) != len(lw.rows):
+            self.fail("przyciski dodawania nie są pod ostatnią pozycją")
+        d = self.guard("baza materiałów", lw.open_db)
+        self.pump()
+        d.search.setText("beton zwykly zbroj")                # bez polskich znaków, kilka fraz
+        d.rebuild()
+        if sorted(d.tiles) != sorted(d.matches()) or len(d.tiles) != 1:
+            self.fail(f"wyszukiwarka „beton zwykly zbroj”: {[d.mats[k]['name'] for k in d.tiles]}")
+        d.search.setText("IPE 120")
+        d.rebuild()
+        names = [d.mats[k]["name"] for k in d.tiles]
+        if "IPE 120" not in names or any(d.mats[k]["unit"] != "kN/m" for k in d.tiles if d.mats[k]["name"] == "IPE 120"):
+            self.fail(f"wyszukiwarka „IPE 120”: {names}")
+        ipe = next(k for k in d.tiles if d.mats[k]["name"] == "IPE 120")
+        if abs(m.mat_range(d.mats[ipe]["value"])[0] - 10.4 * 9.81 / 1000) > 1e-4 or "Bogucki" not in d.mats[ipe]["src"]:
+            self.fail(f"IPE 120 w bazie: {d.mats[ipe]}")
+        if "zakres od" not in m.mat_value_text("od 19,0 do 23,0", "kN/m³"):
+            self.fail("zakres wartości nie jest opisany słownie")
+        d.search.setText("beton zwykly zbroj")
+        d.rebuild()
+        k0 = next(iter(d.tiles))
+        d.select(k0)
+        self.shot(d, "16_baza_materialow")
+        # edycja bazy: duplikat, edycja wszystkich pól w kafelku (zapis do pliku użytkownika), usunięcie
+        n0 = len(d.order)
+        k1 = self.guard("duplikuj w bazie", d.dup_item, k0)
+        if len(d.order) != n0 + 1 or not d.mats[k1]["name"].endswith(" - kopia"):
+            self.fail("duplikowanie pozycji bazy")
+        else:
+            t = d.tiles[k1]
+            t.edit()
+            t.e_name.setText("Test edycji")
+            t.e_lo.setText("20")
+            t.e_hi.setText("30")
+            t.e_unit.setCurrentText("kN/m²")
+            t.e_cat.setCurrentText("Testy / Podgrupa")
+            t.e_src.setText("źródło testowe")
+            self.guard("zapis kafelka", t.save)
+            got, _ = m.mat_load(m.MAT_USER_OVERRIDE)
+            if not any(x["name"] == "Test edycji" and x["value"] == "od 20 do 30" and x["unit"] == "kN/m²"
+                       and x["cat"] == "Testy / Podgrupa" and x["src"] == "źródło testowe" for x in got):
+                self.fail("edycja pozycji bazy (wszystkie pola) nie trafiła do pliku użytkownika")
+            self.guard("usuń z bazy", d.del_item, k1)
+            if len(d.order) != n0:
+                self.fail("usuwanie pozycji bazy")
+        d.search.setText("beton zwykly zbroj")
+        d.rebuild()
+        d.select(next(iter(d.tiles)))
+        self.guard("Dodaj z bazy", d.btn_add.click)
+        self.pump()
+        if lw._db is not None or len(lw.items) != 2:
+            self.fail("Dodaj w bazie materiałów: okno nie zamknięte lub pozycja nie trafiła do panelu")
+            return
+        # Duplikuj i zmiana kolejności (przeciąganie)
+        self.guard("Duplikuj pozycję", lw.duplicate_row, lw.rows[0])
+        if len(lw.items) != 3 or not lw.items[1]["nazwa"].endswith(" - kopia"):
+            self.fail("Duplikuj w obciążeniach własnych")
+        else:
+            lw.remove_row(lw.rows[1])
+        r_last = lw.rows[1]
+        lay.removeWidget(r_last)
+        lay.insertWidget(0, r_last)
+        lw.place_case(r_last, 0)
+        if lw.rows[0] is not r_last or lw.items[0] is not r_last.item:
+            self.fail("zmiana kolejności pozycji przeciąganiem")
+        lay.removeWidget(r_last)
+        lay.insertWidget(1, r_last)
+        lw.place_case(r_last, 1)
+        r2 = lw.rows[1]
+        if vis(r2) != ["t", "b", "d"]:
+            self.fail(f"opcje dla kN/m³: {vis(r2)}")
+        if lw.btn_main.isEnabled() or "różne jednostki" not in lw.summary.text():
+            self.fail("różne jednostki – brak ostrzeżenia albo można dodać do projektu")
+        n_cases = len(a.project["cases"])
+        lw.on_main()                                          # (ostrzeżenie – QMessageBox w testach zastąpiony)
+        if len(a.project["cases"]) != n_cases:
+            self.fail("przypadek z różnymi jednostkami trafił do projektu")
+        box, ch, e = r2.dims["t"]
+        ch.setChecked(True)
+        e.setText("0,2")
+        s = lw.changed()
+        if not s["ok"] or abs(s["total"] - 6.5) > 1e-9 or s["unit"] != "kN/m²":
+            self.fail(f"suma obciążeń własnych: {s}")
+        self.shot(lw, "15_obciazenia_wlasne")
+        self.guard("Dodaj do projektu (własne)", lw.btn_main.click)
+        self.pump()
+        case = a.project["cases"][0]
+        if case["extra"].get("mode") != "własne" or len(a.project["cases"]) != n_cases + 1:
+            self.fail("przypadek obciążeń własnych nie trafił do projektu")
+            return
+        card = pw.card_of(case)
+        if "6,500 kN/m²" not in card.info.text():
+            self.fail(f"karta przypadku: „{card.info.text()}”")
+        self.guard("rozwinięcie karty (własne)", card.toggle)
+        # edycja
+        self.guard("Edytuj (własne)", pw.edit_case, case)
+        self.pump()
+        le = getattr(a, "lab_ed", None)
+        if le is None or not le.isVisible() or "edycja" not in le.windowTitle() or card.btn_edit.text() != "Zakończ edycję":
+            self.fail("edycja przypadku obciążeń własnych")
+            return
+        le.rows[0].val.setText("2,0")
+        self.guard("Zakończ edycję (własne)", card.btn_edit.click)
+        self.pump()
+        if le.isVisible() or "7,000 kN/m²" not in card.info.text() or card.btn_edit.text() != "Edytuj":
+            self.fail(f"po edycji: „{card.info.text()}”")
+        self.check_owned()
+        doc = self.guard("wydruk z obciążeniami własnymi", a.project_document)
+        if doc is not None and ("zestawienie pozycji" not in doc.toPlainText()
+                                or "Źródła wartości" not in doc.toPlainText()
+                                or "PN-EN 1991-1-1, Tablica A.1" not in doc.toPlainText()):
+            self.fail("brak obciążeń własnych lub źródeł wartości w dokumencie wydruku")
+        self.guard("Zamknij obciążenia własne", pw.btn_lab.click)
+        if lw.isVisible() or pw.btn_lab.text() != "Obciążenia własne":
+            self.fail("Zamknij obciążenia własne")
+        # zapis i odczyt projektu
+        path = os.path.join(tempfile.mkdtemp(prefix="obc_lab_"), "wlasne" + m.PROJECT_EXT)
+        a.project_path = path
+        self.guard("zapis projektu (własne)", a.file_save)
+        a.dirty = False
+        self.guard("odczyt projektu (własne)", a.open_path, path)
+        c2 = a.project["cases"][0] if a.project["cases"] else {}
+        if (c2.get("extra") or {}).get("mode") != "własne" or "7,000" not in (pw.card_of(c2).info.text() if c2 else ""):
+            self.fail("przypadek obciążeń własnych po zapisie i odczycie")
+        m.MAT_USER_OVERRIDE = None
+        self.count("testy obciążeń własnych")
+
     # ================================================================ start ===
     def run(self):
         t0 = time.time()
@@ -962,7 +1174,7 @@ except SystemExit:
             if not hasattr(self, "app"):
                 return
             for name, fn in (("użytkowe", self.test_use), ("śnieg", self.test_snow), ("wiatr", self.test_wind), ("stan", self.test_state),
-                             ("projekt", self.test_project)):
+                             ("projekt", self.test_project), ("własne", self.test_lab)):
                 t1 = time.time()
                 self.ctx = name
                 self.guard(f"test {name} przerwany", fn)

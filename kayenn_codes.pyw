@@ -5,9 +5,10 @@ KAYENN
 Program dla konstruktorów (od kN – kiloniuton, czytane po angielsku „kej-en”).
 
 Nazwy wewnętrzne (użytkownik ich nie widzi):
-  KAYENN Main  – okno główne: projekt, lista przypadków, wydruk (ProjectWindow)
-  KAYENN Codes – obciążenia normowe, okno nad oknem głównym (MainWindow):
-                 śnieg wg PN-EN 1991-1-3 (+AC, Ap1, NA), wiatr wg PN-EN 1991-1-4:2008 (+AC, Ap1..Ap3, NA)
+  KAYENN Manager – okno główne, moduł podstawowy: projekt, lista przypadków, wydruk (ProjectWindow);
+                   pozostałe moduły (Codes, Lab, docelowo MES) są jego rozgałęzieniami
+  KAYENN Codes   – obciążenia normowe, okno nad oknem głównym (MainWindow):
+                   śnieg wg PN-EN 1991-1-3 (+AC, Ap1, NA), wiatr wg PN-EN 1991-1-4:2008 (+AC, Ap1..Ap3, NA)
 
 Uruchomienie: dwuklik (Windows) lub  python3 kayenn_codes.pyw
 Wymaga Pythona 3 i biblioteki PySide6:  py -m pip install PySide6
@@ -2591,6 +2592,7 @@ PROJECT_EXT = ".kayenn"
 # q = (od, do, zalecana) – obciążenie równomierne [kN/m²] (6.4: liniowe [kN/m]); Q – skupione [kN];
 # low_min – dolna granica obowiązująca (NB1).
 TAB_USE, TAB_SNOW, TAB_WIND = 0, 1, 2
+REPORT_ONLY = ("użytkowe", "własne")         # przypadki bez modelu 3D: w karcie i na wydruku sam raport
 _C_DESC = "Powierzchnie, na których mogą gromadzić się ludzie (z wyłączeniem powierzchni kategorii A, B i D). "
 USE_GROUPS = [
     ("6.3.1", "6.3.1 – Powierzchnie mieszkalne, socjalne, handlowe i administracyjne", "Tablice 6.1 i 6.2", [
@@ -2886,6 +2888,15 @@ QFrame#card[lifted="true"] {{ border: 2px solid {ACCENT}; }}
 QFrame#dropSlot {{ border: 2px dashed #93b4f5; border-radius: 5px; background: #eef3fe; }}
 QFrame#editor QLabel {{ color: white; font-weight: bold; background: transparent; }}
 QFrame#editor QLineEdit {{ border: none; }}
+QFrame#tile {{ background: {CARD}; border: 1px solid #d9dde3; border-radius: 5px; }}
+QFrame#tile:hover {{ border-color: #93b4f5; }}
+QFrame#tile[sel="true"] {{ border: 2px solid {ACCENT}; background: #f3f7ff; }}
+QFrame#tile QLabel {{ background: transparent; }}
+QLabel#tileName {{ font-size: 10.5pt; font-weight: bold; }}
+QPushButton#groupHead {{ text-align: left; font-weight: bold; font-size: 10.5pt; padding: 6px 4px;
+                         border: none; border-bottom: 1px solid #d9dde3; }}
+QPushButton#catHead {{ text-align: left; font-size: 10pt; padding: 4px; border: none; }}
+QPushButton#groupHead:hover, QPushButton#catHead:hover {{ color: {ACCENT}; }}
 """
 
 
@@ -3690,6 +3701,11 @@ class CaseCard(QFrame):
     # --- nagłówek
     def _update_info(self):
         ex = self.case["extra"]
+        if ex.get("mode") == "własne":
+            self.info.setText(f"  Własne · {lab_info(self.case['state'].get('wlasne'))} · "
+                              f"dodano {self.case.get('created', '')}")
+            self.name.setText(self.case["name"])
+            return
         if ex.get("mode") == "użytkowe":
             u = self.case["state"].get("uzytkowe") or {}
             gr = next((g_ for g_ in USE_GROUPS if g_[0] == u.get("grupa")), None)
@@ -3715,7 +3731,7 @@ class CaseCard(QFrame):
         from PySide6.QtWidgets import QMenu
         m = QMenu(self)
         a1 = m.addAction("Zmień nazwę")
-        a2 = m.addAction("Zakończ edycję" if self.app.edited_case() is self.case else "Edytuj")
+        a2 = m.addAction("Zakończ edycję" if any(self.case is e for e in self.app.edited_cases()) else "Edytuj")
         a4 = m.addAction("Duplikuj")
         a3 = m.addAction("Usuń")
         act = m.exec(self.mapToGlobal(pos))
@@ -3789,13 +3805,13 @@ class CaseCard(QFrame):
         bar = QHBoxLayout()
         calc = self.case["_calc"]
         ex = self.case["extra"]
-        if calc["mode"] == "użytkowe":               # obciążenia użytkowe – tylko krótka informacja
+        if calc["mode"] in REPORT_ONLY:              # obciążenia użytkowe / własne – sam raport
             self.report = FitBrowser()
             self.report.setOpenLinks(False)
             self.report.setHtml(self.case.get("report", ""))
             bl.addWidget(self.report)
             self.body = body
-            self._body_mode = "użytkowe"
+            self._body_mode = calc["mode"]
             self.layout().addWidget(body)
             return
         tg = ex.setdefault("toggles", {})
@@ -3830,7 +3846,7 @@ class CaseCard(QFrame):
         if self.body is None:
             return
         self.app.ensure_calc(self.case)
-        if self._body_mode == "użytkowe" and self.case["_calc"]["mode"] == "użytkowe":
+        if self._body_mode in REPORT_ONLY and self.case["_calc"]["mode"] == self._body_mode:
             self.report.setHtml(self.case.get("report", ""))
             return
         if self.case["_calc"]["mode"] != self._body_mode:
@@ -3897,9 +3913,10 @@ class CaseList(QWidget):
     """Kontener kart przypadków. Przeciąganie karty: karta wyjęta z układu podąża za kursorem, w liście
     zostaje puste pole (dropSlot) przesuwane między pozostałymi kartami; puszczenie – karta w miejscu pola."""
 
-    def __init__(self, pw):
+    def __init__(self, pw, watermark=True):
         super().__init__()
-        self.pw = pw
+        self.pw = pw                                 # właściciel: cards, scroll, place_case(karta, indeks)
+        self.watermark = watermark
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(0, 0, 0, 0)
         self.lay.setSpacing(6)
@@ -3981,7 +3998,7 @@ class CaseList(QWidget):
 
     def paintEvent(self, ev):
         """Pusty projekt: znak wodny – napis KAYENN w prawym dolnym rogu."""
-        if getattr(self.pw, "cards", None):
+        if not self.watermark or getattr(self.pw, "cards", None):
             return
         r = wordmark_renderer()
         if r is None:
@@ -4009,9 +4026,1304 @@ class CaseList(QWidget):
         p.end()
 
 
+# ===================================================================
+#  OBCIĄŻENIA WŁASNE (wewnętrznie: KAYENN Lab) – pozycje wpisane ręcznie lub z bazy materiałów
+# ===================================================================
+LAB_UNITS = ("kN", "kN/m", "kN/m²", "kN/m³")           # indeks = wykładnik m w mianowniku
+LAB_GROUPS = {3: "Ciężary objętościowe [kN/m³]", 2: "Obciążenia powierzchniowe [kN/m²]",
+              1: "Obciążenia liniowe [kN/m]", 0: "Obciążenia skupione [kN]"}
+LAB_MANUAL = ((3, "kN/m³ – ciężar objętościowy"), (2, "kN/m² – powierzchniowe"), (1, "kN/m – liniowe"),
+              (0, "kN – skupione"))
+LAB_DIMS = (("t", "grubość"), ("b", "szerokość"), ("d", "długość"))
+MAT_FILE_NAME = "kayenn_materialy.txt"
+MAT_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), MAT_FILE_NAME)
+MAT_USER_OVERRIDE = None                                # (testy: inny plik użytkownika)
+MAT_HEADER = """# KAYENN – baza materiałów i obciążeń (obciążenia własne)
+#
+# Plik tekstowy UTF-8, wymienny między użytkownikami. Najwygodniej edytować go w programie
+# (Obciążenia własne → Dodaj z bazy materiałów: Nowa pozycja, Edytuj, Duplikuj, Usuń).
+# Można też w Notatniku – zachowaj wtedy układ wierszy:
+#
+#   [Kategoria]            (podkategorie oddzielone „ / ”, np. [Kształtowniki / Dwuteowniki IPE])
+#   nazwa ; wartość ; jednostka ; źródło
+#
+#   wartość   – liczba (przecinek albo kropka) albo zakres, np. „od 19,0 do 23,0”
+#               (program przyjmuje górną granicę – można ją zmienić w panelu obciążeń własnych)
+#   jednostka – kN/m³ (ciężar objętościowy), kN/m² (powierzchniowe), kN/m (liniowe), kN (skupione)
+#   źródło    – norma, tablica, producent (można pominąć)
+#
+# Wiersze zaczynające się od # to komentarze."""
+
+
+def lab_dims(exp):
+    """Wymiary, które można zdefiniować dla jednostki o wykładniku exp: kN/m³ – grubość, szerokość, długość;
+    kN/m² – szerokość, długość; kN/m – długość; kN – brak. Każdy zdefiniowany wymiar obniża wykładnik o 1."""
+    return LAB_DIMS[3 - exp:] if 0 <= exp <= 3 else ()
+
+
+def unit_exp(u):
+    """Wykładnik jednostki (kN → 0, kN/m → 1, kN/m² → 2, kN/m³ → 3); None – nieznana jednostka."""
+    s = str(u or "").strip().lower().replace(" ", "").replace("^", "").replace("²", "2").replace("³", "3")
+    return {"kn": 0, "kn/m": 1, "kn/m2": 2, "kn/m3": 3}.get(s)
+
+
+def lab_fmt(v, d=3):
+    s = f"{v:.{d}f}".replace(".", ",")
+    return s.replace("-", "−") if v < 0 else s
+
+
+def mat_range(txt):
+    """Wartość z bazy: liczba albo przedział „od…do” → (min, max); None – niepoprawna."""
+    s = str(txt or "").strip().replace("...", "…").replace("÷", "…")
+    for sep in ("…", " do ", " – ", " - "):
+        if sep in s:
+            a, b = s.split(sep, 1)
+            lo, hi = parse_num(a.replace("od", "")), parse_num(b)
+            if lo is None or hi is None:
+                return None
+            return (min(lo, hi), max(lo, hi))
+    v = parse_num(s)
+    return None if v is None else (v, v)
+
+
+def mat_user_file():
+    """Baza użytkownika (zmiany z programu): %APPDATA%\\KAYENN\\materialy.txt."""
+    if MAT_USER_OVERRIDE:
+        return MAT_USER_OVERRIDE
+    base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "KAYENN", "materialy.txt")
+
+
+def mat_active_file():
+    """Plik bazy używany przez program: kopia użytkownika, a gdy jej brak – baza z pakietu programu."""
+    u = mat_user_file()
+    return u if os.path.exists(u) else MAT_DEFAULT
+
+
+def mat_sync():
+    """Baza z pakietu nowsza niż kopia użytkownika (aktualizacja programu): do kopii dopisywane są nowe pozycje
+    z pakietu (inna kategoria lub nazwa); zmiany użytkownika zostają. Zwraca liczbę dopisanych pozycji."""
+    u = mat_user_file()
+    try:
+        if not os.path.exists(u) or os.path.getmtime(MAT_DEFAULT) <= os.path.getmtime(u):
+            return 0
+        mine, _ = mat_load(u)
+        new, _ = mat_load(MAT_DEFAULT)
+    except (OSError, UnicodeDecodeError):
+        return 0
+    have = {(it["cat"], it["name"]) for it in mine}
+    add = [it for it in new if (it["cat"], it["name"]) not in have]
+    try:
+        mat_save(u, mine + add)                      # zapis odświeża też datę – kolejne otwarcie bez porównania
+    except OSError:
+        return 0
+    return len(add)
+
+
+def mat_load(path):
+    """Odczyt bazy materiałów: [Kategoria], wiersze „nazwa ; wartość ; jednostka ; źródło”.
+    Zwraca (pozycje, liczba pominiętych wierszy)."""
+    items, bad, catg = [], 0, "Bez kategorii"
+    with open(path, encoding="utf-8-sig") as f:
+        for raw in f:
+            ln = raw.strip()
+            if not ln or ln.startswith("#"):
+                continue
+            if ln.startswith("[") and ln.endswith("]"):
+                catg = ln[1:-1].strip() or "Bez kategorii"
+                continue
+            p = [x.strip() for x in ln.split(";")]
+            if len(p) < 3 or not p[0] or mat_range(p[1]) is None or unit_exp(p[2]) is None:
+                bad += 1
+                continue
+            items.append(dict(name=p[0], value=p[1], unit=LAB_UNITS[unit_exp(p[2])], cat=catg,
+                              src=";".join(p[3:]).strip()))
+    return items, bad
+
+
+def mat_save(path, items):
+    """Zapis bazy (kategorie w kolejności pierwszego wystąpienia)."""
+    d = os.path.dirname(path)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    cats = []
+    for it in items:
+        if it["cat"] not in cats:
+            cats.append(it["cat"])
+    out = [MAT_HEADER]
+    clean = lambda s: str(s or "").replace(";", ",").replace("\n", " ").strip()
+    for c in cats:
+        out.append(f"\n[{clean(c).replace('[', '(').replace(']', ')')}]")
+        for it in items:
+            if it["cat"] == c:
+                out.append(f"{clean(it['name'])} ; {clean(it['value'])} ; {it['unit']} ; {clean(it.get('src'))}")
+    with open(path, "w", encoding="utf-8", newline="\r\n") as f:
+        f.write("\n".join(out) + "\n")
+
+
+def lab_item_calc(it):
+    """Wynik pozycji: wartość podstawowa × zdefiniowane wymiary × mnożnik (opcjonalny).
+    dict(ok, val, exp, unit, formula, err)."""
+    v = parse_num(str(it.get("wartosc", "")))
+    exp = unit_exp(it.get("jedn"))
+    if exp is None:
+        return dict(ok=False, err="nieznana jednostka", val=None, exp=None, unit="", formula="")
+    if v is None:
+        return dict(ok=False, err="niepoprawna wartość obciążenia", val=None, exp=exp, unit=LAB_UNITS[exp],
+                    formula="")
+    parts, val, e = [f"{lab_fmt(v)} {LAB_UNITS[exp]}"], v, exp
+    for k, nm in lab_dims(exp):
+        on, txt = (it.get("wym") or {}).get(k, (False, ""))
+        if not on:
+            continue
+        dv = parse_num(str(txt))
+        if dv is None or dv <= 0:
+            return dict(ok=False, err=f"niepoprawna {nm} (podaj wartość dodatnią w metrach)", val=None, exp=exp,
+                        unit=LAB_UNITS[exp], formula="")
+        parts.append(f"{lab_fmt(dv)} m ({nm})")
+        val *= dv
+        e -= 1
+    mt = str(it.get("mnoznik") or "").strip()
+    if mt:                                           # opcjonalny mnożnik, np. 12 belek na palecie
+        n = parse_num(mt)
+        if n is None or n <= 0:
+            return dict(ok=False, err="niepoprawny mnożnik (podaj liczbę dodatnią)", val=None, exp=exp,
+                        unit=LAB_UNITS[exp], formula="")
+        if abs(n - 1) > 1e-12:
+            parts.append(f"{lab_fmt(n, 3 if abs(n - round(n)) > 1e-9 else 0)} (mnożnik)")
+            val *= n
+    expr = " · ".join(parts) if len(parts) > 1 else ""
+    formula = expr + (f" = {lab_fmt(val)} {LAB_UNITS[e]}" if expr else "")
+    return dict(ok=True, err="", val=val, exp=e, unit=LAB_UNITS[e], formula=formula, expr=expr)
+
+
+def lab_summary(items):
+    """Podsumowanie listy: suma i wspólna jednostka; ok=False – lista pusta, błędna pozycja lub różne jednostki."""
+    rows = [lab_item_calc(it) for it in items]
+    if not items:
+        return dict(ok=False, rows=rows, total=None, unit="", err="Brak obciążeń – dodaj je ręcznie lub z bazy.")
+    bad = [i for i, r in enumerate(rows) if not r["ok"]]
+    if bad:
+        i = bad[0]
+        return dict(ok=False, rows=rows, total=None, unit="",
+                    err=f"Pozycja {i + 1} („{items[i].get('nazwa', '')}”): {rows[i]['err']}.")
+    units = []
+    for r in rows:
+        if r["unit"] not in units:
+            units.append(r["unit"])
+    if len(units) > 1:
+        return dict(ok=False, rows=rows, total=None, unit="",
+                    err="Pozycje mają różne jednostki (" + ", ".join(units) + ") – ujednolić je (zdefiniuj wymiary), "
+                        "inaczej przypadku nie można dodać do projektu.")
+    return dict(ok=True, rows=rows, total=sum(r["val"] for r in rows), unit=units[0], err="")
+
+
+def mat_value_text(value, unit, long=True):
+    """Wartość z bazy do wyświetlenia: liczba albo wyraźnie opisany zakres."""
+    r = mat_range(value)
+    if r is None:
+        return f"{value} {unit}"
+    lo, hi = r
+    f = lambda v: f"{v:g}".replace(".", ",")
+    if abs(hi - lo) < 1e-12:
+        return f"{str(value).strip()} {unit}"
+    return (f"zakres od {f(lo)} do {f(hi)} {unit}" + (" – do obliczeń przyjmowana górna granica" if long else ""))
+
+
+def lab_sources(items):
+    """Źródła wartości pozycji (bez powtórzeń, w kolejności pierwszego użycia)."""
+    out = []
+    for it in items:
+        s = (it.get("zrodlo") or "").strip() if it.get("z_bazy") else ""
+        if s and s not in out:
+            out.append(s)
+    return out
+
+
+def lab_report(data):
+    """Raport przypadku obciążeń własnych (karta przypadku, wydruk): tabela pozycji, suma i źródła wartości."""
+    esc = html.escape
+    items = (data or {}).get("pozycje") or []
+    s = lab_summary(items)
+    srcs = lab_sources(items)
+    th = "style='text-align:left; padding:2px 8px 2px 0; border-bottom:1px solid #c9ced6;'"
+    td = "style='padding:2px 8px 2px 0; vertical-align:top;'"
+    rows = [f"<tr><th {th}>Nr</th><th {th}>Pozycja</th><th {th}>Obliczenie</th><th {th}>Wartość</th></tr>"]
+    for i, (it, r) in enumerate(zip(items, s["rows"])):
+        info = []
+        if it.get("z_bazy"):
+            src = (it.get("zrodlo") or "").strip()
+            if src:
+                info.append(f"źródło [{srcs.index(src) + 1}]")
+        else:
+            info.append("wartość wpisana ręcznie")
+        if it.get("przedzial"):
+            info.append(mat_value_text(it["przedzial"], it.get("jedn", ""), long=False) + " – przyjęto górną granicę")
+        sub = f"<br><span style='color:{MUTED};'>{esc('; '.join(info))}</span>" if info else ""
+        val = f"<b>{lab_fmt(r['val'])} {r['unit']}</b>" if r["ok"] else f"<span style='color:#b91c1c;'>{esc(r['err'])}</span>"
+        rows.append(f"<tr><td {td}>{i + 1}.</td><td {td}>{esc(it.get('nazwa', ''))}{sub}</td>"
+                    f"<td {td}>{esc(r['formula'])}</td><td {td}>{val}</td></tr>")
+    if s["ok"]:
+        tot = f"<p style='margin:6px 0 0 0;'><b>Razem: {lab_fmt(s['total'])} {s['unit']}</b></p>"
+    else:
+        tot = f"<p style='margin:6px 0 0 0; color:#b91c1c;'>{esc(s['err'])}</p>"
+    src_html = ""
+    if srcs:
+        src_html = ("<p style='margin:6px 0 0 0;'><b>Źródła wartości</b><br>"
+                    + "<br>".join(f"[{k + 1}] {esc(x)}" for k, x in enumerate(srcs)) + "</p>")
+    return (f"<p style='margin:0 0 4px 0;'><b>Obciążenia własne</b> – zestawienie pozycji</p>"
+            f"<table cellspacing='0' cellpadding='0'>{''.join(rows)}</table>{tot}{src_html}")
+
+
+def lab_info(data):
+    """Krótki opis przypadku do nagłówka karty."""
+    items = (data or {}).get("pozycje") or []
+    s = lab_summary(items)
+    n = len(items)
+    poz = "pozycja" if n == 1 else ("pozycje" if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else "pozycji")
+    return f"{n} {poz}" + (f" · razem {lab_fmt(s['total'])} {s['unit']}" if s["ok"] else " · niekompletne")
+
+
+def _fold(s):
+    """Tekst do wyszukiwania: małe litery, bez polskich znaków."""
+    import unicodedata
+    s = str(s or "").lower().replace("ł", "l")
+    return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+
+
+MAT_USER_SRC = "obciążenie zdefiniowane przez użytkownika"
+
+
+def mat_db_items():
+    try:
+        return mat_load(mat_active_file())[0]
+    except (OSError, UnicodeDecodeError):
+        return []
+
+
+def mat_categories(unit=None, items=None):
+    """Kategorie bazy (kolejność z pliku); unit – tylko kategorie z pozycjami w tej jednostce."""
+    out = []
+    for it in mat_db_items() if items is None else items:
+        if (unit is None or it["unit"] == unit) and it["cat"] not in out:
+            out.append(it["cat"])
+    return out
+
+
+def mat_guess_category(name, unit, items=None):
+    """Kategoria dla nowej pozycji: ta, w której najwięcej słów nazwy pokrywa się z pozycjami tej samej jednostki."""
+    items = mat_db_items() if items is None else items
+    words = {w for w in _fold(name).replace(",", " ").split() if len(w) >= 3}
+    best, score = None, 0
+    for c in mat_categories(unit, items):
+        hay = _fold(c + " " + " ".join(it["name"] for it in items if it["cat"] == c and it["unit"] == unit))
+        sc = sum(1 for w in words if w in hay)
+        if sc > score:
+            best, score = c, sc
+    cats = mat_categories(unit, items)
+    return best or (cats[0] if cats else "Bez kategorii")
+
+
+def mat_add_to_user_db(mat):
+    """Nowa pozycja w bazie materiałów użytkownika – w swojej kategorii, za ostatnią jej pozycją (jakby była
+    w bazie od zawsze); nowa kategoria – na końcu bazy."""
+    items = mat_db_items()
+    idx = max((i for i, it in enumerate(items) if it["cat"] == mat["cat"]), default=len(items) - 1)
+    items.insert(idx + 1, mat)
+    mat_save(mat_user_file(), items)
+
+
+class MatAddDialog(QDialog):
+    """Dodaj do bazy (z panelu obciążeń własnych): nazwa, wartość, kategoria (podpowiedź według nazwy), źródło
+    (domyślnie „obciążenie zdefiniowane przez użytkownika”, do zmiany). Nie blokuje innych okien."""
+
+    def __init__(self, parent, item):
+        super().__init__(parent)
+        self.setWindowTitle("Dodaj do bazy materiałów")
+        self.setModal(False)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.resize(560, 220)
+        self.unit = item.get("jedn", "kN/m²")
+        items = mat_db_items()
+        g = QGridLayout(self)
+        g.setHorizontalSpacing(8)
+        self.e_name = QLineEdit(item.get("nazwa", "").strip())
+        self.e_val = QLineEdit(str(item.get("wartosc", "")).strip())
+        self.e_val.setFixedWidth(110)
+        self.e_val.setAlignment(AL_R)
+        self.e_cat = QComboBox()
+        self.e_cat.setEditable(True)
+        self.e_cat.addItems(mat_categories(self.unit, items) or mat_categories(None, items))
+        self.e_cat.setCurrentText(mat_guess_category(self.e_name.text(), self.unit, items))
+        self.e_cat.setToolTip("Kategoria w bazie (podkategorie oddziel „ / ”); można wpisać nową")
+        self.e_src = QLineEdit(MAT_USER_SRC)
+        g.addWidget(QLabel("Nazwa"), 0, 0)
+        g.addWidget(self.e_name, 0, 1, 1, 2)
+        g.addWidget(QLabel("Wartość"), 1, 0)
+        g.addWidget(self.e_val, 1, 1)
+        g.addWidget(QLabel(self.unit), 1, 2)
+        g.addWidget(QLabel("Kategoria"), 2, 0)
+        g.addWidget(self.e_cat, 2, 1, 1, 2)
+        g.addWidget(QLabel("Źródło"), 3, 0)
+        g.addWidget(self.e_src, 3, 1, 1, 2)
+        g.setColumnStretch(2, 1)
+        hb = QHBoxLayout()
+        hb.addStretch(1)
+        b = QPushButton("Dodaj do bazy")
+        b.setObjectName("big")
+        b.clicked.connect(lambda checked=False: self.save())
+        hb.addWidget(b)
+        self.btn_ok = b
+        b = QPushButton("Anuluj")
+        b.clicked.connect(lambda checked=False: self.reject())
+        hb.addWidget(b)
+        g.addLayout(hb, 4, 0, 1, 3)
+        self.mat = None
+
+    def save(self):
+        nm = self.e_name.text().strip()
+        if not nm or mat_range(self.e_val.text()) is None:
+            QMessageBox.warning(self, "Dodaj do bazy", "Podaj nazwę i poprawną wartość obciążenia.")
+            return
+        self.mat = dict(name=nm, value=self.e_val.text().strip(), unit=self.unit,
+                        cat=self.e_cat.currentText().strip() or "Bez kategorii", src=self.e_src.text().strip())
+        try:
+            mat_add_to_user_db(self.mat)
+        except OSError as e:
+            QMessageBox.warning(self, "Dodaj do bazy", f"Nie można zapisać bazy materiałów:\n{e}")
+            return
+        self.accept()
+
+
+class LabRow(QFrame):
+    """Pozycja panelu obciążeń własnych: uchwyt ⠿ (przeciąganie), nazwa, Duplikuj, Usuń; wartość z jednostką
+    (ręcznie: kN/m³, kN/m², kN/m, kN; kN/m³ – Dodaj do bazy), opcje wymiarów, wynik."""
+
+    def __init__(self, win, item):
+        super().__init__()
+        self.win, self.item = win, item
+        self.setObjectName("card")
+        g = QGridLayout(self)
+        g.setContentsMargins(8, 6, 8, 6)
+        g.setHorizontalSpacing(6)
+        g.setVerticalSpacing(4)
+        top = QHBoxLayout()
+        self.handle = QLabel("⠿")
+        self.handle.setToolTip("Przeciągnij, aby zmienić kolejność")
+        self.handle.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.handle.setStyleSheet("font-size:16px; color:#6b7280; padding:0 4px;")
+        self.handle.mousePressEvent = self._drag_press
+        self.handle.mouseMoveEvent = self._drag_move
+        self.handle.mouseReleaseEvent = self._drag_release
+        self._drag_start = None
+        top.addWidget(self.handle)
+        self.num = QLabel("")
+        self.num.setObjectName("cardTitle")
+        top.addWidget(self.num)
+        self.name = QLineEdit(item.get("nazwa", ""))
+        self.name.setToolTip("Nazwa pozycji (widoczna w raporcie i na wydruku)")
+        self.name.textChanged.connect(self._name)
+        top.addWidget(self.name, 1)
+        b = QPushButton("Duplikuj")
+        b.setToolTip("Kopia pozycji tuż pod nią")
+        b.clicked.connect(lambda checked=False: self.win.duplicate_row(self))
+        top.addWidget(b)
+        b = QPushButton("Usuń")
+        b.clicked.connect(lambda checked=False: self.win.remove_row(self))
+        top.addWidget(b)
+        g.addLayout(top, 0, 0, 1, 6)
+        g.addWidget(QLabel("Wartość"), 1, 0)
+        self.val = QLineEdit(str(item.get("wartosc", "")))
+        self.val.setFixedWidth(100)
+        self.val.setAlignment(AL_R)
+        self.val.textChanged.connect(self._val)
+        g.addWidget(self.val, 1, 1)
+        self.btn_db = None
+        if item.get("z_bazy"):
+            self.unit = None
+            g.addWidget(QLabel(item.get("jedn", "")), 1, 2)
+        else:
+            self.unit = QComboBox()
+            for e_, lab in LAB_MANUAL:
+                self.unit.addItem(lab, e_)
+            e0 = unit_exp(item.get("jedn"))
+            self.unit.setCurrentIndex(next((i for i, (e_, _) in enumerate(LAB_MANUAL) if e_ == e0), 0))
+            self.unit.currentIndexChanged.connect(self._unit)
+            g.addWidget(self.unit, 1, 2)
+            self.btn_db = QPushButton("Dodaj do bazy")
+            self.btn_db.setToolTip("Zapisz to obciążenie w bazie materiałów (w wybranej kategorii)")
+            self.btn_db.clicked.connect(lambda checked=False: self.add_to_db())
+            g.addWidget(self.btn_db, 1, 3)
+        info = []
+        if item.get("z_bazy"):
+            info.append(item.get("kategoria", ""))
+            if item.get("zrodlo"):
+                info.append(item["zrodlo"])
+        if item.get("przedzial"):
+            info.append(mat_value_text(item["przedzial"], item.get("jedn", ""), long=False)
+                        + " – przyjęto górną granicę")
+        self.info = QLabel(" · ".join(x for x in info if x))
+        self.info.setObjectName("muted")
+        self.info.setWordWrap(True)
+        g.addWidget(self.info, 1, 4, 1, 2)
+        g.setColumnStretch(4, 1)
+        self.dims = {}
+        dl = QHBoxLayout()
+        dl.setSpacing(6)
+        wym = item.setdefault("wym", {})
+        for k, nm in LAB_DIMS:
+            on, txt = wym.get(k, (False, ""))
+            ch = QCheckBox(f"Zdefiniuj {nm}")
+            ch.setChecked(bool(on))
+            e = QLineEdit(str(txt))
+            e.setFixedWidth(70)
+            e.setAlignment(AL_R)
+            e.setEnabled(bool(on))
+            un = QLabel("m")
+            ch.toggled.connect(lambda v, k=k: self._dim(k))
+            e.textChanged.connect(lambda t, k=k: self._dim(k))
+            box = QWidget()
+            hl = QHBoxLayout(box)
+            hl.setContentsMargins(0, 0, 12, 0)
+            hl.setSpacing(4)
+            for w_ in (ch, e, un):
+                hl.addWidget(w_)
+            dl.addWidget(box)
+            self.dims[k] = (box, ch, e)
+        dl.addStretch(1)
+        ml = QHBoxLayout()
+        ml.setSpacing(4)
+        ml.addWidget(QLabel("Mnożnik"))
+        self.mult = QLineEdit(str(item.get("mnoznik") or ""))
+        self.mult.setFixedWidth(60)
+        self.mult.setAlignment(AL_R)
+        self.mult.setPlaceholderText("1")
+        self.mult.setToolTip("Opcjonalny mnożnik pozycji, np. 12 – dwanaście belek na palecie")
+        self.mult.textChanged.connect(self._mult)
+        ml.addWidget(self.mult)
+        ml.addWidget(QLabel("(opcjonalnie, np. liczba sztuk)"))
+        g.addLayout(dl, 2, 0, 1, 6)
+        self.res = QLabel("")
+        self.res.setAlignment(AL_R)
+        self.res.setWordWrap(True)
+        ml.addSpacing(12)
+        ml.addWidget(self.res, 1)
+        g.addLayout(ml, 3, 0, 1, 6)
+        self._show_dims()
+
+    # --- przeciąganie uchwytem ⠿ (jak karty przypadków w oknie głównym)
+    def _drag_press(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._drag_start = e.globalPosition()
+            self.handle.setCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def _drag_move(self, e):
+        if self._drag_start is None:
+            return
+        lst = self.win.list
+        if lst.dragging is None:
+            if (e.globalPosition() - self._drag_start).manhattanLength() < 4:
+                return
+            lst.begin_drag(self, self._drag_start)
+        lst.drag_to(e.globalPosition())
+
+    def _drag_release(self, e):
+        self._drag_start = None
+        self.handle.setCursor(Qt.CursorShape.OpenHandCursor)
+        if self.win.list.dragging is self:
+            self.win.list.end_drag()
+
+    # --- zmiany
+    def _name(self, t):
+        self.item["nazwa"] = t
+        self.win.changed()
+
+    def _val(self, t):
+        self.item["wartosc"] = t
+        if self.item.get("przedzial"):
+            self.item["przedzial"] = ""                # wartość zmieniona ręcznie – bez informacji o zakresie
+            self.info.setText(" · ".join(x for x in (self.item.get("kategoria", ""), self.item.get("zrodlo", "")) if x))
+        self.win.changed()
+
+    def _mult(self, t):
+        self.item["mnoznik"] = t.strip()
+        self.win.changed()
+
+    def _unit(self, i):
+        self.item["jedn"] = LAB_UNITS[self.unit.itemData(i)]
+        self._show_dims()
+        self.win.changed()
+
+    def _dim(self, k):
+        box, ch, e = self.dims[k]
+        e.setEnabled(ch.isChecked())
+        self.item.setdefault("wym", {})[k] = [ch.isChecked(), e.text().strip()]
+        self.win.changed()
+
+    def _show_dims(self):
+        exp = unit_exp(self.item.get("jedn"))
+        ok = {k for k, _ in lab_dims(exp if exp is not None else 0)}
+        for k, (box, ch, e) in self.dims.items():
+            box.setVisible(k in ok)
+
+    def add_to_db(self):
+        """Dodaj do bazy – okno z kategorią (podpowiedź) i źródłem; pozycja trafia do swojej kategorii."""
+        if parse_num(self.val.text()) is None or not self.name.text().strip():
+            QMessageBox.warning(self.win, "Dodaj do bazy", "Podaj nazwę i poprawną wartość obciążenia.")
+            return None
+        d = MatAddDialog(self.win, self.item)
+        d.accepted.connect(lambda d=d: self._added(d.mat))
+        self._add_dlg = d                                  # (testy)
+        d.show()
+        return d
+
+    def _added(self, mat):
+        if self.win._db is not None:
+            self.win._db.load(mat_active_file())
+        self.win.info_msg(f"Dodano do bazy materiałów: „{mat['name']}” ({mat['value']} {mat['unit']}, "
+                          f"kategoria „{mat['cat']}”).")
+
+    def update_result(self, i, r):
+        self.num.setText(f"{i + 1}.")
+        if r["ok"]:
+            res = f"<b>{lab_fmt(r['val'])} {r['unit']}</b>"
+            self.res.setText(f"{html.escape(r['expr'])} = {res}" if r["expr"] else res)
+            self.res.setStyleSheet("")
+        else:
+            self.res.setText(html.escape(r["err"]))
+            self.res.setStyleSheet("color:#b91c1c;")
+        self.val.setProperty("bad", parse_num(self.val.text()) is None)
+        self.val.style().unpolish(self.val)
+        self.val.style().polish(self.val)
+
+
+class LabWindow(QWidget):
+    """Okno obciążeń własnych (wewnętrznie: KAYENN Lab) – należy do okna głównego. Lista pozycji (przeciąganie
+    uchwytem ⠿ zmienia kolejność), pod ostatnią pozycją przyciski dodawania; podsumowanie i Dodaj do projektu;
+    w trybie edycji przypadku – Zakończ edycję. X – tylko ukrycie (w edycji – koniec edycji)."""
+
+    def __init__(self, app, edit=False):
+        super().__init__(app.pw, Qt.WindowType.Window)
+        self.app, self.edit_mode, self.editing = app, edit, None
+        self.setObjectName("page")
+        self.setWindowTitle("Obciążenia własne")
+        self.resize(780, 740)
+        self.items, self.rows = [], []
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(8)
+        sc = QScrollArea()
+        sc.setWidgetResizable(True)
+        sc.setFrameShape(QFrame.Shape.NoFrame)
+        self.list = CaseList(self, watermark=False)        # ta sama lista z przeciąganiem co w oknie głównym
+        self.list.setObjectName("page")
+        sc.setWidget(self.list)
+        sc.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll = sc
+        bar = QWidget()
+        hb = QHBoxLayout(bar)
+        hb.setContentsMargins(0, 2, 0, 2)
+        b = QPushButton("Dodaj obciążenie ręcznie")
+        b.clicked.connect(lambda checked=False: self.add_manual())
+        hb.addWidget(b)
+        self.btn_manual = b
+        b = QPushButton("Dodaj z bazy materiałów…")
+        b.clicked.connect(lambda checked=False: self.open_db())
+        hb.addWidget(b)
+        self.btn_db = b
+        self.empty = QLabel("Wartość wpisana ręcznie (kN/m³, kN/m², kN/m, kN) albo pozycja z bazy materiałów.")
+        self.empty.setObjectName("muted")
+        hb.addWidget(self.empty)
+        hb.addStretch(1)
+        self.add_bar = bar
+        self.list.lay.insertWidget(0, bar)                   # przyciski zawsze pod ostatnią pozycją
+        root.addWidget(sc, 1)
+        self.summary = QLabel("")
+        self.summary.setWordWrap(True)
+        self.summary.setStyleSheet("font-size: 11pt;")
+        root.addWidget(self.summary)
+        self.msg = QLabel("")
+        self.msg.setObjectName("muted")
+        self.msg.setWordWrap(True)
+        self.msg.setVisible(False)
+        root.addWidget(self.msg)
+        self.btn_main = QPushButton("Zakończ edycję" if edit else "Dodaj do projektu")
+        self.btn_main.setObjectName("big")
+        self.btn_main.clicked.connect(lambda checked=False: self.on_main())
+        root.addWidget(self.btn_main)
+        self._db = None
+        self.changed()
+
+    @property
+    def cards(self):                                         # (CaseList: przeciągane elementy)
+        return self.rows
+
+    def place_case(self, row, idx):
+        """Po przeciągnięciu: pozycja (już w układzie na miejscu idx) – ta sama kolejność na liście."""
+        old = self.rows.index(row)
+        if old == idx:
+            return
+        self.rows.insert(idx, self.rows.pop(old))
+        self.items.insert(idx, self.items.pop(old))
+        self.changed()
+
+    # --- pozycje
+    def _insert(self, item, idx=None):
+        idx = len(self.rows) if idx is None else idx
+        row = LabRow(self, item)
+        self.items.insert(idx, item)
+        self.rows.insert(idx, row)
+        self.list.lay.insertWidget(idx, row)
+        self.changed()
+        QTimer.singleShot(0, lambda: self.scroll.ensureWidgetVisible(self.add_bar if idx == len(self.rows) - 1
+                                                                     else row))
+        return row
+
+    def _append(self, item):
+        return self._insert(item)
+
+    def add_manual(self):
+        n = len(self.items) + 1
+        row = self._append(dict(nazwa=f"Obciążenie {n}", wartosc="", jedn="kN/m²", z_bazy=False, wym={}))
+        row.val.setFocus()
+        return row
+
+    def add_material(self, mat):
+        lo, hi = mat_range(mat["value"]) or (0.0, 0.0)
+        rng = mat["value"] if abs(hi - lo) > 1e-12 else ""
+        val = (f"{hi:g}" if rng else str(mat["value"]).strip()).replace(".", ",")
+        return self._append(dict(nazwa=mat["name"], wartosc=val, jedn=mat["unit"], z_bazy=True, przedzial=rng,
+                                 kategoria=mat.get("cat", ""), zrodlo=mat.get("src", ""), wym={}))
+
+    def duplicate_row(self, row):
+        i = self.rows.index(row)
+        it = json.loads(json.dumps(self.items[i]))
+        it["nazwa"] = f"{it.get('nazwa', '')} - kopia"
+        return self._insert(it, i + 1)
+
+    def remove_row(self, row):
+        i = self.rows.index(row)
+        self.rows.pop(i)
+        self.items.pop(i)
+        self.list.lay.removeWidget(row)
+        row.hide()
+        row.deleteLater()
+        self.changed()
+
+    def clear(self):
+        for row in list(self.rows):
+            self.list.lay.removeWidget(row)
+            row.hide()
+            row.deleteLater()
+        self.rows, self.items = [], []
+
+    def set_data(self, data):
+        self.clear()
+        for it in (data or {}).get("pozycje") or []:
+            self._append(json.loads(json.dumps(it)))
+        self.changed()
+
+    def data(self):
+        return {"pozycje": json.loads(json.dumps(self.items))}
+
+    def changed(self):
+        s = lab_summary(self.items)
+        for i, (row, r) in enumerate(zip(self.rows, s["rows"])):
+            row.update_result(i, r)
+        self.empty.setVisible(not self.items)
+        if s["ok"]:
+            self.summary.setText(f"Suma obciążeń: <b>{lab_fmt(s['total'])} {s['unit']}</b>"
+                                 f"&nbsp;&nbsp;<span style='color:{MUTED};'>(jednostka wspólna dla wszystkich "
+                                 f"pozycji: {s['unit']})</span>")
+            self.summary.setStyleSheet("font-size: 11pt;")
+        else:
+            self.summary.setText(("⚠ " if self.items else "") + html.escape(s["err"]))
+            self.summary.setStyleSheet("font-size: 11pt; color: #b91c1c;" if self.items else "font-size: 11pt;")
+        if not self.edit_mode:
+            self.btn_main.setEnabled(s["ok"])
+            self.btn_main.setToolTip("" if s["ok"] else s["err"])
+        return s
+
+    def info_msg(self, text):
+        self.msg.setText(text)
+        self.msg.setVisible(bool(text))
+        QTimer.singleShot(6000, lambda t=text: self.msg.text() == t and self.msg.setVisible(False))
+
+    # --- baza materiałów
+    def open_db(self):
+        if self._db is not None:
+            self._db.raise_()
+            self._db.activateWindow()
+            return self._db
+        d = MaterialDialog(self)
+        d.chosen.connect(self.add_material)
+        d.destroyed.connect(lambda *a: setattr(self, "_db", None))
+        self._db = d
+        d.show()
+        return d
+
+    # --- okno
+    def show_panel(self):
+        if not self.isVisible():
+            if not getattr(self, "_placed", False):          # pierwszy raz – nad oknem głównym
+                g = self.app.pw.frameGeometry()
+                scr = self.app.pw.screen().availableGeometry()
+                d = 60 if not self.edit_mode else 110
+                self.move(max(g.x() + d, scr.x()), max(g.y() + d - 10, scr.y()))
+                self._placed = True
+            self.show()
+        self.raise_()
+        self.activateWindow()
+        self.app.update_buttons()
+
+    def close_panel(self):
+        """X / Zamknij obciążenia własne (w edycji – koniec edycji). False – użytkownik został przy edycji."""
+        if self.edit_mode and not self.end_edit():
+            return False
+        if self._db is not None:
+            self._db.close()
+        self.hide()
+        self.app.update_buttons()
+        return True
+
+    def closeEvent(self, e):
+        if getattr(self.app, "_quitting", False):
+            e.accept()
+            return
+        e.ignore()
+        self.close_panel()
+
+    def on_main(self):
+        if self.edit_mode:
+            self.close_panel()
+            return
+        s = self.changed()
+        if not s["ok"]:
+            QMessageBox.warning(self, "Obciążenia własne", "Nie można dodać przypadku do projektu:\n" + s["err"])
+            return
+        case = self.app.add_lab_case(self.data())
+        self.info_msg(f"Dodano do projektu: „{case['name']}”.")
+
+    # --- edycja przypadku
+    def start_edit(self, case):
+        self.editing = case
+        self.set_data(case["state"].get("wlasne"))
+        self.setWindowTitle(f"Obciążenia własne – edycja: {case['name']}")
+        self.show_panel()
+
+    def end_edit(self, save=True):
+        """Koniec edycji – zmiany do przypadku. False – dane niepoprawne i użytkownik wrócił do edycji."""
+        case = self.editing
+        if case is None:
+            return True
+        if save:
+            s = self.changed()
+            if not s["ok"]:
+                B = QMessageBox.StandardButton
+                box = QMessageBox(QMessageBox.Icon.Warning, "Edycja przypadku",
+                                  f"Przypadku „{case['name']}” nie można zapisać:\n{s['err']}", B.Discard | B.Cancel,
+                                  self)
+                box.button(B.Discard).setText("Odrzuć zmiany")
+                box.button(B.Cancel).setText("Wróć do edycji")
+                if box.exec() != B.Discard:
+                    return False
+            else:
+                data = self.data()
+                if json.dumps(data, sort_keys=True) != json.dumps(case["state"].get("wlasne"), sort_keys=True):
+                    self.app.store_lab_case(case, data)
+        self.editing = None
+        if self._db is not None:
+            self._db.close()
+        self.hide()
+        if case in self.app.project["cases"]:
+            self.app.pw.refresh_cases([case])
+        self.app.update_buttons()
+        return True
+
+
+CAT_SEP = " / "                                          # podkategorie w nazwie kategorii: „Kształtowniki / IPE”
+MAT_AUTO_OPEN = 120                                      # wyszukiwanie: tyle pozycji rozwija się samo
+
+
+class MaterialTile(QFrame):
+    """Kafelek pozycji bazy: nazwa, wartość (zakres opisany słownie), źródło; po prawej Edytuj, Duplikuj, Usuń.
+    Klik – zaznaczenie, dwuklik – Dodaj. Edytuj – formularz w kafelku (Zapisz / Anuluj)."""
+
+    def __init__(self, dlg, key):
+        super().__init__()
+        self.dlg, self.key = dlg, key
+        self.setObjectName("tile")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lay = QVBoxLayout(self)
+        self.lay.setContentsMargins(10, 6, 8, 6)
+        self.lay.setSpacing(2)
+        self.view = None
+        self.form = None
+        self.show_view()
+
+    def show_view(self):
+        it = self.dlg.mats[self.key]
+        if self.form is not None:
+            self.lay.removeWidget(self.form)
+            self.form.hide()
+            self.form.deleteLater()
+            self.form = None
+        v = QWidget()
+        h = QHBoxLayout(v)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+        col = QVBoxLayout()
+        col.setSpacing(1)
+        nm = QLabel(html.escape(it["name"]))
+        nm.setObjectName("tileName")
+        nm.setWordWrap(True)
+        col.addWidget(nm)
+        val = QLabel(f"<b>{html.escape(mat_value_text(it['value'], it['unit']))}</b>")
+        col.addWidget(val)
+        if it.get("src"):
+            s = QLabel("Źródło: " + html.escape(it["src"]))
+            s.setObjectName("muted")
+            s.setWordWrap(True)
+            col.addWidget(s)
+        h.addLayout(col, 1)
+        for txt, fn in (("Edytuj", self.edit), ("Duplikuj", lambda: self.dlg.dup_item(self.key)),
+                        ("Usuń", lambda: self.dlg.del_item(self.key))):
+            b = QPushButton(txt)
+            b.setCursor(Qt.CursorShape.ArrowCursor)
+            b.clicked.connect(lambda checked=False, fn=fn: fn())
+            h.addWidget(b, 0, Qt.AlignmentFlag.AlignTop)
+        self.lay.addWidget(v)
+        if self.view is not None:
+            self.lay.removeWidget(self.view)
+            self.view.hide()
+            self.view.deleteLater()
+        self.view = v
+
+    def edit(self):
+        """Formularz edycji w kafelku: nazwa, wartość (lub zakres od–do), jednostka, kategoria, źródło."""
+        self.dlg.select(self.key)
+        it = self.dlg.mats[self.key]
+        if self.view is not None:
+            self.view.hide()
+        f = QWidget()
+        g = QGridLayout(f)
+        g.setContentsMargins(0, 0, 0, 0)
+        g.setHorizontalSpacing(6)
+        lo, hi = mat_range(it["value"]) or (0.0, 0.0)
+        rng = abs(hi - lo) > 1e-12
+        fm = lambda x: f"{x:g}".replace(".", ",")
+        self.e_name = QLineEdit(it["name"])
+        self.e_lo = QLineEdit(fm(lo) if rng else str(it["value"]))
+        self.e_hi = QLineEdit(fm(hi) if rng else "")
+        self.e_hi.setPlaceholderText("puste – jedna wartość")
+        for e in (self.e_lo, self.e_hi):
+            e.setFixedWidth(110)
+            e.setAlignment(AL_R)
+        self.e_unit = QComboBox()
+        for u in reversed(LAB_UNITS):
+            self.e_unit.addItem(u)
+        self.e_unit.setCurrentText(it["unit"])
+        self.e_cat = QComboBox()
+        self.e_cat.setEditable(True)
+        self.e_cat.addItems(self.dlg.categories())
+        self.e_cat.setCurrentText(it["cat"])
+        self.e_cat.setToolTip("Podkategorie oddziel ukośnikiem, np. „Kształtowniki stalowe / Dwuteowniki IPE”")
+        self.e_src = QLineEdit(it.get("src", ""))
+        g.addWidget(QLabel("Nazwa"), 0, 0)
+        g.addWidget(self.e_name, 0, 1, 1, 5)
+        g.addWidget(QLabel("Wartość"), 1, 0)
+        g.addWidget(self.e_lo, 1, 1)
+        g.addWidget(QLabel("do (zakres)"), 1, 2)
+        g.addWidget(self.e_hi, 1, 3)
+        g.addWidget(QLabel("Jednostka"), 1, 4)
+        g.addWidget(self.e_unit, 1, 5)
+        g.addWidget(QLabel("Kategoria"), 2, 0)
+        g.addWidget(self.e_cat, 2, 1, 1, 5)
+        g.addWidget(QLabel("Źródło"), 3, 0)
+        g.addWidget(self.e_src, 3, 1, 1, 5)
+        hb = QHBoxLayout()
+        hb.addStretch(1)
+        b = QPushButton("Zapisz")
+        b.clicked.connect(lambda checked=False: self.save())
+        hb.addWidget(b)
+        self.btn_save = b
+        b = QPushButton("Anuluj")
+        b.clicked.connect(lambda checked=False: self.show_view())
+        hb.addWidget(b)
+        g.addLayout(hb, 4, 0, 1, 6)
+        g.setColumnStretch(1, 1)
+        self.lay.addWidget(f)
+        self.form = f
+        self.e_name.setFocus()
+        self.e_name.selectAll()
+
+    def save(self):
+        nm = self.e_name.text().strip()
+        lo, hi = parse_num(self.e_lo.text()), parse_num(self.e_hi.text()) if self.e_hi.text().strip() else None
+        if not nm or lo is None or (self.e_hi.text().strip() and hi is None):
+            QMessageBox.warning(self, "Baza materiałów", "Podaj nazwę i poprawną wartość (zakres: dwie liczby).")
+            return
+        val = self.e_lo.text().strip() if hi is None or abs(hi - lo) < 1e-12 else \
+            f"od {self.e_lo.text().strip()} do {self.e_hi.text().strip()}"
+        it = self.dlg.mats[self.key]
+        it.update(name=nm, value=val, unit=self.e_unit.currentText(),
+                  cat=self.e_cat.currentText().strip() or "Bez kategorii", src=self.e_src.text().strip())
+        self.dlg.save()
+        self.dlg.rebuild(select=self.key)
+
+    def set_selected(self, on):
+        self.setProperty("sel", bool(on))
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def mousePressEvent(self, e):
+        self.dlg.select(self.key)
+        super().mousePressEvent(e)
+
+    def mouseDoubleClickEvent(self, e):
+        if self.form is None:
+            self.dlg.select(self.key)
+            self.dlg.add()
+
+
+class MaterialDialog(QDialog):
+    """Baza materiałów w kafelkach: wyszukiwarka (wszystkie wpisane frazy), grupy według rodzaju obciążenia
+    i kategorie (zwijane, podkategorie „A / B”), każda pozycja – Edytuj, Duplikuj, Usuń; Nowa pozycja, wymiana
+    pliku bazy. Dodaj (lub dwuklik) – pozycja do panelu obciążeń własnych, okno się zamyka. Nie blokuje innych okien."""
+    chosen = Signal(dict)
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Baza materiałów")
+        self.setModal(False)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.resize(900, 760)
+        self._key = 0
+        self.mats, self.order = {}, []
+        self.open_groups = {3, 2, 1, 0}                 # rozwinięte grupy (jednostki)
+        self.open_cats = set()                           # rozwinięte kategorie (ścieżki)
+        self.sel_key = None
+        self.tiles = {}
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(8)
+        top = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Szukaj – wpisz kilka fraz, np. „beton zbroj”, „C24”, „IPE 200”…")
+        self.search.setClearButtonEnabled(True)
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(250)
+        self._timer.timeout.connect(lambda: self.rebuild())
+        self.search.textChanged.connect(lambda t: self._timer.start())
+        top.addWidget(self.search, 1)
+        b = QPushButton("Nowa pozycja")
+        b.setToolTip("Nowa pozycja w kategorii zaznaczonej pozycji")
+        b.clicked.connect(lambda checked=False: self.new_item())
+        top.addWidget(b)
+        from PySide6.QtWidgets import QMenu
+        mb = QPushButton("Plik bazy ▾")
+        m = QMenu(mb)
+        m.addAction("Wczytaj bazę z pliku…").triggered.connect(lambda checked=False: self.import_file())
+        m.addAction("Zapisz bazę do pliku…").triggered.connect(lambda checked=False: self.export_file())
+        m.addSeparator()
+        m.addAction("Przywróć bazę domyślną").triggered.connect(lambda checked=False: self.restore_default())
+        mb.setMenu(m)
+        top.addWidget(mb)
+        lay.addLayout(top)
+        sc = QScrollArea()
+        sc.setWidgetResizable(True)
+        sc.setFrameShape(QFrame.Shape.NoFrame)
+        self.inner = QWidget()
+        self.inner.setObjectName("page")
+        self.vl = QVBoxLayout(self.inner)
+        self.vl.setContentsMargins(0, 0, 4, 0)
+        self.vl.setSpacing(4)
+        sc.setWidget(self.inner)
+        self.scroll = sc
+        lay.addWidget(sc, 1)
+        self.status = QLabel("")
+        self.status.setObjectName("muted")
+        self.status.setWordWrap(True)
+        lay.addWidget(self.status)
+        self.btn_add = QPushButton("Dodaj")
+        self.btn_add.setObjectName("big")
+        self.btn_add.setMinimumHeight(40)
+        self.btn_add.clicked.connect(lambda checked=False: self.add())
+        lay.addWidget(self.btn_add)
+        n_new = mat_sync()
+        self.load(mat_active_file())
+        if n_new:
+            self._status(f"dołączono nowe pozycje z bazy programu: {n_new}")
+        self.search.setFocus()
+
+    # --- dane
+    def load(self, path):
+        try:
+            items, bad = mat_load(path)
+        except (OSError, UnicodeDecodeError) as e:
+            items, bad = [], 0
+            QMessageBox.warning(self, "Baza materiałów", f"Nie można odczytać bazy:\n{path}\n{e}")
+        self.mats, self.order = {}, []
+        for it in items:
+            self._put(it)
+        self.path = path
+        self.sel_key = None
+        self.rebuild()
+        self._status(f"{len(items)} pozycji" + (f" (pominięto błędne wiersze: {bad})" if bad else ""))
+        return len(items), bad
+
+    def _put(self, it, after=None):
+        self._key += 1
+        self.mats[self._key] = it
+        if after in self.order:
+            self.order.insert(self.order.index(after) + 1, self._key)
+        else:
+            self.order.append(self._key)
+        return self._key
+
+    def categories(self):
+        out = []
+        for k in self.order:
+            c = self.mats[k]["cat"]
+            if c not in out:
+                out.append(c)
+        return out
+
+    def save(self):
+        """Każda zmiana – zapis do bazy użytkownika (baza z pakietu programu zostaje nietknięta)."""
+        p = mat_user_file()
+        try:
+            mat_save(p, [self.mats[k] for k in self.order])
+            self.path = p
+        except OSError as e:
+            QMessageBox.warning(self, "Baza materiałów", f"Nie można zapisać bazy:\n{p}\n{e}")
+        self._status("zapisano zmiany")
+
+    def _status(self, extra=""):
+        src = "baza użytkownika" if os.path.normcase(os.path.abspath(self.path)) == \
+            os.path.normcase(os.path.abspath(mat_user_file())) else "baza domyślna programu"
+        self.status.setText(f"Plik: {self.path} ({src})" + (f" – {extra}" if extra else ""))
+
+    # --- widok
+    def matches(self):
+        words = _fold(self.search.text()).split()
+        if not words:
+            return None
+        out = set()
+        for k in self.order:
+            it = self.mats[k]
+            hay = _fold(" ".join((it["name"], it["value"], it["unit"], it["cat"], it.get("src", ""),
+                                  mat_value_text(it["value"], it["unit"]))))
+            if all(w in hay for w in words):
+                out.add(k)
+        return out
+
+    def _header(self, text, level, opened, toggle):
+        b = QPushButton(("▾  " if opened else "▸  ") + text)
+        b.setObjectName("groupHead" if level == 0 else "catHead")
+        b.setFlat(True)
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        b.setStyleSheet(f"margin-left: {level * 18}px;")
+        b.clicked.connect(lambda checked=False: toggle())
+        return b
+
+    def rebuild(self, select=None):
+        if select is not None:
+            self.sel_key = select
+        while self.vl.count():
+            w = self.vl.takeAt(0).widget()
+            if w is not None:
+                w.hide()
+                w.deleteLater()
+        self.tiles = {}
+        hit = self.matches()
+        auto = hit is not None and len(hit) <= MAT_AUTO_OPEN
+        keys = [k for k in self.order if hit is None or k in hit]
+        if self.sel_key is not None and select is not None:      # zaznaczona pozycja – jej grupa i kategoria widoczne
+            it = self.mats.get(self.sel_key)
+            if it:
+                self.open_groups.add(unit_exp(it["unit"]))
+                parts = it["cat"].split(CAT_SEP)
+                for i in range(len(parts)):
+                    self.open_cats.add(CAT_SEP.join(parts[:i + 1]))
+        for e in (3, 2, 1, 0):
+            gk = [k for k in keys if unit_exp(self.mats[k]["unit"]) == e]
+            if hit is not None and not gk:
+                continue
+            g_open = auto or e in self.open_groups
+            self.vl.addWidget(self._header(f"{LAB_GROUPS[e]}  ({len(gk)})", 0, g_open,
+                                           lambda e=e: self._toggle_group(e)))
+            if not g_open:
+                continue
+            tree = {}                                   # kategoria → (podkategorie, pozycje); kolejność z bazy
+            for k in gk:
+                node = tree
+                parts = self.mats[k]["cat"].split(CAT_SEP)
+                for i, p in enumerate(parts):
+                    node = node.setdefault(p, ({}, []))
+                    if i == len(parts) - 1:
+                        node[1].append(k)
+                    node = node[0]
+            self._add_cats(tree, "", 1, auto)
+        if not keys:
+            lb = QLabel("Brak pozycji pasujących do wyszukiwania." if hit is not None else "Baza jest pusta.")
+            lb.setObjectName("muted")
+            self.vl.addWidget(lb)
+        elif hit is not None and not auto:
+            lb = QLabel(f"Pasujących pozycji: {len(hit)} – zawęź wyszukiwanie albo rozwiń kategorię.")
+            lb.setObjectName("muted")
+            self.vl.insertWidget(0, lb)
+        self.vl.addStretch(1)
+        if self.sel_key not in self.mats:
+            self.sel_key = None
+        t = self.tiles.get(self.sel_key)
+        if t is not None:
+            t.set_selected(True)
+            if select is not None:
+                QTimer.singleShot(0, lambda: self.scroll.ensureWidgetVisible(t, 50, 80))
+        self.btn_add.setEnabled(t is not None)
+
+    def _add_cats(self, tree, prefix, level, auto):
+        count = lambda n: len(n[1]) + sum(count(c) for c in n[0].values())
+        for name, node in tree.items():
+            path = prefix + CAT_SEP + name if prefix else name
+            opened = auto or path in self.open_cats
+            self.vl.addWidget(self._header(f"{name}  ({count(node)})", level, opened,
+                                           lambda p=path: self._toggle_cat(p)))
+            if not opened:
+                continue
+            self._add_cats(node[0], path, level + 1, auto)
+            for k in node[1]:
+                t = MaterialTile(self, k)
+                t.setStyleSheet(f"QFrame#tile {{ margin-left: {(level + 1) * 18}px; }}")
+                self.vl.addWidget(t)
+                self.tiles[k] = t
+
+    def _toggle_group(self, e):
+        self.open_groups ^= {e}
+        self.rebuild()
+
+    def _toggle_cat(self, p):
+        self.open_cats ^= {p}
+        self.rebuild()
+
+    def select(self, key):
+        old = self.tiles.get(self.sel_key)
+        if old is not None:
+            old.set_selected(False)
+        self.sel_key = key
+        t = self.tiles.get(key)
+        if t is not None:
+            t.set_selected(True)
+        self.btn_add.setEnabled(t is not None)
+
+    def current_key(self):
+        return self.sel_key if self.sel_key in self.tiles else None
+
+    # --- pozycje
+    def new_item(self):
+        base = self.mats.get(self.sel_key)
+        cats = self.categories()
+        it = dict(name="nowy materiał", value="0", unit=base["unit"] if base else "kN/m³",
+                  cat=base["cat"] if base else (cats[0] if cats else "Bez kategorii"), src=MAT_USER_SRC)
+        after = self.sel_key if base else next((k_ for k_ in reversed(self.order)
+                                                 if self.mats[k_]["cat"] == it["cat"]), None)
+        k = self._put(it, after=after)
+        self.save()
+        self.search.blockSignals(True)
+        self.search.clear()
+        self.search.blockSignals(False)
+        self.rebuild(select=k)
+        t = self.tiles.get(k)
+        if t is not None:
+            t.edit()
+        return k
+
+    def dup_item(self, k0):
+        it = dict(self.mats[k0])
+        it["name"] += " - kopia"
+        k = self._put(it, after=k0)
+        self.save()
+        self.rebuild(select=k)
+        return k
+
+    def del_item(self, k0):
+        B = QMessageBox.StandardButton
+        if QMessageBox.question(self, "Baza materiałów", f"Usunąć z bazy „{self.mats[k0]['name']}”?",
+                                B.Yes | B.No, B.No) != B.Yes:
+            return
+        self.order.remove(k0)
+        del self.mats[k0]
+        if self.sel_key == k0:
+            self.sel_key = None
+        self.save()
+        self.rebuild()
+
+    def add(self):
+        k = self.current_key()
+        if k is None:
+            return
+        self.chosen.emit(dict(self.mats[k]))
+        self.close()
+
+    # --- plik bazy
+    def import_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Wczytaj bazę materiałów", os.path.dirname(self.path),
+                                              "Baza materiałów (*.txt);;Wszystkie pliki (*)")
+        if not path:
+            return
+        try:
+            items, bad = mat_load(path)
+        except (OSError, UnicodeDecodeError) as e:
+            QMessageBox.warning(self, "Baza materiałów", f"Nie można odczytać pliku:\n{e}")
+            return
+        if not items:
+            QMessageBox.warning(self, "Baza materiałów", "Plik nie zawiera poprawnych pozycji bazy.")
+            return
+        B = QMessageBox.StandardButton
+        if QMessageBox.question(self, "Baza materiałów",
+                                f"Zastąpić bieżącą bazę ({len(self.order)} pozycji) bazą z pliku ({len(items)} pozycji"
+                                + (f", pominięto błędne wiersze: {bad}" if bad else "") + ")?",
+                                B.Yes | B.No, B.No) != B.Yes:
+            return
+        self.mats, self.order = {}, []
+        for it in items:
+            self._put(it)
+        self.save()
+        self.rebuild()
+
+    def export_file(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Zapisz bazę materiałów", MAT_FILE_NAME,
+                                              "Baza materiałów (*.txt)")
+        if not path:
+            return
+        try:
+            mat_save(path, [self.mats[k] for k in self.order])
+        except OSError as e:
+            QMessageBox.warning(self, "Baza materiałów", f"Nie można zapisać pliku:\n{e}")
+            return
+        self._status(f"zapisano kopię: {path}")
+
+    def restore_default(self):
+        B = QMessageBox.StandardButton
+        if QMessageBox.question(self, "Baza materiałów", "Przywrócić bazę domyślną programu? Zmiany wprowadzone "
+                                "w bazie (nowe, zmienione i usunięte pozycje) zostaną utracone.",
+                                B.Yes | B.No, B.No) != B.Yes:
+            return
+        u = mat_user_file()
+        try:
+            if os.path.exists(u):
+                os.remove(u)
+        except OSError as e:
+            QMessageBox.warning(self, "Baza materiałów", f"Nie można usunąć pliku:\n{u}\n{e}")
+            return
+        self.load(MAT_DEFAULT)
+
+
 class ProjectWindow(QWidget):
-    """Okno główne (wewnętrznie: KAYENN Main) – pierwsze okno po uruchomieniu: menu Plik (nowy, otwórz, zapisz),
-    lista przypadków (najmłodszy na górze), Otwórz / Zamknij obciążenia normowe, Drukuj.
+    """Okno główne (wewnętrznie: KAYENN Manager) – pierwsze okno po uruchomieniu: menu Plik (nowy, otwórz, zapisz),
+    Drukuj), lista przypadków (najmłodszy na górze), Obciążenia normowe / Obciążenia własne (otwórz / zamknij).
     Zamknięcie okna kończy program (jak Plik → Zakończ)."""
 
     def __init__(self, app):
@@ -4028,8 +5340,8 @@ class ProjectWindow(QWidget):
         app.file_menu(mb, project=True)
         lay.setMenuBar(mb)
         self.menu_bar = mb
-        self.empty = QLabel("Projekt nie zawiera przypadków. Kliknij „Obciążenia normowe” i dodaj przypadek "
-                            "przyciskiem „Dodaj do projektu”.")
+        self.empty = QLabel("Projekt nie zawiera przypadków. Kliknij „Obciążenia normowe” albo „Obciążenia własne” "
+                            "i dodaj przypadek przyciskiem „Dodaj do projektu”.")
         self.empty.setObjectName("muted")
         lay.addWidget(self.empty)
         sc = QScrollArea()
@@ -4046,9 +5358,10 @@ class ProjectWindow(QWidget):
         b1.setObjectName("big")
         self.btn_codes = b1
         b1.clicked.connect(lambda checked=False: self.app.toggle_codes())
-        b2 = QPushButton("Drukuj")
+        b2 = QPushButton("Obciążenia własne")
         b2.setObjectName("big")
-        b2.clicked.connect(lambda checked=False: self.app.print_project())
+        self.btn_lab = b2
+        b2.clicked.connect(lambda checked=False: self.app.toggle_lab())
         hb.addWidget(b1, 1)
         hb.addWidget(b2, 1)
         lay.addLayout(hb)
@@ -4133,9 +5446,11 @@ class ProjectWindow(QWidget):
         """Napisy przycisków zależne od okna obciążeń normowych i edytowanego przypadku."""
         app = self.app
         self.btn_codes.setText("Zamknij obciążenia normowe" if app.win.isVisible() else "Obciążenia normowe")
-        ed = app.edited_case()
+        lw = getattr(app, "lab", None)
+        self.btn_lab.setText("Zamknij obciążenia własne" if lw is not None and lw.isVisible() else "Obciążenia własne")
+        eds = app.edited_cases()
         for c in self.cards:
-            c.btn_edit.setText("Zakończ edycję" if ed is c.case else "Edytuj")
+            c.btn_edit.setText("Zakończ edycję" if any(c.case is e for e in eds) else "Edytuj")
 
     def card_of(self, case):
         return next((c for c in self.cards if c.case is case), None)
@@ -4168,8 +5483,16 @@ class ProjectWindow(QWidget):
 
     def edit_case(self, case):
         """Edytuj – przypadek w oknie obciążeń normowych; drugi klik (Zakończ edycję) – koniec edycji.
-        Lista zostaje w tym samym miejscu."""
-        if self.app.edited_case() is case:
+        Lista zostaje w tym samym miejscu. Przypadek obciążeń własnych – w panelu obciążeń własnych."""
+        if case["extra"].get("mode") == "własne":
+            lw = getattr(self.app, "lab_ed", None)
+            if lw is not None and lw.editing is case:
+                self.keep_view(lambda: lw.close_panel())
+            else:
+                self.keep_view(lambda: self.app.edit_lab_case(case))
+            return
+        ed = self.app.editor
+        if ed is not None and ed.editing is case:
             self.keep_view(lambda: self.app.editor.close_codes())
         else:
             self.keep_view(lambda: self.app.edit_case(case))
@@ -4199,11 +5522,35 @@ class ProjectWindow(QWidget):
             self.list.lay.removeWidget(card)
             card.hide()
             card.deleteLater()
-        if self.app.edited_case() is case:
-            self.app.end_editor(save=False)
+        ed, lw = self.app.editor, getattr(self.app, "lab_ed", None)
+        if ed is not None and ed.editing is case:
+            ed.end_edit(save=False)
+        if lw is not None and lw.editing is case:
+            lw.end_edit(save=False)
         self.empty.setVisible(not self.cards)
         self.list.update()
         self.app.project_changed()
+
+    def changeEvent(self, e):
+        """Minimalizacja programu: Windows chowa okna należące do okna głównego, a po przywróceniu Qt pokazuje je
+        w normalnym rozmiarze – zmaksymalizowane (np. Model 3D) maksymalizujemy z powrotem."""
+        if e.type() == QEvent.Type.WindowStateChange:
+            if self.isMinimized():
+                self._max_owned = [w for w in QApplication.topLevelWidgets()
+                                   if w is not self and w.isVisible() and w.isMaximized()]
+            elif e.oldState() & Qt.WindowState.WindowMinimized:
+                ws, self._max_owned = getattr(self, "_max_owned", []), []
+
+                def remax():
+                    for w in ws:
+                        try:
+                            if w.isVisible() and not w.isMaximized():
+                                w.showMaximized()
+                        except RuntimeError:                 # okno usunięte w międzyczasie
+                            pass
+                for t in (0, 150):                           # Windows pokazuje okna z opóźnieniem
+                    QTimer.singleShot(t, remax)
+        super().changeEvent(e)
 
     def closeEvent(self, e):
         if self.app.quit_app():                      # zamknięcie okna głównego = koniec programu
@@ -4339,7 +5686,7 @@ class App:
         self.bdims3d = Var(True)
         if self.host is self:
             self.project = {"cases": [], "next": 1, "globals": None, "name": ""}   # przypadki (najmłodszy pierwszy)
-            self.pw = None                         # okno główne (KAYENN Main)
+            self.pw = None                         # okno główne (KAYENN Manager)
         self.editing = None                        # przypadek edytowany w tym panelu (tylko panel edycji)
         self._ctx = None
 
@@ -4607,7 +5954,7 @@ class App:
         self._build_use_page()
 
         # ================= ŚNIEG
-        lay = self._page("  ❄  Śnieg  ")
+        lay = self._page("  Śnieg  ")
         c = self.card(lay, "Teren")
         self._loc_row(c, "snow")
         self.zone_boxes.append(self.combo(c, 2, 0, self.snow_zone, "Strefa śniegowa", list(SNOW_ZONES), width=4))
@@ -4668,7 +6015,7 @@ class App:
                                                        (52, 220, 105, 115), 1, (0, 1))
 
         # ================= WIATR
-        lay = self._page("  ≋  Wiatr  ")
+        lay = self._page("  Wiatr  ")
         c = self.card(lay, "Teren")
         self._loc_row(c, "wind")
         self.zone_boxes.append(self.combo(c, 2, 0, self.wind_zone, "Strefa wiatrowa", list(WIND_ZONES), width=4))
@@ -4766,7 +6113,8 @@ class App:
             entries = [("Nowy projekt", "Ctrl+N", self.file_new),
                        ("Otwórz plik projektu…", "Ctrl+O", self.file_open), None,
                        ("Zapisz", "Ctrl+S", self.file_save), ("Zapisz jako…", "Ctrl+Shift+S", self.file_save_as),
-                       None, ("Informacje o projekcie…", None, self.project_info), None] + entries
+                       None, ("Informacje o projekcie…", None, self.project_info),
+                       ("Drukuj…", "Ctrl+P", self.print_project), None] + entries
         for entry in entries:
             if entry is None:
                 mf.addSeparator()
@@ -4887,6 +6235,8 @@ class App:
                 app._put_location(loc)
         au = self._auto_values(loc)
         for c in host.project["cases"]:
+            if c["extra"].get("mode") == "własne":     # bez lokalizacji
+                continue
             st = c["state"]
             st["lokalizacja"] = loc
             st["strefy_recznie"] = False
@@ -4966,13 +6316,22 @@ class App:
         return True
 
     def end_editor(self, save=True):
-        """Koniec edycji w panelu edycji (jeśli otwarty). False – użytkownik został przy edycji."""
+        """Koniec edycji w panelach edycji (obciążenia normowe, obciążenia własne). False – użytkownik został
+        przy edycji."""
         ed = self.host.editor
-        return ed is None or ed.end_edit(save)
+        if ed is not None and not ed.end_edit(save):
+            return False
+        lw = getattr(self.host, "lab_ed", None)
+        return lw is None or lw.end_edit(save)
+
+    def edited_cases(self):
+        """Przypadki edytowane w panelach edycji (obciążenia normowe, obciążenia własne)."""
+        ed, lw = self.host.editor, getattr(self.host, "lab_ed", None)
+        return [c for c in (ed.editing if ed is not None else None, lw.editing if lw is not None else None) if c]
 
     def edited_case(self):
-        ed = self.host.editor
-        return ed.editing if ed is not None else None
+        eds = self.edited_cases()
+        return eds[0] if eds else None
 
     def file_open(self):
         if not self.end_editor() or not self._ask_save():
@@ -5089,7 +6448,7 @@ class App:
     def _build_use_page(self):
         """Zakładka „Użytkowe” (PN-EN 1991-1-1): rodzaj powierzchni → kategoria (→ użytkowanie dachu kat. I) →
         opis, przedział normowy z wartością zalecaną, wartość przyjęta (domyślnie zalecana)."""
-        lay = self._page("  ▦  Użytkowe  ")
+        lay = self._page("  Użytkowe  ")
         c = self.card(lay, "Powierzchnia")
         g = c.grid
         self.use_group = QComboBox()
@@ -5862,6 +7221,11 @@ class App:
 
     def _compute(self, case):
         mode = case["extra"].get("mode", "śnieg")
+        if mode == "własne":                          # obciążenia własne – bez formularza obciążeń normowych
+            d = case["state"].get("wlasne") or {}
+            sm = lab_summary(d.get("pozycje") or [])
+            return dict(ok=sm["ok"], err=sm["err"], state=case["state"], calc=dict(mode=mode, snow_case=None),
+                        report=lab_report(d))
         return self._in_case(case["state"], case["extra"], lambda: self._grab_current(mode))
 
     def _apply_result(self, case, r):
@@ -5963,6 +7327,52 @@ class App:
         if getattr(self, "pw", None) is not None and self.pw.app is not None:
             self.pw.update_buttons()
 
+    # --- okno obciążeń własnych (KAYENN Lab) nad oknem głównym
+    def _lab_win(self, edit=False):
+        host = self.host
+        attr = "lab_ed" if edit else "lab"
+        w = getattr(host, attr, None)
+        if w is None:
+            w = LabWindow(host, edit=edit)
+            setattr(host, attr, w)
+        return w
+
+    def toggle_lab(self):
+        w = getattr(self.host, "lab", None)
+        if w is not None and w.isVisible():
+            w.close_panel()
+        else:
+            self._lab_win().show_panel()
+
+    def edit_lab_case(self, case):
+        """Edytuj przypadek obciążeń własnych – osobny panel (panel dodawania działa niezależnie)."""
+        w = self._lab_win(edit=True)
+        if w.editing is not None and w.editing is not case and not w.end_edit():
+            return
+        w.start_edit(case)
+        self.update_buttons()
+
+    def add_lab_case(self, data):
+        """Dodaj do projektu z panelu obciążeń własnych – nowy przypadek na górze listy."""
+        from datetime import datetime
+        host = self.host
+        n = host.project["next"]
+        host.project["next"] = n + 1
+        case = {"id": n, "name": f"Przypadek {n}", "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "extra": {"mode": "własne"}, "state": {"wlasne": data}}
+        host.project["cases"].insert(0, case)
+        host._apply_result(case, host._compute(case))
+        host.project_changed()
+        host.pw.insert_case(case)
+        return case
+
+    def store_lab_case(self, case, data):
+        """Zakończ edycję obciążeń własnych – zmienione pozycje do przypadku."""
+        host = self.host
+        case["state"] = {"wlasne": data}
+        host._apply_result(case, host._compute(case))
+        host.project_changed()
+
     # --- okno obciążeń normowych (KAYENN Codes) nad oknem głównym
     def toggle_codes(self):
         if self.win.isVisible():
@@ -6040,7 +7450,7 @@ class App:
         if self.project.get("globals") not in (None, g):             # zmiana lokalizacji / wysokości n.p.m.
             n_ = 0
             for c in self.project["cases"]:
-                if c is not case and self._globals_of(c["state"]) != g:
+                if c is not case and c["extra"].get("mode") != "własne" and self._globals_of(c["state"]) != g:
                     self._put_globals(c["state"], g)
                     c["_calc"] = None                                 # przeliczenie przy otwarciu / wydruku
                     n_ += 1
@@ -6159,7 +7569,7 @@ class App:
             self.ensure_calc(case)
             ex, op = case["extra"], case["state"].get("opcje", {})
             mode = ex.get("mode", "śnieg")
-            if mode == "użytkowe":                   # bez modelu 3D – sama informacja o wartościach
+            if mode in REPORT_ONLY:                  # bez modelu 3D – sama informacja o wartościach
                 brk = ' style="page-break-before:always;"' if i else ""
                 parts.append(f'<div{brk}><p style="color:#6b7280; font-size:8pt;">{head}</p>'
                              f'<h2 style="margin:4px 0 2px 0;">{esc(case["name"])}</h2>'
@@ -6203,6 +7613,13 @@ class App:
         scr = (self.pw or self.win).screen().availableGeometry()
         dlg.resize(min(1000, scr.width() - 80), scr.height() - 80)
         dlg.paintRequested.connect(lambda p: doc.print_(p))
+        # QPrintPreviewDialog nie przejmuje QPrintera – drukarka i dokument muszą żyć tak długo jak okno
+        # (wcześniej zmienna lokalna znikała po wyjściu z funkcji i podgląd zamykał cały program)
+        keep = self.__dict__.setdefault("_print_keep", {})
+        k = id(dlg)
+        keep[k] = (printer, doc)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dlg.destroyed.connect(lambda *_a, k=k: keep.pop(k, None))    # drukarka zwalniana dopiero po oknie
         self._preview = dlg                               # (testy: dostęp do okna podglądu)
         dlg.setModal(False)                               # nie blokuje pozostałych okien
         dlg.show()
@@ -6585,25 +8002,21 @@ class App:
             faces.append(dict(poly=top, fill=col, outline=edge, n=n, cull=True, label=lab, grp=grp, prio=0,
                               alpha=SNOW_ALPHA, on=("w", id(z)), value=z["we"], kind=z["kind"]))
             slabs.append((P, top, n, d, col, edge, z))
-        # ścianki warstw: krawędź zewnętrzna – zamknięcie; styk pól tej samej powierzchni – uskok grubości;
-        # krawędź wypukła między powierzchniami (narożnik ścian, okap, kalenica) – ukośna ścianka łącząca wierzchy
-        # obu warstw (bez szczeliny, w której prześwitywał budynek); w narożniku – trójkąt domykający;
-        # krawędź wklęsła – warstwy się przenikają, bez ścianek
+        # ścianki warstw: każde pole to osobna warstwa zamknięta ściankami (także na narożnikach, okapie
+        # i kalenicy – bez ukośnych ścianek i trójkątów domykających); styk pól tej samej powierzchni – uskok
+        # grubości zwrócony ku cieńszej warstwie
         keyf = lambda p: (round(p[0], 4), round(p[1], 4), round(p[2], 4))
         same = lambda n1, n2: sum(x_ * y_ for x_, y_ in zip(n1, n2)) > 0.999
-        edges, verts = {}, {}
+        edges = {}
         for i, sl in enumerate(slabs):
             P = sl[0]
             for j in range(len(P)):
                 j1 = (j + 1) % len(P)
                 edges.setdefault(frozenset((keyf(P[j]), keyf(P[j1]))), []).append((i, j, j1))
-                verts.setdefault(keyf(P[j]), []).append((i, j))
-        corner = set()                                 # wierzchołki krawędzi wypukłych – trójkąty domykające
         for k, lst in edges.items():
             if len(lst) >= 2:
                 (i1, a1, b1), (i2, a2, b2) = lst[0], lst[1]
-                n1, n2 = slabs[i1][2], slabs[i2][2]
-                if same(n1, n2):                            # ta sama powierzchnia – uskok grubości
+                if same(slabs[i1][2], slabs[i2][2]):            # ta sama powierzchnia – uskok grubości
                     if abs(slabs[i1][3] - slabs[i2][3]) < 1e-9:
                         continue
                     hi, lo = (i1, i2) if slabs[i1][3] > slabs[i2][3] else (i2, i1)
@@ -6614,43 +8027,16 @@ class App:
                     tb = next(tl[q] for q in (la, lb) if keyf(Pl[q]) == keyf(Ph[ib]))
                     self._wind_side(faces, [th[ia], th[ib], tb, ta], centroid(th), slabs[hi])   # uskok zwrócony ku cieńszej warstwie
                     continue
-                P1, P2 = slabs[i1][0], slabs[i2][0]
-                mid = tuple((x_ + y_) / 2 for x_, y_ in zip(P1[a1], P1[b1]))
-                convex = sum(n_ * (c_ - m_) for n_, c_, m_ in zip(n1, centroid(P2), mid)) < -1e-9
-                if not convex:
-                    continue
-                t1, t2 = slabs[i1][1], slabs[i2][1]
-                ka, kb = keyf(P1[a1]), keyf(P1[b1])
-                q2a = next(t2[q] for q in (a2, b2) if keyf(P2[q]) == ka)
-                q2b = next(t2[q] for q in (a2, b2) if keyf(P2[q]) == kb)
-                big = slabs[i1] if slabs[i1][3] >= slabs[i2][3] else slabs[i2]
-                self._wind_side(faces, [t1[a1], t1[b1], q2b, q2a], mid, big)
-                corner.update((ka, kb))
-                continue
-            for i, ja, jb in lst:                           # krawędź zewnętrzna – zamknięcie warstwy
+            for i, ja, jb in lst:                           # krawędź zewnętrzna / inna powierzchnia – zamknięcie
                 P, top = slabs[i][0], slabs[i][1]
-                self._wind_side(faces, [P[ja], P[jb], top[jb], top[ja]], centroid(P), slabs[i])
-        for kv in corner:                                   # narożnik: trójkąt / wielokąt z wierzchów warstw
-            pts, nrm, sls = [], [], []
-            for i, j in verts.get(kv, []):
-                n = slabs[i][2]
-                if any(same(n, m_) for m_ in nrm):
-                    continue
-                nrm.append(n)
-                pts.append(slabs[i][1][j])
-                sls.append(slabs[i])
-            v = slabs[verts[kv][0][0]][0][verts[kv][0][1]]
-            if len(pts) == 2:                              # koniec krawędzi wypukłej – trójkąt z wierzchołkiem budynku
-                self._wind_side(faces, [v, pts[0], pts[1]], v, max(sls, key=lambda q: q[3]), cull=False)
-            elif len(pts) >= 3:                            # narożnik trzech powierzchni
-                nm = unit(tuple(sum(c_) for c_ in zip(*nrm)))
-                ref = unit(tuple(p_ - v_ for p_, v_ in zip(pts[0], v)))
-                ax2 = unit((nm[1] * ref[2] - nm[2] * ref[1], nm[2] * ref[0] - nm[0] * ref[2],
-                            nm[0] * ref[1] - nm[1] * ref[0]))
-                ang = lambda q: math.atan2(sum(a_ * (b_ - c_) for a_, b_, c_ in zip(ax2, q, v)),
-                                           sum(a_ * (b_ - c_) for a_, b_, c_ in zip(ref, q, v)))
-                order = sorted(range(len(pts)), key=lambda t_: ang(pts[t_]))
-                self._wind_side(faces, [pts[t_] for t_ in order], v, max(sls, key=lambda q: q[3]))
+                # wnętrze pola po lewej stronie krawędzi (względem normalnej Newella) – środek ciężkości zawodzi
+                # przy polach wklęsłych (np. ściana szczytowa dachu zagłębionego: ścianka odwrócona, prześwit)
+                nw = unit(newell(P))
+                e_ = tuple(b_ - a_ for a_, b_ in zip(P[ja], P[jb]))
+                lft = (nw[1] * e_[2] - nw[2] * e_[1], nw[2] * e_[0] - nw[0] * e_[2], nw[0] * e_[1] - nw[1] * e_[0])
+                mid = tuple((a_ + b_) / 2 for a_, b_ in zip(P[ja], P[jb]))
+                inner = tuple(m_ + 0.01 * c_ for m_, c_ in zip(mid, lft))
+                self._wind_side(faces, [P[ja], P[jb], top[jb], top[ja]], inner, slabs[i])
         for pt in w["points"]:
             texts.append((pt["pos"], f"{f2(pt['we'], 3, True)} kN/m²"))
         if g.kind == "dome":
@@ -6669,7 +8055,7 @@ class App:
         return faces, texts, lines
 
     @staticmethod
-    def _wind_side(faces, q, inner, slab, cull=True):
+    def _wind_side(faces, q, inner, slab):
         """Ścianka boczna warstwy obciążenia wiatrem (normalna od wnętrza warstwy)."""
         if poly_area(q) < 1e-12:
             return
@@ -6677,7 +8063,7 @@ class App:
         cq = centroid(q)
         if sum(a_ * (b_ - c_) for a_, b_, c_ in zip(n, cq, inner)) < 0:
             n = tuple(-a_ for a_ in n)
-        faces.append(dict(poly=q, fill=slab[4], outline=slab[5], n=n, cull=cull, prio=0, alpha=SNOW_ALPHA,
+        faces.append(dict(poly=q, fill=slab[4], outline=slab[5], n=n, cull=True, prio=0, alpha=SNOW_ALPHA,
                           on=("w", id(slab[6]))))
 
     def scene_snow(self):
@@ -6844,9 +8230,17 @@ class App:
                             return True
             return False
 
+        vtop = {}                                  # wysokości wierzchu śniegu w wierzchołku (różne – uskok grubości)
+        for k, lst in edges.items():
+            for _ip, tp in lst:
+                for v_ in k:
+                    if v_ in tp:
+                        vtop.setdefault(v_, set()).add(round(tp[v_][2], 5))
+
         def smooth(v_):
             d = vdirs.get(v_, [])
-            return len(d) == 2 and abs(d[0][0] * d[1][1] - d[0][1] * d[1][0]) < 1e-6
+            return (len(d) == 2 and abs(d[0][0] * d[1][1] - d[0][1] * d[1][0]) < 1e-6
+                    and len(vtop.get(v_, ())) <= 1)          # przy uskoku grubości krawędź pionowa zostaje
 
         def side_face(q, toward, on=None, mask=None):
             if poly_area(q) < 1e-9:
@@ -7361,9 +8755,9 @@ class App:
         ye = [pr.oy + pr.B for pr in prisms if isinstance(pr, Prism)] + [g.B]
         y0, y1 = min(ys), max(ye)
         yf, ny = (y0, -1) if facing((0, -1, 0)) else (y1, 1)
-        yL = yf                                  # wymiar L – poza przybudówką / zadaszeniem
+        yL = yf                                  # wymiar L – poza przybudówką (daszek jest wyżej – nie przeszkadza)
         if snow:
-            ext = [q[1] for so in (g.annex, g.canopy) if so for P, _ in so.walls for q in P]
+            ext = [q[1] for so in (g.annex,) if so for P, _ in so.walls for q in P]
             yL = min([yf] + ext) if ny < 0 else max([yf] + ext)
         xs, nx = (0.0, -1) if facing((-1, 0, 0)) else (L, 1)
         rz = g.main.rz if snow else g.rz
@@ -7425,15 +8819,17 @@ class App:
             if top_pt and abs(u - top_pt[2]) < 1e-9:
                 return top_pt
             return (xF, yf, u)
+        # attyka przy okapie od strony widza – jej wysokość najbliżej (N), wysokości budynku o poziom dalej
+        hs = N if snow and getattr(g, "exc", None) and any(abs(ye - yf) < 1e-6 for ye, _ in g.eave_par) else 0.0
         if not hparts:
             pass
         elif len(hparts) > 1 or top_pt:     # na liniach odniesienia wymiaru L: cząstkowe – N, ogólny – jak L
-            kH = max(kL, 2 * N)
-            self._dchain(cv, P, hbase, lambda u: (xF, yf + ny * N, u), hparts, z0_, col)
+            kH = max(kL, 2 * N) + hs
+            self._dchain(cv, P, hbase, lambda u: (xF, yf + ny * (N + hs), u), hparts, z0_, col)
             self._dchain(cv, P, hbase, lambda u: (xF, yL + ny * kH, u), [(0.0, htot, "")], z0_, col,
                          lab_t=0.78)                            # opis wyżej niż opisy cząstkowe
         else:                                                   # jedna wysokość – na linii odniesienia L
-            self._dchain(cv, P, hbase, lambda u: (xF, yL + ny * kL, u), hparts, z0_, col)
+            self._dchain(cv, P, hbase, lambda u: (xF, yL + ny * (kL + hs), u), hparts, z0_, col)
         # ---- kąty połaci
         if isinstance(main, Prism):
             seen = []
@@ -7499,7 +8895,8 @@ class App:
             x_, n_ = sxf(a["x0"], a["x1"])                # głębokość i różnica wysokości – po dalszej stronie
             self._dchain(cv, P, lambda u: (u, a["ya"], 0.0), lambda u: (u, a["ya"] - k2, 0.0),
                          [(a["x0"], a["x1"], "", "s_xw")], z0_, col)
-            self._dchain(cv, P, lambda u: (x_, u, 0.0), lambda u: (x_ + n_ * k2, u, 0.0),
+            he_ = a["he"]                                 # głębokość – na wysokości okapu przybudówki
+            self._dchain(cv, P, lambda u: (x_, u, he_), lambda u: (x_ + n_ * k2, u, he_),
                          [(a["ya"], a["yb"], "", "s_xd")], z0_, col)
             hu = g.upper.prof[0][1]
             self._dchain(cv, P, lambda u: (x_, a["yb"], u), lambda u: (x_ + n_ * k2, a["yb"], u),
@@ -7534,10 +8931,17 @@ class App:
                          [(g.H, zt, "", "s_fh")], z0_, col)
         pr = g.main
         xF, nF = (g.L, 1) if xs == 0.0 else (0.0, -1)            # dalszy szczyt
-        for i, (ye, dr) in enumerate(g.eave_par[:1]):          # attyka przy okapie – wysokość (dalszy szczyt)
+        # attyka przy okapie – wysokość przy dalszym szczycie; attyka od strony widza – na zewnątrz okapu (N),
+        # przed wysokościami budynku (te są wtedy o poziom dalej)
+        near = [q for q in g.eave_par if facing((0, -q[1], 0))]
+        for ye, dr in (near or g.eave_par)[:1]:
             z0 = pr.rz(0, ye)
-            self._dchain(cv, P, lambda u: (xF, ye, u), lambda u: (xF + nF * N, ye, u),
-                         [(z0, z0 + g.exc["pah"], "", "s_pah")], z0_, col)
+            if near:
+                self._dchain(cv, P, lambda u: (xF, ye, u), lambda u: (xF, ye - dr * N, u),
+                             [(z0, z0 + g.exc["pah"], "", "s_pah")], z0_, col)
+            else:
+                self._dchain(cv, P, lambda u: (xF, ye, u), lambda u: (xF + nF * N, ye, u),
+                             [(z0, z0 + g.exc["pah"], "", "s_pah")], z0_, col)
         far_gp = [q for q in g.gable_par if (q[0] == 0.0) != facing((-1, 0, 0))]
         for gx, dr in (far_gp or g.gable_par)[:1]:              # attyka szczytowa – wysokość (dalsza)
             ytop = max(pr.prof, key=lambda q: q[1])[0]
@@ -7676,9 +9080,16 @@ class App:
 
         if g.dims_roof or g.kind == "hip":
             edge_chain("s", 0.0, ups)                               # okap / szczyt nawietrzny
-            segs, zs = edge_segs("t", tside)
-            if len(segs) >= 2 and g.kind not in ("can1", "can2"):
-                edge_chain("t", tside, out, segs, zs)               # krawędź boczna
+            if g.kind not in ("can1", "can2"):
+                # krawędź boczna dachu – po drugiej stronie budynku (dalsza krawędź / dalszy szczyt); od strony
+                # widza zostają wymiary ścian na gruncie
+                tfar, ofar = b - tside, (-out[0], -out[1])
+                segs, zs = edge_segs("t", tfar)
+                if len(segs) < 2:
+                    tfar, ofar = tside, out
+                    segs, zs = edge_segs("t", tside)
+                if len(segs) >= 2:
+                    edge_chain("t", tfar, ofar, segs, zs)
             edge_chain("s", d, (-ups[0], -ups[1]))                  # okap zawietrzny (np. pola J)
             if g.kind in ("can1", "can2"):                          # wiaty: podział w poprzek wiatru (B–A–B)
                 _, zs0 = edge_segs("s", 0.0)
@@ -7686,11 +9097,13 @@ class App:
                                if "rect" in z and z["rect"][0] - 1e-6 <= d / 4 <= z["rect"][1] + 1e-6})
                 if len(segs) >= 2 and zs0:
                     edge_chain("s", 0.0, ups, segs, zs0)
-                _, zsb = edge_segs("t", tside)                      # podział wzdłuż wiatru w środku (C–A–D–A–C)
+                # podział wzdłuż wiatru w środku (C–A–D–A–C) – jak przy budynkach: po drugiej stronie wiaty
+                tfar, ofar = b - tside, (-out[0], -out[1])
+                _, zsb = edge_segs("t", tfar)
                 segs = sorted({(round(z["rect"][0], 6), round(z["rect"][1], 6), z["name"]) for z in roofz
                                if "rect" in z and z["rect"][2] - 1e-6 <= b / 2 <= z["rect"][3] + 1e-6})
                 if len(segs) >= 2 and zsb:
-                    edge_chain("t", tside, out, segs, zsb)
+                    edge_chain("t", tfar, ofar, segs, zsb)
         # ściany: na gruncie, wzdłuż ściany bocznej
         segs = [(z["srange"][0], z["srange"][1], z["name"]) for z in w["zones"] if "srange" in z]
         if segs:

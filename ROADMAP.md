@@ -9,9 +9,10 @@ nazwę KAYENN; podział na części poniżej jest wewnętrzny i służy rozwojow
 
 | Część | Zakres |
 |---|---|
-| **KAYENN Main** | okno główne: projekt, raport obliczeniowy, wydruk; platforma obliczeń MES |
+| **KAYENN Manager** | okno główne, moduł podstawowy: projekt, raport obliczeniowy, wydruk; z niego rozgałęziają się pozostałe moduły |
 | **KAYENN Codes** | obciążenia wg norm: śnieg, wiatr, obciążenia użytkowe |
-| **KAYENN Lab** | obciążenia wyznaczane metodami inżynierskimi |
+| **KAYENN Lab** | obciążenia własne i wyznaczane metodami inżynierskimi |
+| **KAYENN FEM** | obliczenia metodą elementów skończonych (planowane) |
 
 ---
 
@@ -59,8 +60,8 @@ uruchomieniu w każdym z nich.
 
 ## Etap 3. Wspólny format pliku projektu
 
-KAYENN Main (okno główne) jest platformą, do której kolejne części programu (Codes, Lab, a docelowo model MES)
-dokładają elementy projektu.
+KAYENN Manager (okno główne) jest modułem podstawowym, z którego rozgałęziają się kolejne części programu
+(Codes, Lab, a docelowo FEM) – każda dokłada elementy projektu.
 
 - Zdefiniowanie wspólnego, udokumentowanego formatu pliku projektu `.kayenn`, obsługującego wpisy z różnych
   części programu (obciążenia normowe, obciążenia inżynierskie, model MES) – z numerem wersji formatu
@@ -80,10 +81,11 @@ Nowa część programu z narzędziami do wyznaczania obciążeń metodami inżyn
 KAYENN Codes, które w całości odwzorowuje podejście normowe. Otwierana z okna głównego, tak jak obciążenia
 normowe.
 
-Pierwsze narzędzie – **kalkulator obciążeń stałych**:
-- wyznaczanie obciążenia od układu warstw (np. posadzki, stropu, dachu) na podstawie materiałów i grubości,
-- wbudowana baza materiałów z ciężarami objętościowymi,
-- możliwość skorygowania ciężaru objętościowego przez użytkownika przy wprowadzaniu warstwy.
+Pierwsze narzędzie – **obciążenia własne** (dostępne):
+- pozycje wpisane ręcznie (powierzchniowe, liniowe, skupione) lub z bazy materiałów, z wymiarami
+  (grubość, szerokość, długość) i kontrolą wspólnej jednostki,
+- baza materiałów w pliku tekstowym (Załącznik A PN-EN 1991-1-1 i pozycje własne), edytowana w programie,
+- możliwość skorygowania wartości przez użytkownika przy wprowadzaniu pozycji.
 
 Kolejne narzędzia będą dodawane w miarę potrzeb użytkowników.
 
@@ -102,8 +104,8 @@ Kolejne narzędzia będą dodawane w miarę potrzeb użytkowników.
 
 ## Etap 7. Kierunki długoterminowe
 
-### 7.1. Obliczenia MES w KAYENN Main
-- Obliczenia metodą elementów skończonych rozwijane bezpośrednio w oknie głównym (KAYENN Main) – na modelu
+### 7.1. Obliczenia MES – KAYENN FEM
+- Obliczenia metodą elementów skończonych w osobnym module (KAYENN FEM), rozgałęzieniu KAYENN Manager – na modelu
   zbudowanym z elementów dodanych przez pozostałe części programu (obciążenia normowe, inżynierskie).
 
 ### 7.2. Profesjonalna dystrybucja

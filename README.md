@@ -15,9 +15,10 @@ W programie użytkownik widzi tylko nazwę **KAYENN**. Poniższe nazwy są wewn�
 
 | Część | Zakres | Stan |
 |---|---|---|
-| **KAYENN Main** | okno główne: projekt, lista przypadków, raport, wydruk; docelowo obliczenia MES | dostępne |
+| **KAYENN Manager** | okno główne, moduł podstawowy: projekt, lista przypadków, raport, wydruk | dostępne |
 | **KAYENN Codes** | obciążenia normowe: śnieg, wiatr | dostępne |
-| **KAYENN Lab** | obciążenia wyznaczane metodami inżynierskimi | planowane |
+| **KAYENN Lab** | obciążenia własne: pozycje wpisane ręcznie lub z bazy materiałów | dostępne |
+| **KAYENN FEM** | obliczenia metodą elementów skończonych | planowane |
 
 ### Obciążenia normowe (KAYENN Codes)
 
@@ -31,6 +32,15 @@ z wyszukiwaniem działek, projekt z wieloma przypadkami (`.kayenn`), wydruk z po
 
 Obciążenia normowe otwiera przycisk **Obciążenia normowe** w oknie głównym – okno pojawia się nad
 oknem głównym, które pozostaje otwarte.
+
+### Obciążenia własne (KAYENN Lab)
+
+Przycisk **Obciążenia własne** w oknie głównym. Obciążenie dowolnego typu – powierzchniowe, liniowe lub
+skupione – wpisane ręcznie albo wyznaczone z bazy materiałów (ciężar objętościowy × grubość / szerokość /
+długość). Program sumuje pozycje i pilnuje wspólnej jednostki. Baza materiałów (`kayenn_materialy.txt`)
+zawiera wszystkie materiały z Załącznika A PN-EN 1991-1-1, ciężary profili stalowych z „Tablic do projektowania
+konstrukcji metalowych” (Bogucki, Żyburtowicz) oraz pozycje dodatkowe; jest plikiem tekstowym,
+który można wymienić lub edytować w Notatniku, a najwygodniej – w programie.
 
 > Program jest narzędziem pomocniczym – wyniki należy weryfikować z normą.
 
