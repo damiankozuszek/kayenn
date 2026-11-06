@@ -22,6 +22,12 @@ import sys
 import tarfile
 import time
 
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BUILD = os.path.join(ROOT, "build")
 DIST = os.path.join(ROOT, "dist")
@@ -88,6 +94,7 @@ def smoke_test(out):
     env = dict(os.environ, KAYENN_AUTOTEST_DIR=shots)
     cmd = [program_exe(out), "--autotest"]
     if os.environ.get("CI"):
+        env.pop("QT_QPA_PLATFORM", None)             # (ustawione przy generowaniu ikon) – tu prawdziwy ekran
         if sys.platform.startswith("linux"):
             cmd = ["xvfb-run", "-a", "-s", "-screen 0 1920x1080x24"] + cmd
     else:

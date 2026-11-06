@@ -30,6 +30,12 @@ import tempfile
 import time
 import traceback
 
+for _s in (sys.stdout, sys.stderr):          # polskie znaki także w konsoli bez UTF-8 (np. CI Windows)
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "kayenn_codes.pyw")
 

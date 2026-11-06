@@ -22,6 +22,10 @@ jobs:
           - { nazwa: macOS, os: macos-latest }
           - { nazwa: Linux, os: ubuntu-22.04 }
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 
