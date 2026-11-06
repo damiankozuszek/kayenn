@@ -293,80 +293,80 @@ smoła, bitum ; 14,0 ; kN/m³ ; PN-EN 1991-1-1, Tablica A.12
 ścianki działowe ruchome, ciężar własny ≤ 2,0 kN/m ; 0,8 ; kN/m² ; PN-EN 1991-1-1, 6.3.1.2(8)
 ścianki działowe ruchome, ciężar własny ≤ 3,0 kN/m ; 1,2 ; kN/m² ; PN-EN 1991-1-1, 6.3.1.2(8)
 
-[Izolacje (własne)]
-styropian EPS (fasadowy) ; 0,15 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-styropian EPS 100–200 (podłogowy, dachowy) ; 0,30 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-polistyren ekstrudowany XPS ; 0,40 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-płyta PIR / PUR ; 0,35 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-wełna mineralna szklana ; 0,25 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-wełna mineralna skalna, płyty fasadowe ; 1,40 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-wełna mineralna skalna, płyty dachowe twarde ; 1,80 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-keramzyt luzem ; od 4,0 do 5,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-granulat ze szkła piankowego ; 2,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
+[Izolacje]
+styropian EPS (fasadowy) ; 0,15 ; kN/m³ ; wartość orientacyjna
+styropian EPS 100–200 (podłogowy, dachowy) ; 0,30 ; kN/m³ ; wartość orientacyjna
+polistyren ekstrudowany XPS ; 0,40 ; kN/m³ ; wartość orientacyjna
+płyta PIR / PUR ; 0,35 ; kN/m³ ; wartość orientacyjna
+wełna mineralna szklana ; 0,25 ; kN/m³ ; wartość orientacyjna
+wełna mineralna skalna, płyty fasadowe ; 1,40 ; kN/m³ ; wartość orientacyjna
+wełna mineralna skalna, płyty dachowe twarde ; 1,80 ; kN/m³ ; wartość orientacyjna
+keramzyt luzem ; od 4,0 do 5,0 ; kN/m³ ; wartość orientacyjna
+granulat ze szkła piankowego ; 2,0 ; kN/m³ ; wartość orientacyjna
 
-[Mury i przegrody (własne)]
-mur z cegły pełnej ceramicznej ; 18,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-mur z cegły dziurawki ; 14,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-mur z pustaków ceramicznych szlifowanych ; od 8,0 do 10,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-mur z bloczków silikatowych ; od 18,0 do 20,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-mur z bloczków z betonu komórkowego 400 ; 4,4 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-mur z bloczków z betonu komórkowego 500 ; 5,5 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-mur z bloczków z betonu komórkowego 600 ; 6,5 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-mur z bloczków z betonu komórkowego 700 ; 7,5 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-mur z pustaków betonowych ; od 14,0 do 16,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-mur z kamienia łamanego ; 24,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
+[Mury i przegrody]
+mur z cegły pełnej ceramicznej ; 18,0 ; kN/m³ ; wartość orientacyjna
+mur z cegły dziurawki ; 14,0 ; kN/m³ ; wartość orientacyjna
+mur z pustaków ceramicznych szlifowanych ; od 8,0 do 10,0 ; kN/m³ ; wartość orientacyjna
+mur z bloczków silikatowych ; od 18,0 do 20,0 ; kN/m³ ; wartość orientacyjna
+mur z bloczków z betonu komórkowego 400 ; 4,4 ; kN/m³ ; wartość orientacyjna
+mur z bloczków z betonu komórkowego 500 ; 5,5 ; kN/m³ ; wartość orientacyjna
+mur z bloczków z betonu komórkowego 600 ; 6,5 ; kN/m³ ; wartość orientacyjna
+mur z bloczków z betonu komórkowego 700 ; 7,5 ; kN/m³ ; wartość orientacyjna
+mur z pustaków betonowych ; od 14,0 do 16,0 ; kN/m³ ; wartość orientacyjna
+mur z kamienia łamanego ; 24,0 ; kN/m³ ; wartość orientacyjna
 
-[Wykończenia i podłogi (własne)]
-tynk cementowy ; 21,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-tynk cementowo-wapienny ; 19,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-tynk gipsowy ; 12,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-jastrych cementowy ; 22,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-jastrych anhydrytowy ; 21,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-płytki ceramiczne, gres ; 22,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-marmur ; od 27,0 do 28,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-parkiet dębowy ; 7,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-deski podłogowe sosnowe ; 5,5 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-płyta gipsowo-kartonowa ; 9,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-papa, masa bitumiczna ; 11,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-grunt rodzimy wilgotny (zasypka) ; od 18,0 do 20,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-ziemia urodzajna (humus) wilgotna ; 17,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
-żwir płukany (warstwa drenażowa) ; 17,0 ; kN/m³ ; wartość orientacyjna – sprawdź dane producenta
+[Wykończenia i podłogi]
+tynk cementowy ; 21,0 ; kN/m³ ; wartość orientacyjna
+tynk cementowo-wapienny ; 19,0 ; kN/m³ ; wartość orientacyjna
+tynk gipsowy ; 12,0 ; kN/m³ ; wartość orientacyjna
+jastrych cementowy ; 22,0 ; kN/m³ ; wartość orientacyjna
+jastrych anhydrytowy ; 21,0 ; kN/m³ ; wartość orientacyjna
+płytki ceramiczne, gres ; 22,0 ; kN/m³ ; wartość orientacyjna
+marmur ; od 27,0 do 28,0 ; kN/m³ ; wartość orientacyjna
+parkiet dębowy ; 7,0 ; kN/m³ ; wartość orientacyjna
+deski podłogowe sosnowe ; 5,5 ; kN/m³ ; wartość orientacyjna
+płyta gipsowo-kartonowa ; 9,0 ; kN/m³ ; wartość orientacyjna
+papa, masa bitumiczna ; 11,0 ; kN/m³ ; wartość orientacyjna
+grunt rodzimy wilgotny (zasypka) ; od 18,0 do 20,0 ; kN/m³ ; wartość orientacyjna
+ziemia urodzajna (humus) wilgotna ; 17,0 ; kN/m³ ; wartość orientacyjna
+żwir płukany (warstwa drenażowa) ; 17,0 ; kN/m³ ; wartość orientacyjna
 
-[Pokrycia dachów i sufity (własne)]
-blachodachówka stalowa ; 0,06 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-blacha trapezowa stalowa 0,75 mm ; 0,08 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-blacha płaska na rąbek stojący ; 0,06 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-dachówka ceramiczna zakładkowa ; 0,55 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-dachówka ceramiczna karpiówka w koronkę ; 0,95 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-dachówka cementowa ; 0,50 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-gont bitumiczny (z wiatroizolacją) ; 0,12 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-łupek naturalny (dachowy) ; 0,50 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-papa termozgrzewalna dwuwarstwowa ; 0,10 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-membrana dachowa PVC / TPO ; 0,02 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-płyta warstwowa dachowa z rdzeniem PIR 100 mm ; 0,14 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-deskowanie 25 mm (C24) ; 0,11 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-łaty i kontrłaty ; 0,05 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-sufit podwieszany z płyt g-k na ruszcie ; 0,25 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-sufit podwieszany z płyt mineralnych ; 0,15 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-instalacje podwieszone (ryczałt) ; od 0,20 do 0,30 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-panele fotowoltaiczne z konstrukcją ; od 0,15 do 0,25 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-dach zielony ekstensywny (nasycony wodą) ; od 1,0 do 1,5 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
-dach zielony intensywny (nasycony wodą) ; od 3,0 do 5,0 ; kN/m² ; wartość orientacyjna – sprawdź dane producenta
+[Pokrycia dachów i sufity]
+blachodachówka stalowa ; 0,06 ; kN/m² ; wartość orientacyjna
+blacha trapezowa stalowa 0,75 mm ; 0,08 ; kN/m² ; wartość orientacyjna
+blacha płaska na rąbek stojący ; 0,06 ; kN/m² ; wartość orientacyjna
+dachówka ceramiczna zakładkowa ; 0,55 ; kN/m² ; wartość orientacyjna
+dachówka ceramiczna karpiówka w koronkę ; 0,95 ; kN/m² ; wartość orientacyjna
+dachówka cementowa ; 0,50 ; kN/m² ; wartość orientacyjna
+gont bitumiczny (z wiatroizolacją) ; 0,12 ; kN/m² ; wartość orientacyjna
+łupek naturalny (dachowy) ; 0,50 ; kN/m² ; wartość orientacyjna
+papa termozgrzewalna dwuwarstwowa ; 0,10 ; kN/m² ; wartość orientacyjna
+membrana dachowa PVC / TPO ; 0,02 ; kN/m² ; wartość orientacyjna
+płyta warstwowa dachowa z rdzeniem PIR 100 mm ; 0,14 ; kN/m² ; wartość orientacyjna
+deskowanie 25 mm (C24) ; 0,11 ; kN/m² ; wartość orientacyjna
+łaty i kontrłaty ; 0,05 ; kN/m² ; wartość orientacyjna
+sufit podwieszany z płyt g-k na ruszcie ; 0,25 ; kN/m² ; wartość orientacyjna
+sufit podwieszany z płyt mineralnych ; 0,15 ; kN/m² ; wartość orientacyjna
+instalacje podwieszone (ryczałt) ; od 0,20 do 0,30 ; kN/m² ; wartość orientacyjna
+panele fotowoltaiczne z konstrukcją ; od 0,15 do 0,25 ; kN/m² ; wartość orientacyjna
+dach zielony ekstensywny (nasycony wodą) ; od 1,0 do 1,5 ; kN/m² ; wartość orientacyjna
+dach zielony intensywny (nasycony wodą) ; od 3,0 do 5,0 ; kN/m² ; wartość orientacyjna
 
-[Obciążenia liniowe (własne)]
-balustrada stalowa (typowa) ; od 0,30 do 0,50 ; kN/m ; wartość orientacyjna – sprawdź dane producenta
-balustrada szklana (szkło 2×8 mm z mocowaniem) ; od 0,60 do 0,80 ; kN/m ; wartość orientacyjna – sprawdź dane producenta
-rynna z hakami ; 0,05 ; kN/m ; wartość orientacyjna – sprawdź dane producenta
-attyka z bloczków betonowych 24 cm, wys. 1 m ; 3,5 ; kN/m ; wartość orientacyjna – sprawdź dane producenta
+[Obciążenia liniowe]
+balustrada stalowa (typowa) ; od 0,30 do 0,50 ; kN/m ; wartość orientacyjna
+balustrada szklana (szkło 2×8 mm z mocowaniem) ; od 0,60 do 0,80 ; kN/m ; wartość orientacyjna
+rynna z hakami ; 0,05 ; kN/m ; wartość orientacyjna
+attyka z bloczków betonowych 24 cm, wys. 1 m ; 3,5 ; kN/m ; wartość orientacyjna
 
-[Obciążenia skupione (własne)]
-wanna z wodą (ok. 200 l) ; 2,5 ; kN ; wartość orientacyjna – sprawdź dane producenta
-zasobnik c.w.u. 200 l, napełniony ; 2,5 ; kN ; wartość orientacyjna – sprawdź dane producenta
-lodówka z zawartością ; 1,0 ; kN ; wartość orientacyjna – sprawdź dane producenta
-jednostka zewnętrzna klimatyzatora (typowa) ; 0,6 ; kN ; wartość orientacyjna – sprawdź dane producenta
-kocioł gazowy wiszący z wodą ; 0,6 ; kN ; wartość orientacyjna – sprawdź dane producenta
-akwarium 200 l z wyposażeniem ; 2,4 ; kN ; wartość orientacyjna – sprawdź dane producenta
-sejf domowy ; od 1,5 do 3,0 ; kN ; wartość orientacyjna – sprawdź dane producenta
+[Obciążenia skupione]
+wanna z wodą (ok. 200 l) ; 2,5 ; kN ; wartość orientacyjna
+zasobnik c.w.u. 200 l, napełniony ; 2,5 ; kN ; wartość orientacyjna
+lodówka z zawartością ; 1,0 ; kN ; wartość orientacyjna
+jednostka zewnętrzna klimatyzatora (typowa) ; 0,6 ; kN ; wartość orientacyjna
+kocioł gazowy wiszący z wodą ; 0,6 ; kN ; wartość orientacyjna
+akwarium 200 l z wyposażeniem ; 2,4 ; kN ; wartość orientacyjna
+sejf domowy ; od 1,5 do 3,0 ; kN ; wartość orientacyjna
 
 [Stalowe wyroby walcowane / Dwuteowniki zwykłe I]
 I 80 ; 0,0583 ; kN/m ; W. Bogucki, M. Żyburtowicz, Tablice do projektowania konstrukcji metalowych, wyd. 7, Tablica 1.1: 5,94 kg/m

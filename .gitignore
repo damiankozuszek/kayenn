@@ -2,3 +2,5 @@
 *.pyc
 zrzuty/
 Normy/
+build/
+dist/

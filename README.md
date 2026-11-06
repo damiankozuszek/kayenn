@@ -58,7 +58,28 @@ Plany rozwoju: [ROADMAP.md](ROADMAP.md).
 Pismo bez łuków, pochylone o 25°, żółte wypełnienie (#FFD100), gruba czarna obwódka i lity czarny cień
 w lewo w dół. Wszystkie pliki generuje `py identyfikacja/identyfikacja.py` (wymaga PySide6).
 
-## Uruchomienie
+## Instalacja
+
+Pakiety instalacyjne (zakładka **Releases** albo artefakty przebiegu **Actions → Pakiety instalacyjne**):
+
+| System | Pakiet | Instalacja |
+|---|---|---|
+| Windows 10/11 (64-bit) | `KAYENN-<wersja>-windows-x64-instalator.exe` | uruchomić instalator (bez uprawnień administratora albo dla wszystkich użytkowników); skojarzenie plików `.kayenn` |
+| | `KAYENN-<wersja>-windows-x64.zip` | wersja bez instalacji – rozpakować i uruchomić `KAYENN.exe` |
+| macOS 12+ (Apple Silicon) | `KAYENN-<wersja>-macos-arm64.dmg` | otworzyć i przeciągnąć KAYENN do folderu Programy; przy pierwszym uruchomieniu: prawy przycisk → Otwórz (program bez podpisu Apple) |
+| Linux (Debian, Ubuntu, Mint…) | `kayenn_<wersja>_amd64.deb` | `sudo apt install ./kayenn_<wersja>_amd64.deb` – menu programów, ikona, skojarzenie `.kayenn` |
+| Linux (inne) | `KAYENN-<wersja>-linux-x86_64.tar.gz` | rozpakować i uruchomić `KAYENN/KAYENN` |
+
+Program wygląda tak samo w każdym systemie: własne czcionki (Noto, katalog `czcionki/`), styl Fusion, jasna
+paleta programu i rozmiary czcionek liczone jak przy 96 dpi.
+
+Pakiety buduje GitHub Actions (`.github/workflows/pakiety.yml`) na każdym systemie: testy, PyInstaller, próbne
+uruchomienie zbudowanego programu (zrzuty okien jako artefakt `zrzuty-<system>`), pakiet. Lokalnie:
+`python pakiety/zbuduj.py` (wymaga `pip install -r pakiety/requirements.txt`; Windows – Inno Setup 6).
+Nowe wydanie: zmienić `APP_VERSION` w `kayenn_codes.pyw` i wypchnąć znacznik `v<wersja>` – pakiety trafią do
+szkicu wydania.
+
+## Uruchomienie ze źródeł
 
 Wymagany Python 3 i PySide6 (z QtWebEngine – dla mapy):
 
@@ -67,8 +88,8 @@ py -m pip install PySide6
 py kayenn_codes.pyw
 ```
 
-W Windows wystarczy dwuklik na `kayenn_codes.pyw`. Przy pierwszym uruchomieniu bez PySide6 program
-zaproponuje instalację.
+W Windows wystarczy dwuklik na `kayenn_codes.pyw` (macOS / Linux: `python3 kayenn_codes.pyw`). Przy pierwszym
+uruchomieniu bez PySide6 program zaproponuje instalację.
 
 ## Testy
 

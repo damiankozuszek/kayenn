@@ -47,13 +47,16 @@ nazwę KAYENN; podział na części poniżej jest wewnętrzny i służy rozwojow
 Celem jest program działający natywnie w systemach Linux, Windows i macOS – przy możliwie najprostszym
 uruchomieniu w każdym z nich.
 
-- Przegląd elementów zależnych od Windows: czcionki (`Segoe UI`, `Consolas`) z zamiennikami dla innych
-  systemów, skojarzenie plików `.kayenn` (obecnie tylko rejestr Windows) – odpowiedniki dla Linuksa
-  (`.desktop`, typ MIME) i macOS.
-- Testy automatyczne uruchamiane na wszystkich trzech systemach (np. GitHub Actions).
-- Linux: dystrybucja przez sklepy z aplikacjami (np. Flathub).
-- Windows i macOS: prosta instrukcja uruchomienia z Pythona; ewentualnie paczki do pobrania bez podpisu
-  cyfrowego (podpis wiąże się ze stałymi kosztami – zob. punkt 7.2).
+- ✔ Jednakowy wygląd: czcionki Noto dołączone do programu (zamiast `Segoe UI` / `Consolas`), styl Fusion, własna
+  jasna paleta, rozmiary czcionek liczone jak przy 96 dpi (macOS), menu w oknie także w macOS.
+- ✔ Skojarzenie plików `.kayenn`: Windows – instalator (rejestr), macOS – `Info.plist` + zdarzenie FileOpen,
+  Linux – `.desktop` i typ MIME w pakiecie `.deb`.
+- ✔ Testy i pakiety budowane w GitHub Actions na Windows, macOS i Linuksie: instalator `.exe` (Inno Setup)
+  i `.zip`, `.dmg` (Apple Silicon), `.deb` i `.tar.gz`; próbne uruchomienie każdego pakietu ze zrzutami okien.
+- macOS na procesorach Intel (osobny pakiet x86_64 lub pakiet uniwersalny).
+- Linux: dystrybucja przez sklepy z aplikacjami (np. Flathub) lub AppImage.
+- Pakiety bez podpisu cyfrowego (podpis wiąże się ze stałymi kosztami – zob. punkt 7.2): Windows SmartScreen
+  i macOS Gatekeeper pokazują ostrzeżenie przy pierwszym uruchomieniu.
 - Wieloplatformowość jest zasadą stałą: każda nowa funkcja powinna działać na wszystkich systemach.
 
 ---

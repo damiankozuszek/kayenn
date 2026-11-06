@@ -1,0 +1,81 @@
+# Testy i pakiety instalacyjne KAYENN dla Windows, macOS i Linuksa.
+# Uruchomienie: zakładka Actions → „Pakiety instalacyjne” → Run workflow, albo wypchnięcie znacznika v* (np. v0.1.0) –
+# wtedy pakiety trafiają też do wydania (Releases).
+name: Pakiety instalacyjne
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  pakiet:
+    name: ${{ matrix.nazwa }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { nazwa: Windows, os: windows-latest }
+          - { nazwa: macOS, os: macos-latest }
+          - { nazwa: Linux, os: ubuntu-22.04 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Biblioteki systemowe (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libfontconfig1 libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0 \
+            libdbus-1-3 libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxkbfile1 libasound2 xvfb
+
+      - name: Inno Setup (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+
+      - name: Pakiety Pythona
+        run: python -m pip install -r pakiety/requirements.txt
+
+      - name: Testy programu
+        run: python testy.py --szybko
+
+      - name: Budowa pakietu
+        run: python pakiety/zbuduj.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYENN-${{ matrix.nazwa }}
+          path: |
+            dist/*
+            !dist/zrzuty-*
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zrzuty-${{ matrix.nazwa }}
+          path: dist/zrzuty-*
+
+  wydanie:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: pakiet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: pakiety
+          pattern: KAYENN-*
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: pakiety/*
+          draft: true

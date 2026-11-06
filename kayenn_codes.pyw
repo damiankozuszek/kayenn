@@ -24,9 +24,18 @@ import os
 import sys
 import time
 
+APP_VERSION = "0.1.0"
+# katalog zasobów programu (czcionki, ikony, baza materiałów) – także w pakiecie PyInstaller (sys._MEIPASS)
+BASE_DIR = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
+FROZEN = bool(getattr(sys, "frozen", False))
+
 # =========================================================== wygląd ===
-FONT = "Segoe UI"
-MONO = "Consolas"
+# czcionki dołączone do programu (czcionki/, Noto – OFL): ten sam wygląd w Windows, macOS i Linuksie
+FONT = "Noto Sans"
+MONO = "Noto Sans Mono"
+FONT_DIR = os.path.join(BASE_DIR, "czcionki")
+FONT_FALLBACK = ["Noto Sans Symbols 2", "Noto Sans Math"]       # symbole ⚠ ⠿ ⌀ ∝ ⟂ ≤ ≥
+UI_PT = 1.0       # mnożnik rozmiarów w punktach: 1 pt na ekranie jak w Windows (96 dpi); macOS (72 dpi) – 4/3
 BG = "#f6f7f9"
 CARD = "#ffffff"
 TEXT = "#2b2f36"
@@ -1440,7 +1449,7 @@ MAP_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
 </script>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <style>
-html,body,#map{height:100%;margin:0;font-family:"Segoe UI",sans-serif;font-size:13px}
+html,body,#map{height:100%;margin:0;font-family:"Noto Sans","Segoe UI","Helvetica Neue",Arial,sans-serif;font-size:13px}
 .box{position:absolute;z-index:5;background:#fff;border:1px solid #c9ced6;border-radius:6px;
      box-shadow:0 1px 4px rgba(0,0,0,.15);padding:8px 10px}
 #search{top:10px;left:10px;width:330px;padding:6px}
@@ -2840,7 +2849,7 @@ except ImportError:
 AL_R = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 
 # identyfikacja wizualna (folder identyfikacja/, pliki generuje identyfikacja/identyfikacja.py)
-ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "identyfikacja")
+ASSETS = os.path.join(BASE_DIR, "identyfikacja")
 ICON_FILE = os.path.join(ASSETS, "kayenn.ico")
 WORDMARK_FILE = os.path.join(ASSETS, "kayenn_napis.svg")
 _wordmark_cache = []
@@ -3010,7 +3019,7 @@ def qfont(spec):
     f = _FONTS.get(spec)
     if f is None:
         f = QFont(spec[0])
-        f.setPointSizeF(float(spec[1]))
+        f.setPointSizeF(float(spec[1]) * UI_PT)
         f.setBold("bold" in spec[2:])
         _FONTS[spec] = f
     return f
@@ -4036,7 +4045,7 @@ LAB_MANUAL = ((3, "kN/m³ – ciężar objętościowy"), (2, "kN/m² – powierz
               (0, "kN – skupione"))
 LAB_DIMS = (("t", "grubość"), ("b", "szerokość"), ("d", "długość"))
 MAT_FILE_NAME = "kayenn_materialy.txt"
-MAT_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), MAT_FILE_NAME)
+MAT_DEFAULT = os.path.join(BASE_DIR, MAT_FILE_NAME)
 MAT_USER_OVERRIDE = None                                # (testy: inny plik użytkownika)
 MAT_HEADER = """# KAYENN – baza materiałów i obciążeń (obciążenia własne)
 #
@@ -4086,12 +4095,24 @@ def mat_range(txt):
     return None if v is None else (v, v)
 
 
+def user_data_dir():
+    """Katalog danych użytkownika: Windows %APPDATA%\\KAYENN, macOS ~/Library/Application Support/KAYENN,
+    Linux $XDG_CONFIG_HOME/KAYENN (domyślnie ~/.config/KAYENN)."""
+    home = os.path.expanduser("~")
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.join(home, "AppData", "Roaming")
+    elif sys.platform == "darwin":
+        base = os.path.join(home, "Library", "Application Support")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
+    return os.path.join(base, "KAYENN")
+
+
 def mat_user_file():
-    """Baza użytkownika (zmiany z programu): %APPDATA%\\KAYENN\\materialy.txt."""
+    """Baza użytkownika (zmiany z programu): materialy.txt w katalogu danych użytkownika."""
     if MAT_USER_OVERRIDE:
         return MAT_USER_OVERRIDE
-    base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config")
-    return os.path.join(base, "KAYENN", "materialy.txt")
+    return os.path.join(user_data_dir(), "materialy.txt")
 
 
 def mat_active_file():
@@ -4138,7 +4159,31 @@ def mat_load(path):
                 continue
             items.append(dict(name=p[0], value=p[1], unit=LAB_UNITS[unit_exp(p[2])], cat=catg,
                               src=";".join(p[3:]).strip()))
-    return items, bad
+    return mat_migrate(items), bad
+
+
+MAT_OLD_SRC = (" – sprawdź dane producenta",)
+
+
+def mat_migrate(items):
+    """Bazy zapisane przez starsze wersje: kategorie z dopiskiem „(własne)” – bez dopisku; źródło bez
+    „sprawdź dane producenta”; kategoria „Własne” (pozycje użytkownika) – pozycje w swoich kategoriach."""
+    for it in items:
+        if it["cat"].endswith(" (własne)"):
+            it["cat"] = it["cat"][:-len(" (własne)")]
+        for old in MAT_OLD_SRC:
+            it["src"] = it["src"].replace(old, "")
+    legacy = [it for it in items if it["cat"] == "Własne"]
+    if legacy:
+        rest = [it for it in items if it["cat"] != "Własne"]
+        for it in legacy:
+            it["cat"] = mat_guess_category(it["name"], it["unit"], rest)
+            if it["src"] in ("", "dodano z panelu obciążeń własnych"):
+                it["src"] = MAT_USER_SRC
+            idx = max((i for i, x in enumerate(rest) if x["cat"] == it["cat"]), default=len(rest) - 1)
+            rest.insert(idx + 1, it)
+        items = rest
+    return items
 
 
 def mat_save(path, items):
@@ -4640,7 +4685,7 @@ class LabWindow(QWidget):
         root.addWidget(sc, 1)
         self.summary = QLabel("")
         self.summary.setWordWrap(True)
-        self.summary.setStyleSheet("font-size: 11pt;")
+        self.summary.setStyleSheet(css_pt("font-size: 11pt;"))
         root.addWidget(self.summary)
         self.msg = QLabel("")
         self.msg.setObjectName("muted")
@@ -4735,10 +4780,10 @@ class LabWindow(QWidget):
             self.summary.setText(f"Suma obciążeń: <b>{lab_fmt(s['total'])} {s['unit']}</b>"
                                  f"&nbsp;&nbsp;<span style='color:{MUTED};'>(jednostka wspólna dla wszystkich "
                                  f"pozycji: {s['unit']})</span>")
-            self.summary.setStyleSheet("font-size: 11pt;")
+            self.summary.setStyleSheet(css_pt("font-size: 11pt;"))
         else:
             self.summary.setText(("⚠ " if self.items else "") + html.escape(s["err"]))
-            self.summary.setStyleSheet("font-size: 11pt; color: #b91c1c;" if self.items else "font-size: 11pt;")
+            self.summary.setStyleSheet(css_pt("font-size: 11pt; color: #b91c1c;" if self.items else "font-size: 11pt;"))
         if not self.edit_mode:
             self.btn_main.setEnabled(s["ok"])
             self.btn_main.setToolTip("" if s["ok"] else s["err"])
@@ -4962,6 +5007,9 @@ class MaterialTile(QFrame):
         lo, hi = parse_num(self.e_lo.text()), parse_num(self.e_hi.text()) if self.e_hi.text().strip() else None
         if not nm or lo is None or (self.e_hi.text().strip() and hi is None):
             QMessageBox.warning(self, "Baza materiałów", "Podaj nazwę i poprawną wartość (zakres: dwie liczby).")
+            return
+        if hi is not None and hi < lo:
+            QMessageBox.warning(self, "Baza materiałów", "Zakres: wartość „do” musi być większa niż wartość „od”.")
             return
         val = self.e_lo.text().strip() if hi is None or abs(hi - lo) < 1e-12 else \
             f"od {self.e_lo.text().strip()} do {self.e_hi.text().strip()}"
@@ -5578,7 +5626,7 @@ class ProjectInfoDialog(QDialog):
         g.addWidget(QLabel("Nazwa projektu"), 0, 0)
         self.name_edit = QLineEdit(name)
         self.name_edit.setPlaceholderText("np. Hala magazynowa A")
-        self.name_edit.setStyleSheet(f"font-family:'{FONT}'; font-size:9pt;")   # tekst, nie liczba
+        self.name_edit.setStyleSheet(css_pt(f"font-family:'{FONT}'; font-size:9pt;"))   # tekst, nie liczba
         g.addWidget(self.name_edit, 0, 1, 1, 2)
         g.addWidget(QLabel("Lokalizacja"), 1, 0)
         self.loc_label = LabelX("")
@@ -5784,7 +5832,7 @@ class App:
     def _mk_entry(self):
         e = QLineEdit()
         e.setAlignment(AL_R)
-        fm = QFontMetrics(QFont(MONO, 10))
+        fm = QFontMetrics(ui_font(MONO, 10))
         e.setFixedWidth(fm.horizontalAdvance("0") * 9 + 12)
         e._bad = False
         return e
@@ -7107,7 +7155,7 @@ class App:
         h.addWidget(QLabel(lab + ":"))
         ent = EditorLine(lambda: self.close_editor(fr), lambda: QTimer.singleShot(150, lambda: self.close_editor(fr)))
         ent.setAlignment(AL_R)
-        ent.setFixedWidth(QFontMetrics(QFont(MONO, 10)).horizontalAdvance("0") * 9 + 12)
+        ent.setFixedWidth(QFontMetrics(ui_font(MONO, 10)).horizontalAdvance("0") * 9 + 12)
         ent.setText(self.v[keys[0]].get())
         h.addWidget(ent)
         h.addWidget(QLabel(f[2] if f else ""))
@@ -9153,7 +9201,7 @@ def _check_image():
 def register_file_type():
     """Windows: pliki projektu (.kayenn) otwierane dwuklikiem tym programem (rejestr bieżącego użytkownika, bez uprawnień
     administratora). Zapis tylko przy zmianie – np. po przeniesieniu programu w inne miejsce."""
-    if sys.platform != "win32":
+    if sys.platform != "win32" or FROZEN:            # program zainstalowany – skojarzenie zapisuje instalator
         return
     try:
         import winreg
@@ -9188,6 +9236,90 @@ def register_file_type():
         pass                                                    # skojarzenie to wygoda – bez niego program działa
 
 
+def load_fonts():
+    """Czcionki z katalogu czcionki/ (Noto) – rejestracja i zastępstwa dla symboli. True – załadowane."""
+    from PySide6.QtGui import QFontDatabase
+    ok = False
+    if os.path.isdir(FONT_DIR):
+        for f in sorted(os.listdir(FONT_DIR)):
+            if f.lower().endswith((".ttf", ".otf")):
+                ok = QFontDatabase.addApplicationFont(os.path.join(FONT_DIR, f)) >= 0 or ok
+    for fam in (FONT, MONO):
+        QFont.insertSubstitutions(fam, FONT_FALLBACK)
+    return ok
+
+
+def css_pt(css):
+    """Rozmiary „Npt” w arkuszu stylów przeliczone przez UI_PT (na każdym systemie ten sam rozmiar na ekranie)."""
+    if abs(UI_PT - 1.0) < 1e-9:
+        return css
+    import re
+    return re.sub(r"(\d+(?:\.\d+)?)pt\b", lambda m_: f"{float(m_.group(1)) * UI_PT:.2f}pt", css)
+
+
+def ui_font(family, pt, bold=False):
+    f = QFont(family)
+    f.setPointSizeF(pt * UI_PT)
+    f.setBold(bold)
+    return f
+
+
+def setup_qapp(qapp):
+    """Wspólny wygląd na każdym systemie: styl Fusion, jasna paleta programu (bez trybu ciemnego systemu),
+    czcionki Noto, rozmiary w punktach jak przy 96 dpi (macOS liczy punkty przy 72 dpi)."""
+    global UI_PT
+    scr = qapp.primaryScreen()
+    dpi = scr.logicalDotsPerInchY() if scr is not None else 96.0
+    UI_PT = 96.0 / dpi if dpi > 0 else 1.0
+    _FONTS.clear()
+    _METRICS.clear()
+    load_fonts()
+    if os.path.exists(ICON_FILE):
+        qapp.setWindowIcon(QIcon(ICON_FILE))
+    qapp.setStyle("Fusion")
+    pal = qapp.palette()
+    R = QPalette.ColorRole
+    for role, col in ((R.Window, BG), (R.WindowText, TEXT), (R.Base, "#ffffff"), (R.AlternateBase, "#f6f7f9"),
+                      (R.Text, TEXT), (R.Button, "#eef0f3"), (R.ButtonText, TEXT), (R.Highlight, ACCENT),
+                      (R.HighlightedText, "#ffffff"), (R.ToolTipBase, "#ffffff"), (R.ToolTipText, TEXT),
+                      (R.PlaceholderText, MUTED), (R.Light, "#ffffff"), (R.Midlight, "#e3e6ea"),
+                      (R.Mid, "#c4c9d0"), (R.Dark, "#9aa1ab"), (R.Shadow, "#6b7280"), (R.Link, ACCENT)):
+        pal.setColor(role, QColor(col))
+    for grp in (QPalette.ColorGroup.Disabled,):
+        for role in (R.WindowText, R.Text, R.ButtonText):
+            pal.setColor(grp, role, QColor("#a3a8b0"))
+    qapp.setPalette(pal)
+    qapp.setFont(ui_font(FONT, 9))
+    qapp.setStyleSheet(css_pt(STYLE.replace("@CHECK@", _check_image())))
+
+
+class _FileOpener(QObject):
+    """macOS: Finder przekazuje plik zdarzeniem FileOpen (nie w argumentach) – otwarcie projektu."""
+
+    def __init__(self):
+        super().__init__()
+        self.app, self.pending = None, []
+
+    def attach(self, app):
+        self.app = app
+        for p in self.pending:
+            QTimer.singleShot(0, lambda p=p: self._open(p))
+        self.pending = []
+
+    def _open(self, path):
+        if self.app is not None and self.app.end_editor() and self.app._ask_save():
+            self.app.open_path(path)
+
+    def eventFilter(self, obj, e):
+        if e.type() == QEvent.Type.FileOpen and e.file():
+            if self.app is None:
+                self.pending.append(e.file())
+            else:
+                self._open(e.file())
+            return True
+        return False
+
+
 def main():
     try:   # moduł mapy (QtWebEngine) musi być załadowany przed utworzeniem aplikacji
         import PySide6.QtWebEngineWidgets  # noqa: F401
@@ -9199,22 +9331,16 @@ def main():
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("KAYENN")
         except Exception:
             pass
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeMenuBar, True)   # macOS: menu w oknie
     qapp = QApplication(sys.argv)
-    if os.path.exists(ICON_FILE):
-        qapp.setWindowIcon(QIcon(ICON_FILE))
-    qapp.setStyle("Fusion")
-    pal = qapp.palette()
-    R = QPalette.ColorRole
-    for role, col in ((R.Window, BG), (R.WindowText, TEXT), (R.Base, "#ffffff"), (R.AlternateBase, "#f6f7f9"),
-                      (R.Text, TEXT), (R.Button, "#eef0f3"), (R.ButtonText, TEXT), (R.Highlight, ACCENT),
-                      (R.HighlightedText, "#ffffff"), (R.ToolTipBase, "#ffffff"), (R.ToolTipText, TEXT),
-                      (R.PlaceholderText, MUTED)):
-        pal.setColor(role, QColor(col))
-    qapp.setPalette(pal)
-    qapp.setFont(QFont(FONT, 9))
-    qapp.setStyleSheet(STYLE.replace("@CHECK@", _check_image()))
+    qapp.setApplicationName("KAYENN")
+    qapp.setApplicationVersion(APP_VERSION)
+    opener = _FileOpener()
+    qapp.installEventFilter(opener)                  # macOS: plik .kayenn otwierany z Findera (zdarzenie FileOpen)
+    setup_qapp(qapp)
     register_file_type()
     app = App(qapp)
+    opener.attach(app)
     scr = qapp.primaryScreen().availableGeometry()
     app.win.resize(640, min(960, scr.height() - 60))
     app.pw.resize(min(1100, scr.width() - 80), min(860, scr.height() - 60))
@@ -9224,7 +9350,82 @@ def main():
         app.open_path(files[0])
     app.pw.rebuild()
     app.pw.showMaximized()                           # zawsze najpierw okno główne, zmaksymalizowane
+    if "--autotest" in sys.argv:                     # sprawdzenie pakietu: start, raport, zrzuty, zamknięcie
+        QTimer.singleShot(2500, lambda: _autotest(app, qapp))
     sys.exit(qapp.exec())
+
+
+def _autotest(app, qapp):
+    """Próbne uruchomienie pakietu (pakiety/zbuduj.py): raport autotest.json i zrzuty okien do katalogu
+    KAYENN_AUTOTEST_DIR; kod wyjścia 2 – brak czcionek programu albo bazy materiałów."""
+    from PySide6.QtGui import QFontInfo
+    d = os.environ.get("KAYENN_AUTOTEST_DIR")
+    fam = QFontInfo(qapp.font()).family()
+    try:
+        n_mat = len(mat_load(MAT_DEFAULT)[0])
+    except (OSError, UnicodeDecodeError):
+        n_mat = 0
+    scr = qapp.primaryScreen()
+    info = dict(wersja=APP_VERSION, system=sys.platform, platforma=qapp.platformName(), czcionka=fam,
+                ui_pt=UI_PT, dpi=scr.logicalDotsPerInchY() if scr else None,
+                dpr=scr.devicePixelRatio() if scr else None, materialy=n_mat, katalog=BASE_DIR,
+                dane_uzytkownika=user_data_dir())
+    ok = fam == FONT and n_mat > 1000
+    try:                                             # silnik mapy (QtWebEngine) – strona się ładuje
+        from PySide6.QtWebEngineWidgets import QWebEngineView
+        from PySide6.QtCore import QEventLoop
+        v = QWebEngineView()
+        res = []
+        v.loadFinished.connect(lambda r_: res.append(r_))
+        v.setHtml("<html><body><p id='x'>KAYENN</p></body></html>")
+        loop = QEventLoop()
+        QTimer.singleShot(20000, loop.quit)
+        v.loadFinished.connect(lambda r_: loop.quit())
+        loop.exec()
+        info["mapa"] = bool(res and res[0])
+        v.deleteLater()
+    except Exception as e:
+        info["mapa"] = repr(e)
+    ok = ok and info["mapa"] is True
+    if d:
+        os.makedirs(d, exist_ok=True)
+
+        def shot(w, name):
+            for _ in range(5):
+                qapp.processEvents()
+            w.grab().save(os.path.join(d, name + ".png"))
+        try:
+            app.open_codes()
+            app.show_3d()
+            app.win3d.resize(1000, 720)
+            app.draw3d()
+            shot(app.win, "2_obciazenia_normowe")
+            shot(app.win3d, "3_model_3d")
+            app.hide_3d()
+            app.close_codes()
+            app.toggle_lab()
+            lw = app.lab
+            r0 = lw.add_manual()
+            r0.val.setText("0,5")
+            r0.unit.setCurrentIndex(2)               # kN/m – ta sama jednostka co profil z bazy
+            db = lw.open_db()
+            db.search.setText("IPE 200")
+            db.rebuild()
+            shot(db, "5_baza_materialow")
+            db.select(next(iter(db.tiles)))
+            db.add()
+            shot(lw, "4_obciazenia_wlasne")
+            lw.on_main()
+            lw.close_panel()
+            shot(app.pw, "1_okno_glowne")
+        except Exception as e:                   # zrzuty pomocnicze – błąd zapisujemy w raporcie
+            info["blad"] = repr(e)
+            ok = False
+        with open(os.path.join(d, "autotest.json"), "w", encoding="utf-8") as f:
+            json.dump(info, f, ensure_ascii=False, indent=1)
+    app.dirty = False
+    app.quit_app()
+    qapp.exit(0 if ok else 2)                        # kod wyjścia dla skryptu budowy
 
 
 if __name__ == "__main__":

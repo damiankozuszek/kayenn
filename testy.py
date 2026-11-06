@@ -35,7 +35,8 @@ SRC = os.path.join(HERE, "kayenn_codes.pyw")
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 # platforma offscreen w Windows nie widzi czcionek systemowych – bez tego zrzuty mają kwadraty zamiast liter
-os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
+if sys.platform == "win32":
+    os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
 
 
 def load_module(src=SRC):
@@ -108,16 +109,10 @@ class Runner:
         except ImportError:
             pass
         self.qapp = QApplication.instance() or QApplication(sys.argv)
-        self.qapp.setStyle("Fusion")
-        pal = self.qapp.palette()
-        R = QPalette.ColorRole
-        for role, col in ((R.Window, m.BG), (R.WindowText, m.TEXT), (R.Base, "#ffffff"), (R.Text, m.TEXT),
-                          (R.Button, "#eef0f3"), (R.ButtonText, m.TEXT), (R.Highlight, m.ACCENT),
-                          (R.HighlightedText, "#ffffff"), (R.PlaceholderText, m.MUTED)):
-            pal.setColor(role, QColor(col))
-        self.qapp.setPalette(pal)
-        self.qapp.setFont(QFont(m.FONT, 9))
-        self.qapp.setStyleSheet(m.STYLE.replace("@CHECK@", m._check_image()))
+        m.setup_qapp(self.qapp)                    # jak w main(): Fusion, paleta, czcionki Noto, UI_PT
+        from PySide6.QtGui import QFontInfo
+        if QFontInfo(self.qapp.font()).family() != m.FONT:
+            self.fail(f"czcionka programu: {QFontInfo(self.qapp.font()).family()} zamiast {m.FONT} (czcionki/)")
         self.app = m.App(self.qapp)
         self.app.pw.resize(1100, 860)
         self.app.pw.show()
@@ -973,6 +968,21 @@ except SystemExit:
         items, bad = m.mat_load(m.MAT_DEFAULT)
         if len(items) < 2000 or bad:
             self.fail(f"baza materiałów z pakietu: {len(items)} pozycji, błędnych wierszy {bad}")
+        # baza ze starszej wersji: „(własne)”, „sprawdź dane producenta”, kategoria „Własne” – migracja
+        old = [dict(name="styropian X", value="0,3", unit="kN/m³", cat="Izolacje (własne)",
+                    src="wartość orientacyjna – sprawdź dane producenta"),
+               dict(name="beton zwykły", value="24", unit="kN/m³", cat="Beton i zaprawa", src=""),
+               dict(name="beton mój", value="23", unit="kN/m³", cat="Własne", src="dodano z panelu obciążeń własnych")]
+        mg = m.mat_migrate(old)
+        if [x["cat"] for x in mg] != ["Izolacje", "Beton i zaprawa", "Beton i zaprawa"]                 or mg[0]["src"] != "wartość orientacyjna" or mg[2]["src"] != m.MAT_USER_SRC:
+            self.fail(f"migracja bazy ze starszej wersji: {mg}")
+        if any("(własne)" in it["cat"] or "sprawdź dane" in it["src"] for it in items):
+            self.fail("baza z pakietu: dopiski „(własne)” / „sprawdź dane producenta”")
+        # rozmiary w punktach: macOS (72 dpi) – ×4/3
+        m.UI_PT, keep = 4 / 3, m.UI_PT
+        if m.css_pt("font-size: 9pt;") != "font-size: 12.00pt;":
+            self.fail(f"css_pt: {m.css_pt('font-size: 9pt;')}")
+        m.UI_PT = keep
         # aktualizacja programu: nowsza baza z pakietu – nowe pozycje dopisane do kopii użytkownika
         m.mat_save(m.MAT_USER_OVERRIDE, [dict(name="moja pozycja", value="1", unit="kN", cat="Własne", src="")])
         os.utime(m.MAT_USER_OVERRIDE, (1, 1))
