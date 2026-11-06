@@ -199,7 +199,7 @@ Priority: optional
 Architecture: {deb_arch}
 Installed-Size: {size}
 Maintainer: KAYENN <kayenn@users.noreply.github.com>
-Depends: libc6 (>= 2.31), libegl1, libgl1, libfontconfig1, libxkbcommon0, libxkbcommon-x11-0, libxcb-cursor0, libdbus-1-3, libnss3, libxcomposite1, libxdamage1, libxrandr2, libxtst6, libxkbfile1
+Depends: libc6 (>= 2.31), libegl1, libgl1, libfontconfig1, libxkbcommon0, libxkbcommon-x11-0, libxcb-cursor0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-shape0, libxcb-xinerama0, libxcb-xfixes0, libxcb-xkb1, libdbus-1-3, libnss3, libxcomposite1, libxdamage1, libxrandr2, libxtst6, libxkbfile1
 Homepage: https://github.com/damiankozuszek/kayenn
 Description: KAYENN – obciążenia budowlane
  Obciążenia śniegiem i wiatrem wg PN-EN 1991 z modelem 3D, obciążenia użytkowe

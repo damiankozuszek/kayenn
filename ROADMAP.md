@@ -53,7 +53,7 @@ uruchomieniu w każdym z nich.
   Linux – `.desktop` i typ MIME w pakiecie `.deb`.
 - ✔ Testy i pakiety budowane w GitHub Actions na Windows, macOS i Linuksie: instalator `.exe` (Inno Setup)
   i `.zip`, `.dmg` (Apple Silicon), `.deb` i `.tar.gz`; próbne uruchomienie każdego pakietu ze zrzutami okien.
-- macOS na procesorach Intel (osobny pakiet x86_64 lub pakiet uniwersalny).
+- ✔ macOS: osobne pakiety dla Apple Silicon (arm64) i procesorów Intel (x64).
 - Linux: dystrybucja przez sklepy z aplikacjami (np. Flathub) lub AppImage.
 - Pakiety bez podpisu cyfrowego (podpis wiąże się ze stałymi kosztami – zob. punkt 7.2): Windows SmartScreen
   i macOS Gatekeeper pokazują ostrzeżenie przy pierwszym uruchomieniu.

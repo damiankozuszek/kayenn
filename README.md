@@ -66,7 +66,7 @@ Pakiety instalacyjne (zakładka **Releases** albo artefakty przebiegu **Actions 
 |---|---|---|
 | Windows 10/11 (64-bit) | `KAYENN-<wersja>-windows-x64-instalator.exe` | uruchomić instalator (bez uprawnień administratora albo dla wszystkich użytkowników); skojarzenie plików `.kayenn` |
 | | `KAYENN-<wersja>-windows-x64.zip` | wersja bez instalacji – rozpakować i uruchomić `KAYENN.exe` |
-| macOS 12+ (Apple Silicon) | `KAYENN-<wersja>-macos-arm64.dmg` | otworzyć i przeciągnąć KAYENN do folderu Programy; przy pierwszym uruchomieniu: prawy przycisk → Otwórz (program bez podpisu Apple) |
+| macOS 12+ (Apple Silicon / Intel) | `KAYENN-<wersja>-macos-arm64.dmg` / `-macos-x64.dmg` | otworzyć i przeciągnąć KAYENN do folderu Programy; przy pierwszym uruchomieniu: prawy przycisk → Otwórz (program bez podpisu Apple) |
 | Linux (Debian, Ubuntu, Mint…) | `kayenn_<wersja>_amd64.deb` | `sudo apt install ./kayenn_<wersja>_amd64.deb` – menu programów, ikona, skojarzenie `.kayenn` |
 | Linux (inne) | `KAYENN-<wersja>-linux-x86_64.tar.gz` | rozpakować i uruchomić `KAYENN/KAYENN` |
 
