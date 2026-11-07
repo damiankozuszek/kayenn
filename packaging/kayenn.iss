@@ -1,4 +1,4 @@
-﻿; Instalator Windows – Inno Setup 6. Uruchamiane przez pakiety/zbuduj.py:
+﻿; Windows installer – Inno Setup 6. Run by packaging/build.py:
 ;   iscc /DAppVersion=0.1.0 /DSourceDir=...\build\dist\KAYENN /DOutDir=...\dist /DRootDir=... kayenn.iss
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -13,14 +13,15 @@ AppPublisher=KAYENN
 DefaultDirName={autopf}\KAYENN
 DefaultGroupName=KAYENN
 DisableProgramGroupPage=yes
-; instalacja dla bieżącego użytkownika (bez uprawnień administratora) albo dla wszystkich – wybór w instalatorze
+; install for the current user (no administrator rights) or for all users – chosen in the installer
+; (the installer texts stay in Polish – they are part of the program interface)
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutDir}
-OutputBaseFilename=KAYENN-{#AppVersion}-windows-x64-instalator
-SetupIconFile={#RootDir}\identyfikacja\kayenn.ico
+OutputBaseFilename=KAYENN-{#AppVersion}-windows-x64-setup
+SetupIconFile={#RootDir}\branding\kayenn.ico
 UninstallDisplayIcon={app}\KAYENN.exe
 UninstallDisplayName=KAYENN {#AppVersion}
 Compression=lzma2/max
@@ -46,7 +47,7 @@ Name: "{autodesktop}\KAYENN"; Filename: "{app}\KAYENN.exe"; Tasks: desktopicon
 [Registry]
 Root: HKA; Subkey: "Software\Classes\.kayenn"; ValueType: string; ValueName: ""; ValueData: "KAYENN.Projekt"; Flags: uninsdeletevalue; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\KAYENN.Projekt"; ValueType: string; ValueName: ""; ValueData: "Projekt KAYENN"; Flags: uninsdeletekey; Tasks: assoc
-Root: HKA; Subkey: "Software\Classes\KAYENN.Projekt\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\_internal\identyfikacja\kayenn.ico"",0"; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\KAYENN.Projekt\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\_internal\branding\kayenn.ico"",0"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\KAYENN.Projekt\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\KAYENN.exe"" ""%1"""; Tasks: assoc
 
 [Run]

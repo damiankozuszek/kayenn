@@ -1,102 +1,83 @@
 # KAYENN
 
-<p align="center"><img src="identyfikacja/kayenn_napis.svg" alt="KAYENN" width="520"></p>
+<p align="center"><img src="branding/kayenn_wordmark.svg" alt="KAYENN" width="520"></p>
 
-Otwarty program dla konstruktorów. Nazwa pochodzi od **kN** – kiloniutona, jednostki, w której
-konstruktor liczy obciążenia (po angielsku czytanego „kej-en”).
+> [!WARNING]
+> ⚠️ **Under heavy development** ⚠️
+>
+> KAYENN is being developed continuously – new features arrive often, and with them errors may appear,
+> **including serious ones, also in the calculations**. Check every result against the design code and your own
+> experience before using it in a project. The program is an auxiliary tool and does not replace the designer's
+> responsibility.
+>
+> ⚠️ Please report any error you find in [Issues](../../issues) – it is the fastest way to get it fixed. ⚠️
 
-Docelowo KAYENN będzie programem do obliczeń metodą elementów skończonych (MES). Po uruchomieniu użytkownik
-widzi puste okno projektu i dodaje do niego kolejne elementy układanki – np. obciążenia normowe, obciążenia
-wyznaczane metodami inżynierskimi – które razem tworzą pełny obraz projektu.
+**KAYENN** is a program for structural engineers for determining building loads. The name comes from **kN** –
+the kilonewton, the unit loads are calculated in (read in English: “kay-en”).
 
-## Budowa programu
+You work on a **project**: you add load cases – snow, wind, imposed loads, self-weight – and the program collects
+them in one list, with drawings, calculations and a printout. KAYENN is intended to grow into a complete
+structural analysis program based on the finite element method (FEM).
 
-W programie użytkownik widzi tylko nazwę **KAYENN**. Poniższe nazwy są wewnętrzne – porządkują rozwój kodu.
+> [!NOTE]
+> The program interface is currently available in **Polish** only, and the load calculations follow the Polish
+> editions of the Eurocodes with the Polish National Annexes (PN-EN). The language menu is already in place for
+> further languages.
 
-| Część | Zakres | Stan |
+## What it can do
+
+### Code loads
+
+- **Snow** per PN-EN 1991-1-3 with the National Annex – flat, monopitch, duopitch, multispan and cylindrical roofs,
+  roofs next to taller buildings and roofs with parapets or obstructions; drifts, snow overhangs and exceptional
+  drifts.
+- **Wind** per PN-EN 1991-1-4 with the National Annex – buildings with various roofs (flat, monopitch, duopitch,
+  hipped, multispan, vaulted, domes) and canopies; all wind directions and pressure/suction variants.
+- **Imposed loads** per PN-EN 1991-1-1 – area categories A–K and horizontal loads on walls, with the code ranges
+  and recommended values.
+- **Zone map** for snow and wind – you pick the location on a map (also by cadastral parcel number) and the
+  program sets the zone and the altitude above sea level.
+- **3D model** of the building with the load distribution – rotate and zoom, with dimensions you can change by
+  clicking them.
+
+### Own loads
+
+- **Area, line and point loads** entered by hand or derived from the **material database** (unit weight ×
+  thickness, width, length), with a multiplier, e.g. a number of pieces.
+- The database contains all materials from Annex A of PN-EN 1991-1-1, the weights of over two thousand steel
+  sections (from “Tablice do projektowania konstrukcji metalowych”) and many finishing materials. You can extend
+  and change it freely, and every item shows its source.
+- The program adds the items up and makes sure they all have the same unit.
+
+### Project and printout
+
+- All cases in a single `.kayenn` project file – edit, duplicate and reorder them.
+- Printout with preview: calculations, 3D drawings and the sources of values.
+
+## Installation
+
+Download the package for your system from [Releases](../../releases):
+
+| System | File | How to install |
 |---|---|---|
-| **KAYENN Manager** | okno główne, moduł podstawowy: projekt, lista przypadków, raport, wydruk | dostępne |
-| **KAYENN Codes** | obciążenia normowe: śnieg, wiatr | dostępne |
-| **KAYENN Lab** | obciążenia własne: pozycje wpisane ręcznie lub z bazy materiałów | dostępne |
-| **KAYENN FEM** | obliczenia metodą elementów skończonych | planowane |
+| **Windows** 10 / 11 | `…-windows-x64-setup.exe` | run the installer |
+| | `…-windows-x64.zip` | portable version – unzip and run `KAYENN.exe` |
+| **macOS** 12 or newer | `…-macos-arm64.dmg` (Apple Silicon: M1, M2…) or `…-macos-x64.dmg` (Intel) | open it and drag KAYENN to Applications |
+| **Linux** (Ubuntu, Debian, Mint…) | `…_amd64.deb` | `sudo apt install ./kayenn_<version>_amd64.deb` |
+| **Linux** (other) | `…-linux-x86_64.tar.gz` | unpack and run `KAYENN/KAYENN` |
 
-### Obciążenia normowe (KAYENN Codes)
+The program is not digitally signed yet, so on the first start your system may warn about an unknown publisher:
 
-- **obciążenia użytkowe** – PN-EN 1991-1-1 (+AC, Ap1, Ap2, Załącznik krajowy): kategorie powierzchni A–K
-  i obciążenia poziome ścian (6.4) z przedziałami normowymi i wartościami zalecanymi,
-- **śnieg** – PN-EN 1991-1-3 (+AC, Ap1, Załącznik krajowy), w tym zaspy wyjątkowe (Załącznik B wg NB1.3),
-- **wiatr** – PN-EN 1991-1-4:2008 (+AC, Ap1…Ap3, Załącznik krajowy) – budynki i wiaty.
+- **Windows** – in the SmartScreen window click “More info” and then “Run anyway”.
+- **macOS** – right-click the program and choose “Open”.
 
-Funkcje: raport obliczeń, interaktywny model 3D z rozkładem obciążeń, mapa stref obciążenia
-z wyszukiwaniem działek, projekt z wieloma przypadkami (`.kayenn`), wydruk z podglądem.
+The program works and looks the same on Windows, macOS and Linux.
 
-Obciążenia normowe otwiera przycisk **Obciążenia normowe** w oknie głównym – okno pojawia się nad
-oknem głównym, które pozostaje otwarte.
+## Plans
 
-### Obciążenia własne (KAYENN Lab)
+The next development directions – engineering methods for own loads, a common project format and, further on,
+FEM calculations – are described in [ROADMAP.md](ROADMAP.md).
 
-Przycisk **Obciążenia własne** w oknie głównym. Obciążenie dowolnego typu – powierzchniowe, liniowe lub
-skupione – wpisane ręcznie albo wyznaczone z bazy materiałów (ciężar objętościowy × grubość / szerokość /
-długość). Program sumuje pozycje i pilnuje wspólnej jednostki. Baza materiałów (`kayenn_materialy.txt`)
-zawiera wszystkie materiały z Załącznika A PN-EN 1991-1-1, ciężary profili stalowych z „Tablic do projektowania
-konstrukcji metalowych” (Bogucki, Żyburtowicz) oraz pozycje dodatkowe; jest plikiem tekstowym,
-który można wymienić lub edytować w Notatniku, a najwygodniej – w programie.
+---
 
-> Program jest narzędziem pomocniczym – wyniki należy weryfikować z normą.
-
-Plany rozwoju: [ROADMAP.md](ROADMAP.md).
-
-## Identyfikacja wizualna
-
-| Znak | Plik |
-|---|---|
-| Napis (znak słowny) | [`identyfikacja/kayenn_napis.svg`](identyfikacja/kayenn_napis.svg) |
-| Ikona programu – litera K | [`identyfikacja/kayenn_ikona.svg`](identyfikacja/kayenn_ikona.svg), [`kayenn.ico`](identyfikacja/kayenn.ico) |
-
-<img src="identyfikacja/kayenn_ikona_64.png" alt="Ikona KAYENN" width="64">
-
-Pismo bez łuków, pochylone o 25°, żółte wypełnienie (#FFD100), gruba czarna obwódka i lity czarny cień
-w lewo w dół. Wszystkie pliki generuje `py identyfikacja/identyfikacja.py` (wymaga PySide6).
-
-## Instalacja
-
-Pakiety instalacyjne (zakładka **Releases** albo artefakty przebiegu **Actions → Pakiety instalacyjne**):
-
-| System | Pakiet | Instalacja |
-|---|---|---|
-| Windows 10/11 (64-bit) | `KAYENN-<wersja>-windows-x64-instalator.exe` | uruchomić instalator (bez uprawnień administratora albo dla wszystkich użytkowników); skojarzenie plików `.kayenn` |
-| | `KAYENN-<wersja>-windows-x64.zip` | wersja bez instalacji – rozpakować i uruchomić `KAYENN.exe` |
-| macOS 12+ (Apple Silicon / Intel) | `KAYENN-<wersja>-macos-arm64.dmg` / `-macos-x64.dmg` | otworzyć i przeciągnąć KAYENN do folderu Programy; przy pierwszym uruchomieniu: prawy przycisk → Otwórz (program bez podpisu Apple) |
-| Linux (Debian, Ubuntu, Mint…) | `kayenn_<wersja>_amd64.deb` | `sudo apt install ./kayenn_<wersja>_amd64.deb` – menu programów, ikona, skojarzenie `.kayenn` |
-| Linux (inne) | `KAYENN-<wersja>-linux-x86_64.tar.gz` | rozpakować i uruchomić `KAYENN/KAYENN` |
-
-Program wygląda tak samo w każdym systemie: własne czcionki (Noto, katalog `czcionki/`), styl Fusion, jasna
-paleta programu i rozmiary czcionek liczone jak przy 96 dpi.
-
-Pakiety buduje GitHub Actions (`.github/workflows/pakiety.yml`) na każdym systemie: testy, PyInstaller, próbne
-uruchomienie zbudowanego programu (zrzuty okien jako artefakt `zrzuty-<system>`), pakiet. Lokalnie:
-`python pakiety/zbuduj.py` (wymaga `pip install -r pakiety/requirements.txt`; Windows – Inno Setup 6).
-Nowe wydanie: zmienić `APP_VERSION` w `kayenn_codes.pyw` i wypchnąć znacznik `v<wersja>` – pakiety trafią do
-szkicu wydania.
-
-## Uruchomienie ze źródeł
-
-Wymagany Python 3 i PySide6 (z QtWebEngine – dla mapy):
-
-```
-py -m pip install PySide6
-py kayenn_codes.pyw
-```
-
-W Windows wystarczy dwuklik na `kayenn_codes.pyw` (macOS / Linux: `python3 kayenn_codes.pyw`). Przy pierwszym
-uruchomieniu bez PySide6 program zaproponuje instalację.
-
-## Testy
-
-```
-py testy.py            # pełny zestaw (ok. 45 s)
-py testy.py --szybko   # jeden widok 3D
-py testy.py --zrzuty DIR   # zrzuty okien do obejrzenia
-```
-
-Kod wyjścia 0 = brak błędów.
+Information for developers (running from source, tests, building packages): [DEVELOPMENT.md](DEVELOPMENT.md).

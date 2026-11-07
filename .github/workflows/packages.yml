@@ -1,7 +1,7 @@
-# Testy i pakiety instalacyjne KAYENN dla Windows, macOS i Linuksa.
-# Uruchomienie: zakładka Actions → „Pakiety instalacyjne” → Run workflow, albo wypchnięcie znacznika v* (np. v0.1.0) –
-# wtedy pakiety trafiają też do wydania (Releases).
-name: Pakiety instalacyjne
+# Tests and installation packages of KAYENN for Windows, macOS and Linux.
+# Run: Actions tab → „Installation packages” → Run workflow, or push a v* tag (e.g. v0.1.0) –
+# then the packages also go to a draft release (Releases).
+name: Installation packages
 
 on:
   workflow_dispatch:
@@ -12,16 +12,16 @@ permissions:
   contents: write
 
 jobs:
-  pakiet:
-    name: ${{ matrix.nazwa }}
+  package:
+    name: ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { nazwa: Windows, os: windows-latest }
-          - { nazwa: macOS, os: macos-15 }
-          - { nazwa: macOS-Intel, os: macos-15-intel }
-          - { nazwa: Linux, os: ubuntu-22.04 }
+          - { name: Windows, os: windows-latest }
+          - { name: macOS, os: macos-15 }
+          - { name: macOS-Intel, os: macos-15-intel }
+          - { name: Linux, os: ubuntu-22.04 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
@@ -34,7 +34,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Biblioteki systemowe (Linux)
+      - name: System libraries (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -48,40 +48,40 @@ jobs:
         run: |
           if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
 
-      - name: Pakiety Pythona
-        run: python -m pip install -r pakiety/requirements.txt
+      - name: Python packages
+        run: python -m pip install -r packaging/requirements.txt
 
-      - name: Testy programu
-        run: python testy.py --szybko
+      - name: Program tests
+        run: python tests.py --quick
 
-      - name: Budowa pakietu
-        run: python pakiety/zbuduj.py
+      - name: Build package
+        run: python packaging/build.py
 
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYENN-${{ matrix.nazwa }}
+          name: KAYENN-${{ matrix.name }}
           path: |
             dist/*
-            !dist/zrzuty-*
+            !dist/screenshots-*
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: zrzuty-${{ matrix.nazwa }}
-          path: dist/zrzuty-*
+          name: screenshots-${{ matrix.name }}
+          path: dist/screenshots-*
 
-  wydanie:
+  release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: pakiet
+    needs: package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          path: pakiety
+          path: release
           pattern: KAYENN-*
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: pakiety/*
+          files: packaging/*
           draft: true

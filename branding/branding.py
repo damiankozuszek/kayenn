@@ -1,15 +1,15 @@
-"""KAYENN – identyfikacja wizualna: napis (znak słowny) i ikona programu (litera K).
+"""KAYENN – visual branding: the wordmark and the program icon (the letter K).
 
-Generuje w tym folderze:
-  kayenn_napis.svg / .png   – napis KAYENN
-  kayenn_ikona.svg          – ikona (litera K)
-  kayenn_ikona_<n>.png      – ikona w rozmiarach 16…256 px
-  kayenn.ico                – ikona dla Windows (wszystkie rozmiary)
+Generates in this folder:
+  kayenn_wordmark.svg / .png   – the KAYENN wordmark
+  kayenn_icon.svg              – icon (the letter K)
+  kayenn_icon_<n>.png          – icon in sizes 16…256 px
+  kayenn.ico                   – icon for Windows (all sizes)
 
-Uruchomienie: py identyfikacja.py   (wymaga PySide6 – render PNG)
+Running: py branding.py   (requires PySide6 – PNG rendering)
 
-Litery rysowane pionowo w siatce o wysokości 100, pochylenie (skewX) nakładane na końcu.
-Wypełnienie żółte, gruba czarna obwódka, lity czarny cień wysunięty w lewo w dół.
+Letters drawn upright in a grid of height 100, the slant (skewX) applied at the end.
+Yellow fill, thick black outline, solid black shadow offset to the lower left.
 """
 import math
 import os
@@ -17,17 +17,17 @@ import struct
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-H = 100      # wysokość wersalików
-S = 38       # grubość pionowych kresek (w poziomie, przed pochyleniem)
-B = 22       # grubość poziomych belek
-M1 = 42      # środkowe belki K, A, Y, E – wspólna linia (góra belki)
+H = 100      # cap height
+S = 38       # thickness of vertical strokes (horizontal, before skewing)
+B = 22       # thickness of horizontal bars
+M1 = 42      # middle bars of K, A, Y, E – a common line (top of the bar)
 M2 = M1 + B
-SKEW = 25    # pochylenie [°]
+SKEW = 25    # slant [°]
 FILL, LINE, SHADOW = "#FFD100", "#000", "#000"
 
 
 def N_(G=28, k=0.7, w=31, x0=6):
-    # skos tylko w górnej części; k = dx/dy skosu, w = jego szerokość w poziomie
+    # slant only in the upper part; k = dx/dy of the slant, w = its horizontal width
     r = S + G
     x0 = S + x0
     yt = (r - x0) / k
@@ -38,7 +38,7 @@ def N_(G=28, k=0.7, w=31, x0=6):
 
 
 def K_(G=34, k=0.6, w=42):
-    # trzon, pozioma belka w środku, z niej pionowa noga w dół i jeden skos w górę, ścięty poziomo
+    # stem, horizontal bar in the middle, from it a vertical leg down and one slant up, cut horizontally
     W = 2 * S + G
     r = W - S
     Rb = W - k * M1
@@ -49,7 +49,7 @@ def K_(G=34, k=0.6, w=42):
 
 
 def Y_(G=30):
-    # widły z dwoma zębami – bez skosów
+    # fork with two prongs – no slants
     W = 2 * S + G
     s0 = (W - S) / 2
     return [[(0, 0), (S, 0), (S, M1), (S + G, M1), (S + G, 0), (W, 0), (W, M2), (s0 + S, M2), (s0 + S, 100),
@@ -78,7 +78,7 @@ def _path(polys, dx):
 
 
 def mark(text="KAYENN", sw=9, depth=28, side=50, gap=24, square=False, bg=None, label=None):
-    """SVG napisu. square=True – kwadratowe pole (ikona), znak na środku."""
+    """SVG of the wordmark. square=True – square field (icon), mark centred."""
     d, x, width = [], 0, 0
     for ch in text:
         polys, w = LETTERS[ch]()
@@ -96,13 +96,13 @@ def mark(text="KAYENN", sw=9, depth=28, side=50, gap=24, square=False, bg=None, 
     D = " ".join(d)
     base = f"translate({sk:.2f},0) skewX({-SKEW})"
     g = []
-    steps = int(max(depth, side) * 2)   # cień: lita ekstruzja w lewo-w dół
+    steps = int(max(depth, side) * 2)   # shadow: solid extrusion to the lower left
     for i in range(steps, 0, -1):
         o = i / steps
         g.append(f'<path d="{D}" transform="translate({-side * o:.2f},{depth * o:.2f}) {base}" fill="{SHADOW}" '
                  f'stroke="{SHADOW}" stroke-width="{sw}" stroke-linejoin="miter" stroke-miterlimit="3"/>')
-    # obwódka pod wypełnieniem: dwie osobne warstwy (paint-order="stroke" nie działa np. w Qt – tam obwódka
-    # zjadałaby połowę grubości liter)
+    # outline under the fill: two separate layers (paint-order="stroke" does not work e.g. in Qt – there the outline
+    # would eat half of the letter thickness)
     g.append(f'<path d="{D}" transform="{base}" fill="{LINE}" stroke="{LINE}" stroke-width="{sw}" '
              f'stroke-linejoin="miter" stroke-miterlimit="3" fill-rule="evenodd"/>')
     g.append(f'<path d="{D}" transform="{base}" fill="{FILL}" fill-rule="evenodd"/>')
@@ -112,8 +112,8 @@ def mark(text="KAYENN", sw=9, depth=28, side=50, gap=24, square=False, bg=None, 
 
 
 def icon(size=None):
-    """Ikona: litera K dokładnie jak w napisie (te same proporcje, obwódka i cień), w kwadratowym polu.
-    Wszystkie rozmiary to to samo SVG – tylko przeskalowane."""
+    """Icon: the letter K exactly as in the wordmark (same proportions, outline and shadow), in a square field.
+    All sizes are the same SVG – only scaled."""
     return mark("K", square=True, label="KAYENN")
 
 
@@ -140,7 +140,7 @@ def _png(svg, w, h):
 
 
 def _ico(pngs):
-    """Plik .ico z obrazami PNG (Windows Vista+)."""
+    """.ico file with PNG images (Windows Vista+)."""
     out = struct.pack("<HHH", 0, 1, len(pngs))
     off = 6 + 16 * len(pngs)
     data = b""
@@ -154,15 +154,15 @@ def main():
     from PySide6.QtGui import QGuiApplication
     app = QGuiApplication.instance() or QGuiApplication(sys.argv[:1])  # noqa: F841
     w = lambda name, s: open(os.path.join(HERE, name), "w", encoding="utf-8").write(s)
-    napis = mark()
-    w("kayenn_napis.svg", napis)
-    vb = [float(v) for v in napis.split('viewBox="')[1].split('"')[0].split()]
-    open(os.path.join(HERE, "kayenn_napis.png"), "wb").write(_png(napis, 1200, round(1200 * vb[3] / vb[2])))
-    w("kayenn_ikona.svg", icon(256))
+    wordmark = mark()
+    w("kayenn_wordmark.svg", wordmark)
+    vb = [float(v) for v in wordmark.split('viewBox="')[1].split('"')[0].split()]
+    open(os.path.join(HERE, "kayenn_wordmark.png"), "wb").write(_png(wordmark, 1200, round(1200 * vb[3] / vb[2])))
+    w("kayenn_icon.svg", icon(256))
     pngs = []
     for n in ICON_SIZES:
         png = _png(icon(n), n, n)
-        open(os.path.join(HERE, f"kayenn_ikona_{n}.png"), "wb").write(png)
+        open(os.path.join(HERE, f"kayenn_icon_{n}.png"), "wb").write(png)
         pngs.append((n, png))
     open(os.path.join(HERE, "kayenn.ico"), "wb").write(_ico(pngs))
 

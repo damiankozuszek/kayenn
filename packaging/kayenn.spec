@@ -1,22 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller – KAYENN (Windows, macOS, Linux). Uruchamiane przez pakiety/zbuduj.py.
+# PyInstaller – KAYENN (Windows, macOS, Linux). Run by packaging/build.py.
 import os
 import re
 import sys
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
-ICONS = os.path.join(ROOT, "build", "ikony")              # przygotowuje zbuduj.py
-VERSION = re.search(r'^APP_VERSION = "([^"]+)"', open(os.path.join(ROOT, "kayenn_codes.pyw"), encoding="utf-8").read(),
+ICONS = os.path.join(ROOT, "build", "icons")              # prepared by build.py
+VERSION = re.search(r'^APP_VERSION = "([^"]+)"', open(os.path.join(ROOT, "kayenn.pyw"), encoding="utf-8").read(),
                     re.M).group(1)
 
 datas = [(os.path.join(ROOT, "kayenn_materialy.txt"), "."),
-         (os.path.join(ROOT, "czcionki"), "czcionki")]
-for f in os.listdir(os.path.join(ROOT, "identyfikacja")):
+         (os.path.join(ROOT, "fonts"), "fonts")]
+for f in os.listdir(os.path.join(ROOT, "branding")):
     if f.endswith((".svg", ".png", ".ico")):
-        datas.append((os.path.join(ROOT, "identyfikacja", f), "identyfikacja"))
+        datas.append((os.path.join(ROOT, "branding", f), "branding"))
 
 a = Analysis(
-    [os.path.join(ROOT, "kayenn_codes.pyw")],
+    [os.path.join(ROOT, "kayenn.pyw")],
     pathex=[ROOT],
     datas=datas,
     hiddenimports=["PySide6.QtSvg", "PySide6.QtPrintSupport", "PySide6.QtWebEngineWidgets"],
@@ -25,8 +25,8 @@ a = Analysis(
               "PySide6.QtSensors", "PySide6.QtSerialPort", "PySide6.QtSql", "PySide6.QtTest"],
     noarchive=False,
 )
-# odchudzenie: moduły Qt, których program nie używa (ciągnięte przez zależności QML), pliki QML,
-# tłumaczenia Qt i języki silnika przeglądarki poza polskim i angielskim
+# slimming: Qt modules the program does not use (pulled in by QML dependencies), QML files,
+# Qt translations and browser engine languages other than Polish and English, browser developer tools
 _DROP = re.compile(r"qt6?(3d|quick3d|charts|datavisualization|graphs|multimedia|location|labs|quickcontrols2|"
                    r"quickdialogs2|quicktimeline|quickparticles|quickvectorimage|spatialaudio|texttospeech|"
                    r"virtualkeyboard|scxml|statemachine|remoteobjects|bluetooth|nfc|serialport|serialbus|sql|"
@@ -38,6 +38,9 @@ def _keep(dest):
     d = dest.replace("\\", "/").lower()
     name = d.rsplit("/", 1)[-1]
     if "/qml/" in "/" + d or d.startswith("qml/"):
+        return False
+    # browser developer tools (QtWebEngine DevTools, ~83 MB) – not used by the program (map only)
+    if name.startswith("qtwebengine_devtools_resources"):
         return False
     if _DROP.search(name) or re.search(r"/(qt6?)?(3d|quick3d|charts|datavisualization|multimedia|location|"
                                         r"quickcontrols2)[^/]*\.framework/", "/" + d):
@@ -54,7 +57,7 @@ a.datas = [x for x in a.datas if _keep(x[0])]
 pyz = PYZ(a.pure)
 
 if sys.platform == "win32":
-    icon = os.path.join(ROOT, "identyfikacja", "kayenn.ico")
+    icon = os.path.join(ROOT, "branding", "kayenn.ico")
 elif sys.platform == "darwin":
     icon = os.path.join(ICONS, "kayenn.icns")
 else:
@@ -77,7 +80,7 @@ if sys.platform == "darwin":
             "CFBundleShortVersionString": VERSION,
             "CFBundleVersion": VERSION,
             "NSHighResolutionCapable": True,
-            "NSRequiresAquaSystemAppearance": True,          # program ma własną, jasną paletę
+            "NSRequiresAquaSystemAppearance": True,          # the program has its own light palette
             "LSMinimumSystemVersion": "12.0",
             "CFBundleDevelopmentRegion": "pl",
             "CFBundleDocumentTypes": [{

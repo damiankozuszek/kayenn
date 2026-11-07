@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-Budowa pakietu instalacyjnego KAYENN dla bieżącego systemu:
+Builds the KAYENN installation package for the current system:
 
-    python pakiety/zbuduj.py              ikony → PyInstaller → próbne uruchomienie → pakiet
-    python pakiety/zbuduj.py --bez-testu  bez próbnego uruchomienia zbudowanego programu
+    python packaging/build.py             icons → PyInstaller → trial run → package
+    python packaging/build.py --no-test   without the trial run of the built program
 
-Wynik w katalogu dist/:
-  Windows  KAYENN-<wersja>-windows-x64-instalator.exe (Inno Setup) i KAYENN-<wersja>-windows-x64.zip (bez instalacji)
-  macOS    KAYENN-<wersja>-macos-<arch>.dmg (KAYENN.app – przeciągnąć do Programów)
-  Linux    kayenn_<wersja>_amd64.deb (Debian, Ubuntu, Mint…) i KAYENN-<wersja>-linux-x86_64.tar.gz
+Output in the dist/ folder:
+  Windows  KAYENN-<version>-windows-x64-setup.exe (Inno Setup) and KAYENN-<version>-windows-x64.zip (portable)
+  macOS    KAYENN-<version>-macos-<arch>.dmg (KAYENN.app – drag to Applications)
+  Linux    kayenn_<version>_amd64.deb (Debian, Ubuntu, Mint…) and KAYENN-<version>-linux-x86_64.tar.gz
 
-Wymaga: pip install -r pakiety/requirements.txt; Windows – Inno Setup 6 (iscc); Linux – dpkg-deb.
-Pakiety dla wszystkich systemów buduje GitHub Actions (.github/workflows/pakiety.yml).
+Requires: pip install -r packaging/requirements.txt; Windows – Inno Setup 6 (iscc); Linux – dpkg-deb.
+GitHub Actions builds the packages for all systems (.github/workflows/packages.yml).
 """
 import os
 import platform
@@ -31,8 +31,8 @@ for _s in (sys.stdout, sys.stderr):
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BUILD = os.path.join(ROOT, "build")
 DIST = os.path.join(ROOT, "dist")
-ICONS = os.path.join(BUILD, "ikony")
-VERSION = re.search(r'^APP_VERSION = "([^"]+)"', open(os.path.join(ROOT, "kayenn_codes.pyw"), encoding="utf-8").read(),
+ICONS = os.path.join(BUILD, "icons")
+VERSION = re.search(r'^APP_VERSION = "([^"]+)"', open(os.path.join(ROOT, "kayenn.pyw"), encoding="utf-8").read(),
                     re.M).group(1)
 
 
@@ -42,14 +42,14 @@ def run(cmd, **kw):
 
 
 def render_icons():
-    """Ikony z identyfikacja/kayenn_ikona.svg: PNG 16–1024; macOS – kayenn.icns (iconutil)."""
+    """Icons from branding/kayenn_icon.svg: PNG 16–1024; macOS – kayenn.icns (iconutil)."""
     os.makedirs(ICONS, exist_ok=True)
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QGuiApplication, QImage, QPainter
     from PySide6.QtSvg import QSvgRenderer
     app = QGuiApplication.instance() or QGuiApplication([])  # noqa: F841
-    r = QSvgRenderer(os.path.join(ROOT, "identyfikacja", "kayenn_ikona.svg"))
+    r = QSvgRenderer(os.path.join(ROOT, "branding", "kayenn_icon.svg"))
     pngs = {}
     for n in (16, 32, 64, 128, 256, 512, 1024):
         img = QImage(n, n, QImage.Format.Format_ARGB32_Premultiplied)
@@ -73,7 +73,7 @@ def render_icons():
 
 def pyinstaller():
     run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--distpath", os.path.join(BUILD, "dist"),
-         "--workpath", os.path.join(BUILD, "work"), os.path.join(ROOT, "pakiety", "kayenn.spec")])
+         "--workpath", os.path.join(BUILD, "work"), os.path.join(ROOT, "packaging", "kayenn.spec")])
     if sys.platform == "darwin":
         return os.path.join(BUILD, "dist", "KAYENN.app")
     return os.path.join(BUILD, "dist", "KAYENN")
@@ -86,28 +86,28 @@ def program_exe(out):
 
 
 def smoke_test(out):
-    """Próbne uruchomienie zbudowanego programu: start, okna, zrzuty i raport (dist/zrzuty-<system>/), zamknięcie –
-    kod 0. Lokalnie bez ekranu (offscreen); w GitHub Actions (CI) na ekranie systemu (Linux – Xvfb), żeby zrzuty
-    pokazywały prawdziwy wygląd na danym systemie."""
-    shots = os.path.join(DIST, f"zrzuty-{sys.platform}")
+    """Trial run of the built program: start, windows, screenshots and report (dist/screenshots-<system>/), quit –
+    exit code 0. Locally without a screen (offscreen); in GitHub Actions (CI) on the system's screen (Linux – Xvfb),
+    so the screenshots show the real look on that system."""
+    shots = os.path.join(DIST, f"screenshots-{sys.platform}")
     shutil.rmtree(shots, ignore_errors=True)
     env = dict(os.environ, KAYENN_AUTOTEST_DIR=shots)
     cmd = [program_exe(out), "--autotest"]
     if os.environ.get("CI"):
-        env.pop("QT_QPA_PLATFORM", None)             # (ustawione przy generowaniu ikon) – tu prawdziwy ekran
+        env.pop("QT_QPA_PLATFORM", None)             # (set while generating icons) – a real screen here
         if sys.platform.startswith("linux"):
             cmd = ["xvfb-run", "-a", "-s", "-screen 0 1920x1080x24"] + cmd
     else:
         env["QT_QPA_PLATFORM"] = "offscreen"
     t0 = time.time()
     r = subprocess.run(cmd, env=env, timeout=300, capture_output=True, text=True, errors="replace")
-    print(f"próbne uruchomienie: kod {r.returncode}, {time.time() - t0:.1f} s")
+    print(f"trial run: exit code {r.returncode}, {time.time() - t0:.1f} s")
     rep = os.path.join(shots, "autotest.json")
     if os.path.exists(rep):
         print(open(rep, encoding="utf-8").read())
     if r.returncode != 0:
         print(r.stdout[-3000:], r.stderr[-3000:])
-        sys.exit("BŁĄD: zbudowany program nie uruchomił się poprawnie")
+        sys.exit("ERROR: the built program did not start correctly")
 
 
 def arch():
@@ -122,10 +122,10 @@ def package_windows(out):
                                                     r"C:\Program Files\Inno Setup 6\ISCC.exe") if os.path.exists(p)),
                                         None)
     if not iscc:
-        print("UWAGA: brak Inno Setup (iscc) – zbudowano tylko archiwum .zip")
+        print("WARNING: Inno Setup (iscc) not found – only the .zip archive was built")
         return
     run([iscc, f"/DAppVersion={VERSION}", f"/DSourceDir={out}", f"/DOutDir={DIST}", f"/DRootDir={ROOT}",
-         os.path.join(ROOT, "pakiety", "kayenn.iss")])
+         os.path.join(ROOT, "packaging", "kayenn.iss")])
 
 
 def package_macos(app):
@@ -133,7 +133,7 @@ def package_macos(app):
     shutil.rmtree(stage, ignore_errors=True)
     os.makedirs(stage)
     run(["ditto", app, os.path.join(stage, "KAYENN.app")])
-    os.symlink("/Applications", os.path.join(stage, "Programy"))
+    os.symlink("/Applications", os.path.join(stage, "Programy"))          # Polish name in the DMG window
     dmg = os.path.join(DIST, f"KAYENN-{VERSION}-macos-{arch()}.dmg")
     if os.path.exists(dmg):
         os.remove(dmg)
@@ -169,7 +169,7 @@ def package_linux(out, pngs):
     with tarfile.open(tgz, "w:gz") as t:
         t.add(out, arcname="KAYENN")
     if not shutil.which("dpkg-deb"):
-        print("UWAGA: brak dpkg-deb – zbudowano tylko archiwum .tar.gz")
+        print("WARNING: dpkg-deb not found – only the .tar.gz archive was built")
         return
     root = os.path.join(BUILD, "deb")
     shutil.rmtree(root, ignore_errors=True)
@@ -201,9 +201,10 @@ Installed-Size: {size}
 Maintainer: KAYENN <kayenn@users.noreply.github.com>
 Depends: libc6 (>= 2.31), libegl1, libgl1, libfontconfig1, libxkbcommon0, libxkbcommon-x11-0, libxcb-cursor0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-shape0, libxcb-xinerama0, libxcb-xfixes0, libxcb-xkb1, libdbus-1-3, libnss3, libxcomposite1, libxdamage1, libxrandr2, libxtst6, libxkbfile1
 Homepage: https://github.com/damiankozuszek/kayenn
-Description: KAYENN – obciążenia budowlane
- Obciążenia śniegiem i wiatrem wg PN-EN 1991 z modelem 3D, obciążenia użytkowe
- i własne z bazą materiałów, projekt z wieloma przypadkami i wydrukiem.
+Description: KAYENN – structural loads for engineers
+ Snow and wind loads per PN-EN 1991 with a 3D model, imposed loads and own
+ loads with a material database, projects with many cases and printouts.
+ The program interface is in Polish.
 """)
     for name in ("postinst", "postrm"):
         p = os.path.join(deb_dir, name)
@@ -221,7 +222,7 @@ def main():
     print(f"KAYENN {VERSION} – {sys.platform} {platform.machine()}")
     pngs = render_icons()
     out = pyinstaller()
-    if "--bez-testu" not in sys.argv:
+    if "--no-test" not in sys.argv:
         smoke_test(out)
     if sys.platform == "win32":
         package_windows(out)
@@ -229,7 +230,7 @@ def main():
         package_macos(out)
     else:
         package_linux(out, pngs)
-    print("Gotowe:", *sorted(os.listdir(DIST)), sep="\n  ")
+    print("Done:", *sorted(os.listdir(DIST)), sep="\n  ")
 
 
 if __name__ == "__main__":
