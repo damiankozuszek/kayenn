@@ -4526,7 +4526,7 @@ LAB_GROUPS = {3: "Ciężary objętościowe [kN/m³]", 2: "Obciążenia powierzch
 LAB_MANUAL = ((3, "kN/m³ – ciężar objętościowy"), (2, "kN/m² – powierzchniowe"), (1, "kN/m – liniowe"),
               (0, "kN – skupione"))
 LAB_DIMS = (("t", "grubość"), ("b", "szerokość"), ("d", "długość"))
-MAT_FILE_NAME = "kayenn_materialy.txt"
+MAT_FILE_NAME = "kayenn_materials_pl.txt"
 MAT_DEFAULT = os.path.join(BASE_DIR, MAT_FILE_NAME)
 MAT_USER_OVERRIDE = None                                # (tests: a different user file)
 MAT_HEADER = """# KAYENN – baza materiałów i obciążeń (obciążenia własne)
@@ -4595,12 +4595,23 @@ def user_data_dir():
 LANGUAGES = {"pl": "Polski"}          # interface languages (code → name shown in the Język menu)
 
 
+def migrate_user_file(new, old):
+    """Rename a user file from its former Polish name (once, silently)."""
+    try:
+        if not os.path.exists(new) and os.path.exists(old):
+            os.replace(old, new)
+    except OSError:
+        pass
+    return new
+
+
 def settings_file():
-    return os.path.join(user_data_dir(), "ustawienia.json")
+    d = user_data_dir()
+    return migrate_user_file(os.path.join(d, "settings.json"), os.path.join(d, "ustawienia.json"))
 
 
 def settings_get(key, default=None):
-    """User setting (ustawienia.json in the user data folder); default when missing or unreadable."""
+    """User setting (settings.json in the user data folder); default when missing or unreadable."""
     try:
         with open(settings_file(), encoding="utf-8") as f:
             return json.load(f).get(key, default)
@@ -4626,10 +4637,11 @@ def settings_set(key, value):
 
 
 def mat_user_file():
-    """User database (changes made in the program): materialy.txt in the user data folder."""
+    """User database (changes made in the program): materials_pl.txt in the user data folder."""
     if MAT_USER_OVERRIDE:
         return MAT_USER_OVERRIDE
-    return os.path.join(user_data_dir(), "materialy.txt")
+    d = user_data_dir()
+    return migrate_user_file(os.path.join(d, "materials_pl.txt"), os.path.join(d, "materialy.txt"))
 
 
 def mat_active_file():

@@ -9,7 +9,7 @@ ICONS = os.path.join(ROOT, "build", "icons")              # prepared by build.py
 VERSION = re.search(r'^APP_VERSION = "([^"]+)"', open(os.path.join(ROOT, "kayenn.pyw"), encoding="utf-8").read(),
                     re.M).group(1)
 
-datas = [(os.path.join(ROOT, "kayenn_materialy.txt"), "."),
+datas = [(os.path.join(ROOT, "kayenn_materials_pl.txt"), "."),
          (os.path.join(ROOT, "fonts"), "fonts")]
 for f in os.listdir(os.path.join(ROOT, "branding")):
     if f.endswith((".svg", ".png", ".ico")):

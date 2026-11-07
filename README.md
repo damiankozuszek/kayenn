@@ -1,5 +1,7 @@
 # KAYENN
 
+**English** | [Polski](README.pl.md)
+
 <p align="center"><img src="branding/kayenn_wordmark.svg" alt="KAYENN" width="520"></p>
 
 > [!WARNING]
