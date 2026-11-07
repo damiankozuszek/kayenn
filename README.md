@@ -28,6 +28,10 @@ structural analysis program based on the finite element method (FEM).
 
 ## What it can do
 
+> [!IMPORTANT]
+> All loads KAYENN gives are **characteristic values** – without partial factors γ and combination factors ψ.
+> Design values and combinations of actions (EN 1990) are determined separately by the designer.
+
 ### Code loads
 
 - **Snow** per PN-EN 1991-1-3 with the National Annex – flat, monopitch, duopitch, multispan and cylindrical roofs,

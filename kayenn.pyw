@@ -42,6 +42,14 @@ BG = "#f6f7f9"
 CARD = "#ffffff"
 TEXT = "#2b2f36"
 MUTED = "#6b7280"
+CHAR_NOTE = ("Wszystkie obciążenia podane w programie są wartościami charakterystycznymi – bez współczynników "
+             "częściowych γ i bez współczynników kombinacyjnych ψ. Wartości obliczeniowe i kombinacje oddziaływań "
+             "(PN-EN 1990) należy wyznaczyć odrębnie.")
+
+
+def char_note_html():
+    """Standing information at the end of every report (case card, printout)."""
+    return f"<p style='color:{MUTED}; font-size:8pt; margin:8px 0 0 0;'><i>{html.escape(CHAR_NOTE)}</i></p>"
 ACCENT = "#2563eb"
 ERR_BG = "#fde8e8"
 RO_BG = "#f1f2f4"
@@ -1794,7 +1802,7 @@ def cdir_value(zone, sector):
 
 
 def cpi_mu(hd, mu):
-    """Fig. 7.13 – internal pressure for evenly distributed openings (lines read from the chart):
+    """Fig. 7.13 – internal pressure for evenly distributed openings (straight segments between the key points of the chart):
     h/d ≤ 0.25: +0.35 at μ = 0.33 → −0.30 at μ = 0.9 (then constant); h/d ≥ 1.0: +0.35 → −0.50 at μ = 0.95
     (then constant); in between – linear interpolation (Note to Fig. 7.13)."""
     up = interp(mu, [0.33, 0.9, 1.0], [0.35, -0.30, -0.30])
@@ -1945,12 +1953,12 @@ def canopy_cp(table, alphas, zone, alpha, phi, var):
 
 
 def vault_cpe(fd, hd):
-    """Fig. 7.11 (read from the chart) – vaulted roofs; returns (list of values A, B, C)."""
+    """Fig. 7.11 (straight segments between the key points of the chart) – vaulted roofs; returns (list of values A, B, C)."""
     fd = clamp(fd, 0.05, 0.5)
     a0 = interp(fd, [0.05, 0.5], [0.1, 0.8])
     a5 = []
     if fd <= 0.3:
-        a5.append(interp(fd, [0.05, 0.1, 0.2, 0.3], [-0.95, -1.2, -1.2, -0.35]))
+        a5.append(interp(fd, [0.05, 0.1, 0.2, 0.3], [-0.95, -1.2, -1.2, -0.3]))
     if fd >= 0.2:
         a5.append(interp(fd, [0.2, 0.5], [0.0, 0.8]))
     t = clamp(hd / 0.5, 0, 1)
@@ -1961,14 +1969,14 @@ def vault_cpe(fd, hd):
 
 
 def dome_cpe(fd, hd):
-    """Fig. 7.12 (read from the chart) – domes; returns (A, B, C)."""
+    """Fig. 7.12 (straight segments between the key points of the chart) – domes; returns (A, B, C)."""
     fd = clamp(fd, 0.05, 0.5)
     a_0 = interp(fd, [0.05, 0.5], [0.13, 0.8])
     a_25 = interp(fd, [0.05, 0.5], [-1.4, 0.8])
     a_1 = interp(fd, [0.05, 0.1, 0.335, 0.5], [-1.4, -1.7, -1.4, 0.8])
     A = interp(hd, [0, 0.25, 1.0], [a_0, a_25, a_1])
     B = interp(hd, [0, 0.5], [interp(fd, [0.05, 0.5], [-0.25, -1.2]),
-                              interp(fd, [0.05, 0.1, 0.25, 0.5], [-0.5, -0.78, -1.2, -1.28])])
+                              interp(fd, [0.05, 0.1, 0.25, 0.5], [-0.5, -0.8, -1.2, -1.3])])
     C = interp(hd, [0, 0.5], [0.0, -0.5])
     return A, B, C
 
@@ -2250,7 +2258,7 @@ def calc_wind(g, wp, theta, var):
         cpis = []
     elif ck == 1:                                # (6): no dominant wall, Fig. 7.13
         cpis = [cpi_mu(hd, wp["mu"])]
-        info["cpi_note"] = f"c_pi z Rys. 7.13: h/d = {hd:.3f}, μ = {wp['mu']:g} (odczyt z wykresu)"
+        info["cpi_note"] = f"c_pi z Rys. 7.13: h/d = {hd:.3f}, μ = {wp['mu']:g}"
     elif ck == 2:                                # (5): dominant wall, (7.1), (7.2): cpi = k·cpe of its zone
         zs = [z for z in zones if z["kind"] == "wall" and z["name"] == wp["dom_zone"]]
         ta = sum(z["area"] for z in zs)
@@ -2834,6 +2842,11 @@ ASSUMPTIONS = """\
 KAYENN – ZAŁOŻENIA OBLICZEŃ
 ===========================
 
+WARTOŚCI CHARAKTERYSTYCZNE
+• Wszystkie obciążenia, które podaje program (śnieg, wiatr, użytkowe, własne), są wartościami charakterystycznymi:
+  bez współczynników częściowych γ i bez współczynników kombinacyjnych ψ. Wartości obliczeniowe oraz kombinacje
+  oddziaływań (PN-EN 1990) projektant wyznacza odrębnie.
+
 ŚNIEG – PN-EN 1991-1-3:2005 z poprawkami AC:2009, Ap1:2010
 • s = μᵢ·Cₑ·Cₜ·sₖ (5.2); obciążenie działa pionowo na rzut poziomy dachu.
 • sₖ wg Tablicy NB.1 (strefy 1–5, A – wysokość n.p.m.). Cₑ – Tabl. 5.1; Cₜ = 1,0 lub wzór NB.1
@@ -2911,14 +2924,14 @@ WIATR – PN-EN 1991-1-4:2008 z poprawkami AC:2009, Ap1:2010, Ap2:2010, Ap3:2011
 • Wielospadowe (7.2.7, Rys. 7.10): F/G/J tylko na nawie nawietrznej; kolejne nawy: 0,8·cpe, 0,6·cpe
   (piłokształtny, 1. nawa z cpe > 0: −0,4); θ = 90°: każda nawa jak pojedynczy dach.
   Konfiguracja c) z Rys. 7.10 (kosze z połaciami jednospadowymi na końcach) nie jest modelowana.
-• Łukowe (Rys. 7.11 z AC) i kopuły (Rys. 7.12): cpe,10 ODCZYTANE Z WYKRESÓW (±0,05); ze = h + f;
+• Łukowe (Rys. 7.11 z AC) i kopuły (Rys. 7.12): cpe,10 z węzłów wykresów (odcinki proste); ze = h + f;
   łuk – pola A, B, C = d/4, d/2, d/4, tylko wiatr prostopadły do tworzącej; kopuła – cpe liniowo
   A → B → C wzdłuż łuku. Ściany kopuły (walec, 7.9) nie są liczone.
 • Wiaty (7.3, Tabl. 7.6 z AC i 7.7): cp,net i cf; min. interpolowane liniowo po φ; |α| < 5° dla wiaty
   dwuspadowej → wartości dla ±5°. Siła Fw = cf·qp(ze)·L·d (cs·cd = 1). Środek parcia: d/4 od krawędzi
   nawietrznej (jednospadowa), środki połaci (dwuspadowa); sprawdzić też obciążenie jednej połaci.
 • cpe dla pola A: Rys. 7.2. cpi (7.2.9, nie dotyczy wiat): +0,2 i −0,3 (Uwaga 2) albo z Rys. 7.13 wg wskaźnika
-  otworów μ ≥ 0,33 (odczyt z wykresu: h/d ≤ 0,25 → −0,3 od μ = 0,9; h/d ≥ 1 → −0,5 od μ = 0,95; pomiędzy – interpolacja
+  otworów μ ≥ 0,33 (odcinki proste: h/d ≤ 0,25 → −0,3 od μ = 0,9; h/d ≥ 1 → −0,5 od μ = 0,95; pomiędzy – interpolacja
   liniowa), albo dla ściany dominującej cpi = 0,75·cpe (otwory 2×) … 0,90·cpe (3× i więcej) – cpe pola wybranej
   ściany; program nie dopuszcza dowolnej wartości cpi.
 • Znaki: (+) parcie – w stronę powierzchni (wiaty: ku dołowi), (−) ssanie.
@@ -4862,7 +4875,7 @@ def lab_report(data):
         src_html = ("<p style='margin:6px 0 0 0;'><b>Źródła wartości</b><br>"
                     + "<br>".join(f"[{k + 1}] {esc(x)}" for k, x in enumerate(srcs)) + "</p>")
     return (f"<p style='margin:0 0 4px 0;'><b>Obciążenia własne</b> – zestawienie pozycji</p>"
-            f"<table cellspacing='0' cellpadding='0'>{''.join(rows)}</table>{tot}{src_html}")
+            f"<table cellspacing='0' cellpadding='0'>{''.join(rows)}</table>{tot}{src_html}" + char_note_html())
 
 
 def lab_info(data):
@@ -7635,6 +7648,7 @@ class App:
                 out.append(f'<p style="margin:2px 0 1px 0; color:#92400e;">{esc(it[1])}</p>')
         sb = t.verticalScrollBar()
         pos = sb.value()
+        out.append(char_note_html())
         t.setHtml("".join(out))
         QTimer.singleShot(0, lambda: sb.setValue(pos))     # keep the scroll position
 
@@ -8308,7 +8322,7 @@ class App:
         return (f"<p style='margin:0 0 4px 0;'><b>Obciążenia użytkowe</b> – {html.escape(gt)}<br>"
                 f"Kategoria: {html.escape(self._use_title())}</p>"
                 f"<p style='margin:0 0 4px 0;'>{'<br>'.join(rows)}</p>"
-                f"<p style='color:{MUTED}; margin:0;'>PN-EN 1991-1-1, {html.escape(src)}</p>")
+                f"<p style='color:{MUTED}; margin:0;'>PN-EN 1991-1-1, {html.escape(src)}</p>" + char_note_html())
 
     def _use_state(self):
         e, v, _ = self._use_entry()
@@ -9544,10 +9558,10 @@ class App:
         if "multi" in inf:
             notes.append(inf["multi"])
         if g.kind == "dome":
-            notes.append("Kopuła: cpe liniowo A → B → C wzdłuż łuku (Rys. 7.12, odczyt z wykresu); "
+            notes.append("Kopuła: cpe liniowo A → B → C wzdłuż łuku (Rys. 7.12); "
                          "ściany walcowe (7.9) nie są liczone.")
         if g.kind == "vault":
-            notes.append("Łuk: wartości z Rys. 7.11 (odczyt z wykresu); tylko wiatr ⟂ do tworzącej.")
+            notes.append("Łuk: wartości z Rys. 7.11; tylko wiatr ⟂ do tworzącej.")
         if g.kind == "hip":
             notes.append("Czterospadowy: o wszystkich połaciach decyduje kąt połaci nawietrznej (Uwaga 3).")
         if g.kind == "can2":

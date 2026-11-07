@@ -27,6 +27,10 @@ programem do obliczeń konstrukcji metodą elementów skończonych (MES).
 
 ## Co potrafi
 
+> [!IMPORTANT]
+> Wszystkie obciążenia podawane przez KAYENN to **wartości charakterystyczne** – bez współczynników częściowych γ
+> i kombinacyjnych ψ. Wartości obliczeniowe i kombinacje oddziaływań (PN-EN 1990) projektant wyznacza odrębnie.
+
 ### Obciążenia normowe
 
 - **Śnieg** wg PN-EN 1991-1-3 z Załącznikiem Krajowym – dachy płaskie, jednospadowe, dwuspadowe, wielospadowe
