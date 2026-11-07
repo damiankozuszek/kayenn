@@ -45,13 +45,6 @@ the division into parts below is internal and serves the development of the code
 
 The goal is a program running natively on Linux, Windows and macOS – as simple to start as possible on each.
 
-- ✔ Uniform look: Noto fonts shipped with the program (instead of `Segoe UI` / `Consolas`), Fusion style, own
-  light palette, font sizes computed as at 96 dpi (macOS), menu inside the window also on macOS.
-- ✔ `.kayenn` file association: Windows – installer (registry), macOS – `Info.plist` + FileOpen event,
-  Linux – `.desktop` and MIME type in the `.deb` package.
-- ✔ Tests and packages built in GitHub Actions on Windows, macOS and Linux: `.exe` installer (Inno Setup)
-  and `.zip`, `.dmg`, `.deb` and `.tar.gz`; a trial run of every package with window screenshots.
-- ✔ macOS: separate packages for Apple Silicon (arm64) and Intel processors (x64).
 - Linux: distribution through app stores (e.g. Flathub) or AppImage.
 - Packages without a digital signature (signing involves fixed costs – see 7.2): Windows SmartScreen
   and macOS Gatekeeper show a warning on the first start.
@@ -70,22 +63,12 @@ KAYENN Manager (the main window) is the core module from which the other parts o
 
 ---
 
-## Stage 4. Imposed loads – additions
-
-- ✔ Reduction factors αA (6.1) and αn (6.2) and the equivalent load from partition walls (6.3.1.2(8)).
-
-## Stage 4a. Full compliance of KAYENN Codes with PN-EN 1991-1-1/-3/-4 (review of 2026-11)
-
-Done: wind parameters strictly per the National Annex (qb,0, c_dir by sector, zmax), only code methods for cpi
-(Fig. 7.13, dominant wall), flat roofs with rounded and mansard edges, snow – mean return period (Annex D),
-imposed loads – partitions and reductions. All code tables of chapter 7 (Tables 7.1–7.7) re-checked against the
-current standard (with AC, Ap1–Ap3) – no differences in values.
+## Stage 4. Full compliance of KAYENN Codes with PN-EN 1991-1-1/-3/-4
 
 Still missing to cover the whole scope of the three codes:
 - wind: orography c0 (Annex A), friction forces (7.5, Table 7.10), free-standing walls and parapets (7.4,
   Table 7.9), multi-skin walls and roofs (7.2.10), multispan configuration c) of Fig. 7.10, cylindrical walls of
   vaulted roofs and domes (7.9), cscd (6), structures other than buildings and canopies (7.6–7.13);
-  Fig. 7.11 and 7.12 are read from charts (±0.05) – a table of values would be better;
 - snow: Annex B2 is excluded by the National Annex (NB1.3) – nothing missing; check B3(2) (nearby buildings);
 - imposed loads: forklifts and transport vehicles (6.3.2.3, 6.3.2.4, Tables 6.5, 6.6), barrier impact (Annex B).
 
@@ -96,20 +79,12 @@ Still missing to cover the whole scope of the three codes:
 A part of the program with tools for determining loads by engineering methods – complementing KAYENN Codes,
 which follows the code approach entirely. Opened from the main window, like the code loads.
 
-First tool – **own loads** (available):
-- items entered by hand (area, line, point loads) or from the material database, with dimensions
-  (thickness, width, length), a multiplier and a common-unit check,
-- material database in a text file (Annex A of PN-EN 1991-1-1, steel sections, additional items), edited in the
-  program – items as well as groups and subgroups (names, new groups, indents, order),
-- the user can adjust values when entering items.
-
-Further tools will be added as users need them.
+Own loads are available; further tools will be added as users need them.
 
 ---
 
 ## Stage 6. Languages and foreign codes
 
-- ✔ The language menu in the main window (currently Polish only); the choice is stored in the user settings.
 - Several interface and report languages (Polish as the base language, English first).
 - Extension to countries using Eurocode EN 1991-1 – by supporting their National Annexes (nationally determined
   parameters, load zone maps). The common code basis makes this a fairly natural direction.
