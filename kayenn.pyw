@@ -26,7 +26,7 @@ import os
 import sys
 import time
 
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.1.1"
 # program resources folder (fonts, icons, material database) – also inside the PyInstaller bundle (sys._MEIPASS)
 BASE_DIR = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
 FROZEN = bool(getattr(sys, "frozen", False))
@@ -3000,7 +3000,7 @@ def _no_qt():
 
 
 try:
-    from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, QObject, Signal, QEvent, QSize
+    from PySide6.QtCore import Qt, QTimer, QPoint, QPointF, QRectF, QObject, Signal, QEvent, QSize
     from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QFontMetricsF, QIcon, QKeySequence, QPainter,
                                QPalette, QPen, QPolygonF)
     from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFrame,
@@ -3066,8 +3066,6 @@ QPushButton[menu="true"] {{ padding-right: 24px; }}
 QPushButton#big {{ font-weight: bold; padding: 6px; }}
 QPushButton#expBtn {{ border: 1px solid transparent; background: transparent; padding: 0; border-radius: 4px; }}
 QPushButton#expBtn:hover {{ background: #e8eefb; border-color: #c9d7f5; }}
-QPushButton#linkBtn {{ border: none; background: transparent; color: {ACCENT}; padding: 2px 6px; }}
-QPushButton#linkBtn:hover {{ text-decoration: underline; }}
 QComboBox {{ background: #ffffff; border: 1px solid #b9c0ca; border-radius: 3px; padding: 2px 6px; }}
 QComboBox:hover {{ border-color: {ACCENT}; }}
 QComboBox:disabled {{ background: {RO_BG}; color: #a0a6ae; border-color: #d5d9df; }}
@@ -3086,9 +3084,12 @@ QTabBar::tab:hover {{ color: {ACCENT}; }}
 QTabBar::tab:selected {{ background: {BG}; color: {TEXT}; font-weight: bold; border-color: #c4c9d0; }}
 QFrame#editor {{ background: {BDIM_COL}; border-radius: 3px; }}
 QFrame#card[lifted="true"] {{ border: 2px solid {ACCENT}; }}
+QFrame#card[sel="true"] {{ border: 1px solid {ACCENT}; background: #f3f7ff; }}
 QFrame#dropSlot {{ border: 2px dashed #93b4f5; border-radius: 5px; background: #eef3fe; color: {ACCENT}; }}
 QFrame#caseGroup {{ background: #e9edf3; border: 1px solid #d3d8df; border-radius: 5px; }}
 QFrame#caseGroup[lifted="true"] {{ border: 2px solid {ACCENT}; }}
+QFrame#caseGroup[sel="true"] {{ background: #dbe6fd; border: 1px solid {ACCENT}; }}
+QFrame#caseGroup:focus {{ border: 1px solid {ACCENT}; }}
 QFrame#caseGroup QLabel {{ background: transparent; }}
 QLabel#groupTitle {{ font-weight: bold; font-size: 10pt; }}
 QLabel#caseNum {{ font-weight: bold; }}
@@ -3099,16 +3100,10 @@ QFrame#tile:hover {{ border-color: #93b4f5; }}
 QFrame#tile[sel="true"] {{ border: 2px solid {ACCENT}; background: #f3f7ff; }}
 QFrame#tile QLabel {{ background: transparent; }}
 QFrame#tile[lifted="true"] {{ border: 2px dashed {ACCENT}; background: #eef3fe; }}
-QFrame#matHead[sel="true"] {{ background: #e8eefb; border-radius: 4px; }}
-QFrame#matHead[lifted="true"] {{ background: #eef3fe; border: 2px dashed {ACCENT}; border-radius: 4px; }}
 QLabel#dragHandle {{ color: #6b7280; font-size: 12pt; }}
 QLabel#dropSlot {{ border: 2px dashed #93b4f5; border-radius: 4px; background: #eef3fe; color: {ACCENT};
                    font-size: 8.5pt; }}
 QLabel#tileName {{ font-size: 10.5pt; font-weight: bold; }}
-QPushButton#groupHead {{ text-align: left; font-weight: bold; font-size: 10.5pt; padding: 6px 4px;
-                         border: none; border-bottom: 1px solid #d9dde3; border-radius: 0; background: transparent; }}
-QPushButton#catHead {{ text-align: left; font-size: 10pt; padding: 4px; border: none; background: transparent; }}
-QPushButton#groupHead:hover, QPushButton#catHead:hover {{ color: {ACCENT}; }}
 """
 
 
@@ -3555,6 +3550,8 @@ class EditorLine(QLineEdit):
             self._esc()
             return
         super().keyPressEvent(e)
+        if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            e.accept()                               # (QLineEdit ignores Enter – the group behind would take it)
 
     def focusOutEvent(self, e):
         super().focusOutEvent(e)
@@ -3892,8 +3889,8 @@ class CaseCard(QFrame):
         hd.addWidget(self.handle)
         self.btn_exp = QPushButton()
         self.btn_exp.setObjectName("expBtn")
-        self.btn_exp.setFixedSize(30, 28)
-        self.btn_exp.setIconSize(QSize(20, 20))
+        self.btn_exp.setFixedSize(24, 22)                # the same size as the group chevrons everywhere
+        self.btn_exp.setIconSize(QSize(14, 14))
         self.btn_exp.setToolTip("Rozwiń / zwiń")
         self._set_exp_icon(False)
         self.btn_exp.clicked.connect(lambda checked=False: self.toggle())
@@ -3966,8 +3963,13 @@ class CaseCard(QFrame):
         a2 = m.addAction("Zakończ edycję" if any(self.case is e for e in self.app.edited_cases()) else "Edytuj")
         a4 = m.addAction("Duplikuj")
         a3 = m.addAction("Usuń")
+        m.addSeparator()
+        ids = self.pw.menu_ids(self.case)
+        a5 = m.addAction("Utwórz grupę" if len(ids) == 1 else f"Utwórz grupę z zaznaczonych ({len(ids)})")
         act = m.exec(self.mapToGlobal(pos))
-        if act is a4:
+        if act is a5:
+            self.pw.group_cases(ids)
+        elif act is a4:
             self.pw.duplicate_case(self.case)
         if act is a1:
             self.rename()
@@ -3975,6 +3977,20 @@ class CaseCard(QFrame):
             self.pw.edit_case(self.case)
         elif act is a3:
             self.pw.delete_case(self.case)
+
+    def mousePressEvent(self, e):
+        """Click selects the case (Ctrl – adds / removes, Shift – the range from the last clicked one)."""
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.pw.card_clicked(self, e.modifiers())
+            e.accept()                               # (otherwise the list behind the card clears the selection)
+            return
+        super().mousePressEvent(e)
+
+    def set_selected(self, on):
+        if bool(self.property("sel")) != bool(on):
+            self.setProperty("sel", bool(on))
+            self.style().unpolish(self)
+            self.style().polish(self)
 
     def rename(self):
         self.name.setVisible(False)
@@ -4038,7 +4054,8 @@ class CaseCard(QFrame):
             self.setStyleSheet(f"QFrame#card {{ margin-left: {depth * CASE_INDENT}px; }}" if depth else "")
 
     def _set_exp_icon(self, opened):
-        self.btn_exp.setIcon(QIcon(chevron_pixmap("down" if opened else "right", ACCENT if opened else "#374151")))
+        self.btn_exp.setIcon(QIcon(chevron_pixmap("down" if opened else "right", ACCENT if opened else "#374151",
+                                                  16, 2.0)))
 
     def set_open(self, opened):
         """Expands / collapses the card (Rozwiń wszystko / Zwiń wszystko)."""
@@ -4311,6 +4328,11 @@ class CaseList(QWidget):
         self.lay.insertWidget(idx, card)
         self.pw.place_case(card, idx)
 
+    def mousePressEvent(self, ev):
+        if hasattr(self.pw, "clear_selection"):
+            self.pw.clear_selection()
+        super().mousePressEvent(ev)
+
     def paintEvent(self, ev):
         """Empty project: watermark – KAYENN wordmark in the bottom right corner."""
         if not self.watermark or getattr(self.pw, "cards", None):
@@ -4442,6 +4464,18 @@ def ptree_load(data):
     return out
 
 
+def group_chevron(opened, on_click):
+    """Expand / collapse button of a group header (Manager and material database – the same size)."""
+    b = QPushButton()
+    b.setObjectName("expBtn")
+    b.setFixedSize(24, 22)
+    b.setIconSize(QSize(14, 14))
+    b.setToolTip("Rozwiń / zwiń")
+    b.setIcon(QIcon(chevron_pixmap("down" if opened else "right", ACCENT if opened else "#374151", 16, 2.0)))
+    b.clicked.connect(lambda checked=False: on_click())
+    return b
+
+
 class CaseGroupHeader(QFrame):
     """Header of a group of cases in the main window: ⠿ handle (dragging the whole group), expand / collapse,
     number and name (inline renaming), number of cases; right click – Zmień nazwę, Nowa podgrupa, Rozgrupuj,
@@ -4463,13 +4497,7 @@ class CaseGroupHeader(QFrame):
         self.handle.mouseReleaseEvent = self._drag_release
         self._drag_start = None
         h.addWidget(self.handle)
-        b = QPushButton()
-        b.setObjectName("expBtn")
-        b.setFixedSize(30, 28)
-        b.setIconSize(QSize(20, 20))
-        b.setIcon(QIcon(chevron_pixmap("down" if node.get("open", True) else "right",
-                                       ACCENT if node.get("open", True) else "#374151")))
-        b.clicked.connect(lambda checked=False: pw.toggle_group(node))
+        b = group_chevron(node.get("open", True), lambda: pw.toggle_group(node))
         h.addWidget(b)
         self.btn_exp = b
         self.title = QLabel(f"{num} {node['name']}")
@@ -4478,14 +4506,20 @@ class CaseGroupHeader(QFrame):
         self.title.mouseDoubleClickEvent = lambda e: self.start_rename()
         h.addWidget(self.title)
         self.edit = EditorLine(self._rename_cancel, self._rename_done)
-        self.edit.returnPressed.connect(self._rename_done)
+        self.edit.returnPressed.connect(lambda: self._rename_done(True))
         self.edit.setVisible(False)
         h.addWidget(self.edit)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)      # Enter on the group – expand / collapse
         self.count = QLabel(f"({count})")
         self.count.setObjectName("muted")
         h.addWidget(self.count, 1)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(lambda pos: pw.group_menu(self, self.mapToGlobal(pos)))
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.pw.clear_selection()
+        super().mousePressEvent(e)
 
     def start_rename(self):
         self.title.setVisible(False)
@@ -4494,14 +4528,25 @@ class CaseGroupHeader(QFrame):
         self.edit.setFocus()
         self.edit.selectAll()
 
-    def _rename_done(self):
+    def _rename_done(self, enter=False):
+        """Enter (enter=True) confirms – also the default name – and leaves the focus on the group, so that the next
+        Enter expands / collapses it; clicking away only confirms."""
         if not self.edit.isVisible():
             return
         self.edit.setVisible(False)
         self.title.setVisible(True)
         t = " ".join(self.edit.text().split())
         if t and t != self.node["name"]:
-            QTimer.singleShot(0, lambda: self.pw.rename_group(self.node, t))
+            QTimer.singleShot(0, lambda: self.pw.rename_group(self.node, t, focus=enter))
+        elif enter:
+            self.setFocus()
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.pw.toggle_group(self.node)
+            self.pw.focus_group(self.node)
+            return
+        super().keyPressEvent(e)
 
     def _rename_cancel(self):
         self.edit.setVisible(False)
@@ -4649,12 +4694,56 @@ def settings_set(key, value):
         pass
 
 
-def mat_user_file():
-    """User database (changes made in the program): materials_pl.txt in the user data folder."""
+def mat_legacy_file():
+    """The first user database: materials_pl.txt in the user data folder (tests: MAT_USER_OVERRIDE)."""
     if MAT_USER_OVERRIDE:
         return MAT_USER_OVERRIDE
     d = user_data_dir()
     return migrate_user_file(os.path.join(d, "materials_pl.txt"), os.path.join(d, "materialy.txt"))
+
+
+MAT_BASE_NAME = "Baza użytkownika"
+
+
+def mat_bases():
+    """User material databases (the one bundled with the program is read-only and not on the list; a user
+    database is its editable copy): ([{id, name, file}, …], id of the default one). The list is kept in
+    materials_index.json next to the first database; without it – one database „Baza użytkownika”."""
+    legacy = mat_legacy_file()
+    d = os.path.dirname(legacy)
+    bases, default = [], None
+    try:
+        with open(os.path.join(d, "materials_index.json"), encoding="utf-8") as f:
+            data = json.load(f)
+        for b in data["bases"]:
+            bases.append(dict(id=str(b["id"]), name=str(b["name"]), file=os.path.join(d, str(b["file"]))))
+        default = data.get("default")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        bases = []
+    if not bases:
+        bases = [dict(id="user", name=MAT_BASE_NAME, file=legacy)]
+    if default not in [b["id"] for b in bases]:
+        default = bases[0]["id"]
+    return bases, default
+
+
+def mat_bases_save(bases, default):
+    d = os.path.dirname(mat_legacy_file())
+    data = dict(default=default, bases=[dict(id=b["id"], name=b["name"], file=os.path.basename(b["file"]))
+                                        for b in bases])
+    try:
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "materials_index.json"), "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+        return True
+    except OSError:
+        return False
+
+
+def mat_user_file():
+    """File of the default user database (where changes are saved)."""
+    bases, default = mat_bases()
+    return next(b["file"] for b in bases if b["id"] == default)
 
 
 def mat_active_file():
@@ -4666,7 +4755,7 @@ def mat_active_file():
 def mat_sync():
     """Bundled database newer than the user copy (program update): new bundled items (different category
     or name) are appended to the copy; user changes stay. Returns the number of appended items."""
-    u = mat_user_file()
+    u = mat_legacy_file()                            # (only the first user database follows the bundled one)
     try:
         if not os.path.exists(u) or os.path.getmtime(MAT_DEFAULT) <= os.path.getmtime(u):
             return 0
@@ -5182,7 +5271,10 @@ class LabRow(QFrame):
 
     def _added(self, mat):
         if self.win._db is not None:
-            self.win._db.load(mat_active_file())
+            if self.win._db.dirty():                     # unsaved changes there – the item is added to them too
+                self.win._db.add_loaded(mat)
+            else:
+                self.win._db.load(mat_active_file())
         self.win.info_msg(f"Dodano do bazy materiałów: „{mat['name']}” ({mat['value']} {mat['unit']}, "
                           f"kategoria „{mat['cat']}”).")
 
@@ -5632,6 +5724,8 @@ class MaterialTile(QFrame):
         self.lay.setSpacing(2)
         self.view = None
         self.form = None
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(lambda pos: self.dlg.tile_menu(self, self.mapToGlobal(pos)))
         self.show_view()
 
     def show_view(self):
@@ -5658,7 +5752,9 @@ class MaterialTile(QFrame):
         nm = QLabel(html.escape(it["name"]))
         nm.setObjectName("tileName")
         nm.setWordWrap(True)
+        nm.mouseDoubleClickEvent = lambda e: self.rename()       # double-click on the name – rename (as in Manager)
         col.addWidget(nm)
+        self.col, self.nm, self._ed = col, nm, None
         val = QLabel(f"<b>{html.escape(mat_value_text(it['value'], it['unit']))}</b>")
         col.addWidget(val)
         if it.get("src"):
@@ -5679,6 +5775,38 @@ class MaterialTile(QFrame):
             self.view.hide()
             self.view.deleteLater()
         self.view = v
+
+    def rename(self):
+        """Inline renaming of the item (double-click on its name); Enter / click away – saves, Esc – cancels."""
+        if self.form is not None or self._ed is not None:
+            return
+        self.dlg.select(self.key)
+        ed = EditorLine(self._rename_cancel, self._rename_done)
+        ed.setText(self.dlg.mats[self.key]["name"])
+        ed.returnPressed.connect(self._rename_done)
+        self._ed = ed
+        self.nm.setVisible(False)
+        self.col.insertWidget(0, ed)
+        ed.setFocus()
+        ed.selectAll()
+
+    def _rename_cancel(self):
+        ed, self._ed = self._ed, None
+        if ed is not None:
+            ed.hide()
+            ed.deleteLater()
+            self.nm.setVisible(True)
+
+    def _rename_done(self):
+        ed = self._ed
+        if ed is None:
+            return
+        t = " ".join(ed.text().split()).replace(";", ",")
+        self._rename_cancel()
+        it = self.dlg.mats[self.key]
+        if t and t != it["name"]:
+            it["name"] = t
+            QTimer.singleShot(0, lambda: (self.dlg.save(), self.dlg.rebuild(select=self.key)))
 
     def edit(self):
         """Edit form inside the tile: name, value (or range from–to), unit, category, source."""
@@ -5756,13 +5884,16 @@ class MaterialTile(QFrame):
         self.dlg.rebuild(select=self.key)
 
     def set_selected(self, on):
-        self.setProperty("sel", bool(on))
-        self.style().unpolish(self)
-        self.style().polish(self)
+        if bool(self.property("sel")) != bool(on):
+            self.setProperty("sel", bool(on))
+            self.style().unpolish(self)
+            self.style().polish(self)
 
     def mousePressEvent(self, e):
-        self.dlg.select(self.key)
-        super().mousePressEvent(e)
+        """Click selects (Ctrl – adds / removes, Shift – range from the last clicked row)."""
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.dlg.click_entry(("i", self.key), e.modifiers())
+        e.accept()
 
     def mouseDoubleClickEvent(self, e):
         if self.form is None:
@@ -5781,17 +5912,20 @@ MAT_INDENT = 18                                          # px per level of the d
 
 
 class MatHeader(QFrame):
-    """Header of a unit group (fixed – follows from the unit) or of a group / subgroup in the material database:
-    ⠿ handle (dragging – groups only), expand / collapse, inline renaming; right-click menu – what dragging cannot
-    do (unit: Nowa grupa; group: Zmień nazwę, Nowa podgrupa, Usuń grupę)."""
+    """Header of a unit group (fixed – follows from the unit) or of a group / subgroup in the material database,
+    a tile like the group header in Manager: ⠿ handle (dragging – groups only), expand / collapse button (the only
+    way to expand), name (double-click – inline renaming) and the number of items; right-click menu – what dragging
+    cannot do (unit: Nowa grupa; group: Zmień nazwę, Nowa podgrupa, Usuń grupę)."""
 
-    def __init__(self, dlg, kind, e, path, text, level, opened):
+    def __init__(self, dlg, kind, e, path, name, count, level, opened):
         super().__init__()
         self.dlg, self.kind, self.e, self.path = dlg, kind, e, path
-        self.setObjectName("matHead")
+        self.setObjectName("caseGroup")
+        if level:
+            self.setStyleSheet(f"QFrame#caseGroup {{ margin-left: {level * MAT_INDENT}px; }}")
         h = QHBoxLayout(self)
-        h.setContentsMargins(level * MAT_INDENT, 0, 0, 0)
-        h.setSpacing(2)
+        h.setContentsMargins(8, 3, 8, 3)
+        h.setSpacing(4)
         self.handle = QLabel("⠿")
         self.handle.setObjectName("dragHandle")
         self.handle.setFixedWidth(16)
@@ -5800,47 +5934,72 @@ class MatHeader(QFrame):
         else:
             self.handle.setText("")
         h.addWidget(self.handle)
-        b = QPushButton(" " + text)
-        b.setIcon(QIcon(chevron_pixmap("down" if opened else "right", "#374151", 16, 2.0)))
-        b.setIconSize(QSize(14, 14))
-        b.setObjectName("groupHead" if kind == "unit" else "catHead")
-        b.setCursor(Qt.CursorShape.PointingHandCursor)
-        b.clicked.connect(lambda checked=False: dlg.header_clicked(self))
-        h.addWidget(b, 1)
-        self.btn = b
+        self.btn = group_chevron(opened, lambda: dlg.header_clicked(self))
+        h.addWidget(self.btn)
+        self.title = QLabel(name)
+        self.title.setTextFormat(Qt.TextFormat.PlainText)
+        self.title.setObjectName("groupTitle")
+        self.title.mouseDoubleClickEvent = lambda ev: self.start_rename()
+        h.addWidget(self.title)
         self.edit = EditorLine(self._rename_cancel, self._rename_done)
-        self.edit.returnPressed.connect(self._rename_done)
+        self.edit.returnPressed.connect(lambda: self._rename_done(True))
         self.edit.setVisible(False)
-        h.addWidget(self.edit, 1)
+        h.addWidget(self.edit)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)      # Enter on the group – expand / collapse
+        cl = QLabel(f"({count})")
+        cl.setObjectName("muted")
+        h.addWidget(cl, 1)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(lambda pos: dlg.row_menu(self, self.mapToGlobal(pos)))
 
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton:
+            if self.kind == "group":
+                self.dlg.click_entry(("g", self.e, self.path), ev.modifiers())
+            else:
+                self.dlg.clear_msel()
+        ev.accept()
+
     def set_flag(self, name, on):
-        self.setProperty(name, bool(on))
-        self.style().unpolish(self)
-        self.style().polish(self)
+        if bool(self.property(name)) != bool(on):
+            self.setProperty(name, bool(on))
+            self.style().unpolish(self)
+            self.style().polish(self)
 
     def start_rename(self):
         if self.kind != "group":
             return
-        self.btn.setVisible(False)
+        self.title.setVisible(False)
         self.edit.setText(self.path[-1])
         self.edit.setVisible(True)
         self.edit.setFocus()
         self.edit.selectAll()
 
-    def _rename_done(self):
+    def _rename_done(self, enter=False):
+        """Enter confirms (also the default name) and leaves the focus on the group – the next Enter expands /
+        collapses it; clicking away only confirms."""
         if not self.edit.isVisible():
             return
         self.edit.setVisible(False)
-        self.btn.setVisible(True)
+        self.title.setVisible(True)
         t = self.edit.text()
         if mat_clean_group(t) and mat_clean_group(t) != self.path[-1]:
-            QTimer.singleShot(0, lambda: self.dlg.rename_group(self.e, self.path, t))
+            QTimer.singleShot(0, lambda: self.dlg.rename_group(self.e, self.path, t, focus=enter))
+        elif enter:
+            self.setFocus()
+
+    def keyPressEvent(self, ev):
+        if ev.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):         # group or load family (unit)
+            self.dlg.header_clicked(self)
+            hd = self.dlg.heads.get((self.e, self.path))
+            if hd is not None:
+                hd.setFocus()
+            return
+        super().keyPressEvent(ev)
 
     def _rename_cancel(self):
         self.edit.setVisible(False)
-        self.btn.setVisible(True)
+        self.title.setVisible(True)
 
 
 class MaterialDialog(QDialog):
@@ -5868,6 +6027,9 @@ class MaterialDialog(QDialog):
         self.tiles, self.heads, self.rows = {}, {}, []
         self._auto = set()                               # subgroups created by an indent (e, path)
         self._drag = None
+        self.msel = set()                                # selected rows: ("i", key) / ("g", e, path)
+        self._anchor = None                              # the row a Shift+click range starts from
+        self._force, self._mgr = False, None
         self.hist = History()
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 10, 10, 10)
@@ -5894,14 +6056,32 @@ class MaterialDialog(QDialog):
         mb = QPushButton("Plik bazy")
         mb.setProperty("menu", True)
         m = QMenu(mb)
-        m.addAction("Wczytaj bazę z pliku…").triggered.connect(lambda checked=False: self.import_file())
-        m.addAction("Zapisz bazę do pliku…").triggered.connect(lambda checked=False: self.export_file())
+        self.act_save = m.addAction("Zapisz do bazy")
+        self.act_save.triggered.connect(lambda checked=False: self.commit())
+        m.addAction("Zarządzaj bazami materiałów…").triggered.connect(lambda checked=False: self.open_bases())
         m.addSeparator()
-        m.addAction("Przywróć bazę domyślną").triggered.connect(lambda checked=False: self.restore_default())
+        m.addAction("Wczytaj z pliku…").triggered.connect(lambda checked=False: self.import_file())
+        m.addAction("Zapisz kopię do pliku…").triggered.connect(lambda checked=False: self.export_file())
+        m.addSeparator()
+        m.addAction("Przywróć zawartość bazy domyślnej programu").triggered.connect(
+            lambda checked=False: self.restore_default())
         mb.setMenu(m)
         top.addWidget(mb)
         self.btn_file = mb
+        self.hist.listeners.append(self._dirty_changed)
         lay.addLayout(top)
+        bar = QHBoxLayout()                              # Rozwiń wszystko / Zwiń wszystko, Usuń zaznaczone
+        bar.setSpacing(4)
+        b = QPushButton("Zwiń wszystko")                 # (no „Rozwiń wszystko” – the list is too long)
+        b.clicked.connect(lambda checked=False: self.set_all_open(False))
+        bar.addWidget(b)
+        bar.addStretch(1)
+        self.btn_del_sel = QPushButton("Usuń zaznaczone")
+        self.btn_del_sel.setToolTip("Usuwa zaznaczone pozycje i grupy (razem z zawartością)")
+        self.btn_del_sel.clicked.connect(lambda checked=False: self.delete_selected())
+        self.btn_del_sel.setVisible(False)
+        bar.addWidget(self.btn_del_sel)
+        lay.addLayout(bar)
         sc = QScrollArea()
         sc.setWidgetResizable(True)
         sc.setFrameShape(QFrame.Shape.NoFrame)
@@ -5916,6 +6096,7 @@ class MaterialDialog(QDialog):
         self._hold = None
         sc.verticalScrollBar().rangeChanged.connect(self._apply_hold)
         sc.verticalScrollBar().actionTriggered.connect(lambda a_: setattr(self, "_hold", None))   # user scrolls
+        self.inner.mousePressEvent = lambda ev: self.clear_msel()      # click on empty space – no selection
         self.slot = QLabel("", self.inner)              # drop place while dragging
         self.slot.setObjectName("dropSlot")
         self.slot.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -5948,10 +6129,12 @@ class MaterialDialog(QDialog):
             self._put(it)
         self.path = path
         self.sel_key = self.sel_group = None
+        self.msel, self._anchor = set(), None
         if reset:
             self.hist.reset(self._snap())
         else:
             self.hist.push(self._snap())
+        self._dirty_changed()
         self.rebuild()
         n = sum(1 for it in items if not it.get("empty"))
         self._status(f"{n} pozycji" + (f" (pominięto błędne wiersze: {bad})" if bad else ""))
@@ -5977,25 +6160,79 @@ class MaterialDialog(QDialog):
     def _snap(self):
         return [dict(self.mats[k]) for k in self.order]
 
-    def _write(self):
+    def dirty(self):
+        return not self.hist.at_saved()
+
+    def base_name(self):
+        bases, default = mat_bases()
+        return next(b["name"] for b in bases if b["id"] == default)
+
+    def _dirty_changed(self):
+        """Title with an asterisk and the Zapisz do bazy item while there are unsaved changes."""
+        d = self.dirty()
+        if hasattr(self, "act_save"):
+            self.act_save.setEnabled(d)
+        self.setWindowTitle("Baza materiałów – " + self.base_name() + (" *" if d else ""))
+
+    def save(self):
+        """A change of the database: a Cofnij step. NOT written to the file – only Zapisz do bazy writes it."""
+        self.hist.push(self._snap())
+        self._status("zmiany niezapisane (Plik bazy → Zapisz do bazy)")
+
+    def commit(self):
+        """Plik bazy → Zapisz do bazy: the default user database file is written."""
         p = mat_user_file()
         try:
             mat_save(p, [self.mats[k] for k in self.order])
-            self.path = p
-            return True
         except OSError as e:
             QMessageBox.warning(self, "Baza materiałów", f"Nie można zapisać bazy:\n{p}\n{e}")
             return False
+        self.path = p
+        self.hist.mark_saved()
+        self._dirty_changed()
+        self._status("zapisano do bazy")
+        return True
 
-    def save(self):
-        """Every change is saved to the user database (the bundled database stays untouched) and becomes
-        a Cofnij step."""
-        self._write()
-        self.hist.push(self._snap())
-        self._status("zapisano zmiany")
+    def confirm_close(self):
+        """Unsaved changes – question „Zapisać do bazy?” (Cancel – stay). True – may close."""
+        if not self.dirty():
+            return True
+        B = QMessageBox.StandardButton
+        r = QMessageBox.question(self, "Baza materiałów", f"Zapisać zmiany w bazie „{self.base_name()}”?",
+                                 B.Yes | B.No | B.Cancel, B.Yes)
+        if r == B.Cancel:
+            return False
+        if r == B.Yes:
+            return self.commit()
+        return True
+
+    def closeEvent(self, e):
+        if self._force or self.confirm_close():
+            e.accept()
+        else:
+            e.ignore()
+
+    def reject(self):
+        self.close()
+
+    def keyPressEvent(self, e):
+        """Enter on a selected item (focus in the list) – Dodaj (the item goes to the own-loads panel)."""
+        if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and \
+                not isinstance(self.focusWidget(), (QLineEdit, QPushButton, MatHeader)):
+            if self.current_key() is not None and len(self.msel) == 1:
+                self.add()
+            elif self.sel_group and self.sel_group[1] and len(self.msel) == 1 and self.sel_group in self.heads:
+                hd = self.heads[self.sel_group]
+                self.header_clicked(hd)
+                hd = self.heads.get(self.sel_group)
+                if hd is not None:
+                    hd.setFocus()
+            e.accept()
+            return
+        super().keyPressEvent(e)
 
     def undo(self, redo=False):
-        """Cofnij / Ponów – the previous / next state of the database (also saved to the user file)."""
+        """Cofnij / Ponów – the previous / next state of the database (not written to the file)."""
         if not (self.hist.can_redo() if redo else self.hist.can_undo()):
             return
         st = self.hist.redo() if redo else self.hist.undo()
@@ -6003,19 +6240,41 @@ class MaterialDialog(QDialog):
         self.mats, self.order = {}, []
         for it in st:
             self._put(dict(it))
-        self._write()
         self.sel_key = next((k for k in self.order if sel and self.mats[k]["name"] == sel["name"]
                              and self.mats[k]["unit"] == sel["unit"]), None)
+        self._dirty_changed()
         self.rebuild()
         self._status("przywrócono następny stan" if redo else "cofnięto zmianę")
 
     def redo(self):
         self.undo(redo=True)
 
+    def switch_base(self):
+        """The default database changed (Zarządzaj bazami materiałów): the new one is loaded."""
+        self.load(mat_active_file())
+
+    def open_bases(self):
+        if self._mgr is not None:
+            self._mgr.raise_()
+            self._mgr.activateWindow()
+            return self._mgr
+        d = MatBasesDialog(self)
+        d.destroyed.connect(lambda *a: setattr(self, "_mgr", None))
+        self._mgr = d
+        d.show()
+        return d
+
+    def add_loaded(self, mat):
+        """An item added to the database file from outside (Dodaj do bazy) while this window has unsaved changes."""
+        idx = max((i for i, k in enumerate(self.order) if self.mats[k]["cat"] == mat["cat"]),
+                  default=len(self.order) - 1)
+        self._put(dict(mat), after=self.order[idx] if self.order else None)
+        self.hist.push(self._snap())
+        self.rebuild()
+
     def _status(self, extra=""):
-        src = "baza użytkownika" if os.path.normcase(os.path.abspath(self.path)) == \
-            os.path.normcase(os.path.abspath(mat_user_file())) else "baza domyślna programu"
-        self.status.setText(f"Plik: {self.path} ({src})" + (f" – {extra}" if extra else ""))
+        self.status.setText(f"Baza: {self.base_name()} · plik: {self.path}"
+                            + (" · zmiany niezapisane" if self.dirty() else "") + (f" – {extra}" if extra else ""))
 
     # --- view
     def matches(self):
@@ -6041,6 +6300,7 @@ class MaterialDialog(QDialog):
         header to rename at once (a new group); keep – the list stays where it was (False – new search)."""
         if select is not None:
             self.sel_key, self.sel_group = select, None
+            self.msel = {("i", select)}
         self._end_drag(apply=False)
         sb = self.scroll.verticalScrollBar()
         pos = sb.value() if keep else 0
@@ -6064,7 +6324,7 @@ class MaterialDialog(QDialog):
             if hit is not None and not r["ch"]:
                 continue
             g_open = auto or e in self.open_groups
-            self._add_row(MatHeader(self, "unit", e, (), f"{LAB_GROUPS[e]}  ({count(r)})", 0, g_open),
+            self._add_row(MatHeader(self, "unit", e, (), LAB_GROUPS[e], count(r), 0, g_open),
                           "unit", e, (), None, 0, g_open)
             if g_open:
                 self._add_children(r, (), 1, auto)
@@ -6079,25 +6339,52 @@ class MaterialDialog(QDialog):
         self.vl.addStretch(1)
         # the list stays in place (does not jump to the top): the position is held while the rebuilt list
         # settles its height (like keep_view in the main window)
-        self._hold = (pos, time.monotonic() + 0.6)
+        self._hold = (pos, time.monotonic() + 1.0)
         self.vl.activate()
         self._apply_hold()
-        for ms in (0, 50, 200):
+        for ms in (0, 50, 200, 500, 900):
             QTimer.singleShot(ms, self._apply_hold)
         if self.sel_key not in self.mats:
             self.sel_key = None
         t = self.tiles.get(self.sel_key)
-        if t is not None:
-            t.set_selected(True)
-            if select is not None:
-                QTimer.singleShot(0, lambda: self.scroll.ensureWidgetVisible(t, 50, 80))
-        hd = self.heads.get(self.sel_group)
-        if hd is not None:
-            hd.set_flag("sel", True)
-        self.btn_add.setEnabled(t is not None)
+        valid = {("i", k) for k in self.tiles} | {("g", e_, p_) for (e_, p_) in self.heads if p_}
+        self.msel &= valid                               # selection only among visible rows
+        if not self.msel:
+            if t is not None:
+                self.msel = {("i", self.sel_key)}
+            elif self.sel_group in self.heads and self.sel_group[1]:
+                self.msel = {("g",) + tuple(self.sel_group)}
+        self._paint_sel()
+        if t is not None and select is not None:
+            self._reveal(t)
         if rename is not None and rename in self.heads:
             h = self.heads[rename]
-            QTimer.singleShot(0, lambda: (self.scroll.ensureWidgetVisible(h, 50, 80), h.start_rename()))
+            self._reveal(h)
+            QTimer.singleShot(0, h.start_rename)
+
+    def _reveal(self, w):
+        """Scrolls the list to w only when it is really outside the view – and after the list has settled (a widget
+        not yet laid out sits at y = 0, scrolling to it threw the list to the top)."""
+        def go():
+            try:
+                sb, vh = self.scroll.verticalScrollBar(), self.scroll.viewport().height()
+                want = self._hold[0] if self._hold else sb.value()      # (the bar itself may be clamped for a moment)
+                if not w.isVisible() or w.height() <= 1 or sb.maximum() < want:
+                    return                                    # list not settled yet – the next timer
+                y = w.mapTo(self.inner, QPoint(0, 0)).y()
+                nv = want
+                if y < want:
+                    nv = max(y - 20, 0)
+                elif y + w.height() > want + vh:
+                    nv = y + w.height() - vh + 20
+                if nv != want:
+                    if self._hold:
+                        self._hold = (nv, self._hold[1])
+                    sb.setValue(nv)
+            except RuntimeError:                              # widget replaced in the meantime
+                pass
+        for ms in (60, 250, 600):
+            QTimer.singleShot(ms, go)
 
     def _apply_hold(self, *args):
         h = getattr(self, "_hold", None)
@@ -6122,7 +6409,7 @@ class MaterialDialog(QDialog):
             if c["kind"] == "group":
                 p = path + (c["name"],)
                 opened = auto or CAT_SEP.join(p) in self.open_cats
-                self._add_row(MatHeader(self, "group", c["e"], p, f"{c['name']}  ({count(c)})", level, opened),
+                self._add_row(MatHeader(self, "group", c["e"], p, c["name"], count(c), level, opened),
                               "group", c["e"], p, None, level, opened)
                 if opened:
                     self._add_children(c, p, level + 1, auto)
@@ -6136,29 +6423,173 @@ class MaterialDialog(QDialog):
         for i in range(len(path)):
             self.open_cats.add(CAT_SEP.join(path[:i + 1]))
 
+    # --- selection (click; Ctrl – add / remove; Shift – range from the last clicked row)
+    def _entry(self, r):
+        return ("i", r["key"]) if r["kind"] == "item" else ("g", r["e"], r["path"])
+
+    def click_entry(self, entry, mods):
+        ctrl = bool(mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier))
+        order = [self._entry(r) for r in self.rows if r["kind"] != "unit"]
+        if mods & Qt.KeyboardModifier.ShiftModifier and self._anchor in order and entry in order:
+            a, b = sorted((order.index(self._anchor), order.index(entry)))
+            rng = set(order[a:b + 1])
+            self.msel = (self.msel | rng) if ctrl else rng
+        elif ctrl:
+            self.msel ^= {entry}
+            self._anchor = entry
+        else:
+            self.msel = {entry}
+            self._anchor = entry
+        if entry in self.msel:
+            if entry[0] == "i":
+                self.sel_key, self.sel_group = entry[1], None
+            else:
+                self.sel_key, self.sel_group = None, tuple(entry[1:])
+        else:
+            if entry[0] == "i" and self.sel_key == entry[1]:
+                self.sel_key = None
+            if entry[0] == "g" and self.sel_group == tuple(entry[1:]):
+                self.sel_group = None
+        hd = self.heads.get((entry[1], entry[2])) if entry[0] == "g" else None
+        (hd or self.inner).setFocus()                    # a group keeps the focus – Enter expands / collapses it
+        self._paint_sel()
+
+    def clear_msel(self):
+        if self.msel:
+            self.msel = set()
+            self.sel_key = self.sel_group = None
+            self._paint_sel()
+
+    def _paint_sel(self):
+        for k, t in self.tiles.items():
+            t.set_selected(("i", k) in self.msel)
+        for (e, path), h in self.heads.items():
+            if path:
+                h.set_flag("sel", ("g", e, path) in self.msel)
+        self.btn_add.setEnabled(self.current_key() is not None and len(self.msel) == 1)
+        self.btn_del_sel.setVisible(bool(self.msel))
+
+    def set_all_open(self, opened):
+        """Rozwiń wszystko / Zwiń wszystko – all groups of the database."""
+        if opened:
+            self.open_groups = {3, 2, 1, 0}
+            self.open_cats = {CAT_SEP.join(p) for (e, p) in self._tree()[1]}
+        else:
+            self.open_groups, self.open_cats = set(), set()
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self.rebuild()
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def _sel_nodes(self, tree, e=None):
+        """Selected rows as nodes of the tree (list order); a node inside another selected group is dropped;
+        e – only nodes of that unit group."""
+        roots, groups, items = tree
+        nodes = []
+        for en in self.msel:
+            nd = items.get(en[1]) if en[0] == "i" else groups.get((en[1], en[2]))
+            if nd is not None and (e is None or nd["e"] == e):
+                nodes.append(nd)
+        ids = {id(n) for n in nodes}
+
+        def inside(n):
+            par = n["parent"]
+            while par is not None:
+                if id(par) in ids:
+                    return True
+                par = par["parent"]
+            return False
+        nodes = [n for n in nodes if not inside(n)]
+        order = {}
+
+        def walk(n):
+            for c in n["ch"]:
+                order[id(c)] = len(order)
+                walk(c)
+        for r_ in roots.values():
+            walk(r_)
+        return sorted(nodes, key=lambda n: order.get(id(n), 0))
+
+    def group_selected(self):
+        """Utwórz podgrupę z zaznaczonych: a new subgroup at the place of the first selected row, the selected
+        items / groups move into it (one unit group only); its name is edited at once."""
+        tree = self._tree()
+        roots = tree[0]
+        nodes = self._sel_nodes(tree)
+        if not nodes:
+            return None
+        es = {n["e"] for n in nodes}
+        if len(es) > 1:
+            QMessageBox.warning(self, "Baza materiałów", "Zaznaczone pozycje należą do różnych grup obciążeń "
+                                "(jednostek) – nie można ich połączyć w jedną podgrupę.")
+            return None
+        par = nodes[0]["parent"]
+        moved = {id(n) for n in nodes}
+        pos = sum(1 for c in par["ch"][:par["ch"].index(nodes[0])] if id(c) not in moved)
+        for n in nodes:
+            n["parent"]["ch"].remove(n)
+        g = self._new_group_node(par, "Nowa podgrupa", nodes)
+        par["ch"].insert(pos, g)
+        self._unique(g)
+        self._open_path(g["e"], self._path(g))
+        self._finish(roots, g, rename=g)
+        return (g["e"], self._path(g))
+
+    def delete_selected(self):
+        """Usuń zaznaczone: items and whole groups (with their contents); question."""
+        tree = self._tree()
+        roots = tree[0]
+        nodes = self._sel_nodes(tree)
+        if not nodes:
+            return False
+
+        def count(n):
+            return 1 if n["kind"] == "item" else sum(count(c) for c in n["ch"])
+        n_items = sum(count(n) for n in nodes)
+        n_groups = sum(1 for n in nodes if n["kind"] == "group")
+        B = QMessageBox.StandardButton
+        txt = f"Usunąć zaznaczone z bazy: pozycje – {n_items}" + (f", w tym grupy – {n_groups} (razem z zawartością)"
+                                                                if n_groups else "") + "?"
+        if QMessageBox.question(self, "Baza materiałów", txt, B.Yes | B.No, B.No) != B.Yes:
+            return False
+        for n in nodes:
+            n["parent"]["ch"].remove(n)
+        self.msel, self.sel_key, self.sel_group = set(), None, None
+        self._apply_tree(roots)
+        self.rebuild()
+        return True
+
+    def tile_menu(self, tile, gpos):
+        """Right click on a tile: Utwórz podgrupę (from the selection), Usuń zaznaczone."""
+        from PySide6.QtWidgets import QMenu
+        if ("i", tile.key) not in self.msel:
+            self.click_entry(("i", tile.key), Qt.KeyboardModifier.NoModifier)
+        n = len(self.msel)
+        m = QMenu(self)
+        m.addAction("Utwórz podgrupę" if n == 1 else f"Utwórz podgrupę z zaznaczonych ({n})").triggered.connect(
+            lambda checked=False: self.group_selected())
+        if n > 1:
+            m.addAction(f"Usuń zaznaczone ({n})").triggered.connect(lambda checked=False: self.delete_selected())
+        m.exec(gpos)
+
+    def select(self, key):
+        self.msel, self._anchor = {("i", key)}, ("i", key)
+        self.sel_key, self.sel_group = key, None
+        if key in self.tiles:
+            self.inner.setFocus()
+        self._paint_sel()
+
     def header_clicked(self, hd):
-        """Click on a header: selects it and expands / collapses."""
+        """Chevron button of a header: selects it and expands / collapses (the only way to expand)."""
         self.sel_group, self.sel_key = (hd.e, hd.path), None
+        self.msel = {("g", hd.e, hd.path)} if hd.kind == "group" else set()
         if hd.kind == "unit":
             self.open_groups ^= {hd.e}
         else:
             self.open_cats ^= {CAT_SEP.join(hd.path)}
         self.inner.setFocus()
         self.rebuild()
-
-    def select(self, key):
-        old = self.tiles.get(self.sel_key)
-        if old is not None:
-            old.set_selected(False)
-        hd = self.heads.get(self.sel_group)
-        if hd is not None:
-            hd.set_flag("sel", False)
-        self.sel_key, self.sel_group = key, None
-        t = self.tiles.get(key)
-        if t is not None:
-            t.set_selected(True)
-            self.inner.setFocus()
-        self.btn_add.setEnabled(t is not None)
 
     def current_key(self):
         return self.sel_key if self.sel_key in self.tiles else None
@@ -6234,6 +6665,7 @@ class MaterialDialog(QDialog):
 
     def _finish(self, roots, node, old_open=None, rename=None):
         """After a change of the structure: saved, the moved node visible (and selected), its expansion kept."""
+        self.msel = set()
         if node["kind"] == "group":
             new = CAT_SEP.join(self._path(node))
             if old_open is not None:
@@ -6278,8 +6710,9 @@ class MaterialDialog(QDialog):
         self._finish(roots, g, rename=g)
         return (hd.e, self._path(g))
 
-    def rename_group(self, e, path, name):
-        """Zmień nazwę grupy / podgrupy (with its subgroups); False – invalid name."""
+    def rename_group(self, e, path, name, focus=False):
+        """Zmień nazwę grupy / podgrupy (with its subgroups); False – invalid name. focus – the group keeps the
+        keyboard focus (Enter in the name field)."""
         name = mat_clean_group(name)
         roots, groups, items = self._tree()
         g = groups.get((e, tuple(path)))
@@ -6289,6 +6722,9 @@ class MaterialDialog(QDialog):
         g["name"] = name
         self._unique(g)
         self._finish(roots, g, old)
+        hd = self.heads.get(self.sel_group)
+        if focus and hd is not None:
+            hd.setFocus()
         return True
 
     def delete_group(self, hd):
@@ -6311,11 +6747,23 @@ class MaterialDialog(QDialog):
     # --- right-click menu (only what dragging cannot do)
     def row_menu(self, w, gpos):
         from PySide6.QtWidgets import QMenu
-        self.sel_group, self.sel_key = (w.e, w.path), None
+        if w.kind == "group":
+            if ("g", w.e, w.path) not in self.msel:
+                self.click_entry(("g", w.e, w.path), Qt.KeyboardModifier.NoModifier)
+        else:
+            self.sel_group, self.sel_key, self.msel = (w.e, w.path), None, set()
+            self._paint_sel()
+        n = len(self.msel)
         m = QMenu(self)
-        acts = [("Nowa grupa", lambda: self.new_group(w))] if w.kind == "unit" else \
-            [("Zmień nazwę", w.start_rename), ("Nowa podgrupa", lambda: self.new_group(w)),
-             ("Usuń grupę", lambda: self.delete_group(w))]
+        if w.kind == "unit":
+            acts = [("Nowa grupa", lambda: self.new_group(w))]
+        else:
+            acts = [("Zmień nazwę", w.start_rename), ("Nowa podgrupa", lambda: self.new_group(w))]
+            if n > 1:
+                acts.append((f"Utwórz podgrupę z zaznaczonych ({n})", self.group_selected))
+                acts.append((f"Usuń zaznaczone ({n})", self.delete_selected))
+            else:
+                acts.append(("Usuń grupę", lambda: self.delete_group(w)))
         for txt, fn in acts:
             m.addAction(txt).triggered.connect(lambda checked=False, fn=fn: fn())
         m.exec(gpos)
@@ -6452,8 +6900,17 @@ class MaterialDialog(QDialog):
             sib.insert(sib.index(n) + 1, x)
             x["parent"] = n["parent"]
         else:                                            # wrap – a new subgroup with only x after the item n
+            many = [nd for nd in self._sel_nodes(tree, x["e"]) if nd is not x] \
+                if x["kind"] == "item" and ("i", x["key"]) in self.msel else []
+            many = [nd for nd in many if nd is not n] if len(self.msel) > 1 else []
             sib = n["parent"]["ch"]
-            g = self._new_group_node(n["parent"], "Nowa podgrupa", [x])
+            if many:                                     # the selected rows go together (x stays in its order)
+                allx = [x] + many
+                for nd in many:
+                    nd["parent"]["ch"].remove(nd)
+                g = self._new_group_node(n["parent"], "Nowa podgrupa", allx)
+            else:
+                g = self._new_group_node(n["parent"], "Nowa podgrupa", [x])
             sib.insert(sib.index(n) + 1, g)
             self._unique(g)
             self._auto.add((x["e"], self._path(g)))
@@ -6511,8 +6968,9 @@ class MaterialDialog(QDialog):
 
     def add(self):
         k = self.current_key()
-        if k is None:
+        if k is None or not self.confirm_close():
             return
+        self._force = True
         self.chosen.emit(dict(self.mats[k]))
         self.close()
 
@@ -6556,18 +7014,301 @@ class MaterialDialog(QDialog):
 
     def restore_default(self):
         B = QMessageBox.StandardButton
-        if QMessageBox.question(self, "Baza materiałów", "Przywrócić bazę domyślną programu? Zmiany wprowadzone "
-                                "w bazie (nowe, zmienione i usunięte pozycje) zostaną zastąpione – można to "
-                                "cofnąć (Cofnij).", B.Yes | B.No, B.No) != B.Yes:
-            return
-        u = mat_user_file()
-        try:
-            if os.path.exists(u):
-                os.remove(u)
-        except OSError as e:
-            QMessageBox.warning(self, "Baza materiałów", f"Nie można usunąć pliku:\n{u}\n{e}")
+        if QMessageBox.question(self, "Baza materiałów", "Wstawić do bieżącej bazy zawartość bazy dostarczonej z "
+                                "programem? Zmiany wprowadzone w bazie (nowe, zmienione i usunięte pozycje) "
+                                "zostaną zastąpione – można to cofnąć (Cofnij), a do pliku trafią dopiero po "
+                                "Zapisz do bazy.", B.Yes | B.No, B.No) != B.Yes:
             return
         self.load(MAT_DEFAULT, reset=False)
+        self.path = mat_user_file()
+        self._status("przywrócono zawartość bazy programu – zmiany niezapisane")
+
+
+class MatBaseTile(QFrame):
+    """Tile of a user material database in the database manager: ⠿ (order), name (double-click or right-click –
+    rename), Ustaw jako domyślną, Duplikuj, Usuń."""
+
+    def __init__(self, dlg, b, default, last):
+        super().__init__()
+        self.dlg, self.b = dlg, b
+        self.setObjectName("tile")
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(lambda pos: dlg.tile_menu(self, self.mapToGlobal(pos)))
+        h = QHBoxLayout(self)
+        h.setContentsMargins(10, 6, 8, 6)
+        h.setSpacing(8)
+        self.handle = QLabel("⠿")
+        self.handle.setObjectName("dragHandle")
+        self.handle.setFixedWidth(12)
+        self.handle.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.handle.setToolTip("Przeciągnij: kolejność baz")
+        self.handle.mousePressEvent = lambda e: dlg.drag_press(self, e)
+        self.handle.mouseMoveEvent = lambda e: dlg.drag_move(self, e)
+        self.handle.mouseReleaseEvent = lambda e: dlg.drag_release(self, e)
+        h.addWidget(self.handle, 0, Qt.AlignmentFlag.AlignTop)
+        self.col = QVBoxLayout()
+        self.col.setSpacing(1)
+        self.title = QLabel(b["name"])
+        self.title.setTextFormat(Qt.TextFormat.PlainText)
+        self.title.setObjectName("tileName")
+        self.title.mouseDoubleClickEvent = lambda e: self.rename()
+        self.col.addWidget(self.title)
+        info = QLabel("Plik: " + b["file"])
+        info.setObjectName("muted")
+        info.setWordWrap(True)
+        self.col.addWidget(info)
+        h.addLayout(self.col, 1)
+        self._ed = None
+        self.btn_def = QPushButton("Domyślna" if default else "Ustaw jako domyślną")
+        self.btn_def.setEnabled(not default)
+        self.btn_def.clicked.connect(lambda checked=False: dlg.set_default(b["id"]))
+        self.btn_dup = QPushButton("Duplikuj")
+        self.btn_dup.clicked.connect(lambda checked=False: dlg.duplicate(b["id"]))
+        self.btn_del = QPushButton("Usuń")
+        self.btn_del.setEnabled(not last)
+        self.btn_del.setToolTip("Ostatniej bazy nie można usunąć" if last else "")
+        self.btn_del.clicked.connect(lambda checked=False: dlg.delete(b["id"]))
+        for w in (self.btn_def, self.btn_dup, self.btn_del):
+            h.addWidget(w, 0, Qt.AlignmentFlag.AlignTop)
+
+    def set_selected(self, on):
+        if bool(self.property("sel")) != bool(on):
+            self.setProperty("sel", bool(on))
+            self.style().unpolish(self)
+            self.style().polish(self)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.dlg.select(self.b["id"])
+        e.accept()
+
+    def rename(self):
+        if self._ed is not None:
+            return
+        ed = EditorLine(self._cancel, self._done)
+        ed.setText(self.b["name"])
+        ed.returnPressed.connect(self._done)
+        self._ed = ed
+        self.title.setVisible(False)
+        self.col.insertWidget(0, ed)
+        ed.setFocus()
+        ed.selectAll()
+
+    def _cancel(self):
+        ed, self._ed = self._ed, None
+        if ed is not None:
+            ed.hide()
+            ed.deleteLater()
+            self.title.setVisible(True)
+
+    def _done(self):
+        ed = self._ed
+        if ed is None:
+            return
+        t = " ".join(ed.text().split())
+        self._cancel()
+        if t and t != self.b["name"]:
+            QTimer.singleShot(0, lambda: self.dlg.rename(self.b["id"], t))
+
+
+class MatBasesDialog(QDialog):
+    """Plik bazy → Zarządzaj bazami materiałów: tiles of the user databases (the database bundled with the program
+    is read-only and not on the list – a user database is its editable copy). Choosing the default database,
+    renaming (double-click / right click), Duplikuj, Usuń (the last one cannot be deleted), order by the ⠿ handle.
+    Changes of the list are saved at once; the contents of a database – only by Zapisz do bazy."""
+
+    def __init__(self, owner):
+        super().__init__(owner)
+        self.owner = owner
+        self.setWindowTitle("Zarządzanie bazami materiałów")
+        self.setModal(False)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.resize(720, 420)
+        self.sel = None
+        self.tiles, self._drag = [], None
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(8)
+        hint = QLabel("Baza dostarczona z programem jest tylko do odczytu – bazy użytkownika są jej edytowalnymi "
+                      "kopiami. Baza domyślna jest tą, którą pokazuje okno bazy materiałów i do której trafiają "
+                      "pozycje dodawane z obciążeń własnych. Duplikat powstaje z zapisanego pliku bazy.")
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+        sc = QScrollArea()
+        sc.setWidgetResizable(True)
+        sc.setFrameShape(QFrame.Shape.NoFrame)
+        self.inner = QWidget()
+        self.inner.setObjectName("page")
+        self.vl = QVBoxLayout(self.inner)
+        self.vl.setContentsMargins(0, 0, 4, 0)
+        self.vl.setSpacing(4)
+        sc.setWidget(self.inner)
+        lay.addWidget(sc, 1)
+        self.refresh()
+
+    def refresh(self):
+        self.bases, self.default = mat_bases()
+        while self.vl.count():
+            w = self.vl.takeAt(0).widget()
+            if w is not None:
+                w.hide()
+                w.deleteLater()
+        self.tiles = []
+        for b in self.bases:
+            t = MatBaseTile(self, b, b["id"] == self.default, len(self.bases) <= 1)
+            t.set_selected(b["id"] == self.sel)
+            self.vl.addWidget(t)
+            self.tiles.append(t)
+        self.vl.addStretch(1)
+
+    def _save(self):
+        mat_bases_save(self.bases, self.default)
+
+    def select(self, bid):
+        self.sel = bid
+        for t in self.tiles:
+            t.set_selected(t.b["id"] == bid)
+
+    def _get(self, bid):
+        return next(b for b in self.bases if b["id"] == bid)
+
+    def _unique_name(self, name, bid=None):
+        names = {b["name"] for b in self.bases if b["id"] != bid}
+        out, n = name, 2
+        while out in names:
+            out, n = f"{name} ({n})", n + 1
+        return out
+
+    def rename(self, bid, name):
+        self._get(bid)["name"] = self._unique_name(name, bid)
+        self._save()
+        self.refresh()
+        self.owner._dirty_changed()
+        self.owner._status()
+
+    def set_default(self, bid):
+        if bid == self.default or not self.owner.confirm_close():     # unsaved changes – question first
+            return False
+        self.default = bid
+        self._save()
+        self.owner.switch_base()
+        self.refresh()
+        return True
+
+    def duplicate(self, bid):
+        import shutil
+        src = self._get(bid)
+        used = {b["id"] for b in self.bases}
+        n = 1
+        while f"b{n}" in used:
+            n += 1
+        nid = f"b{n}"
+        dst = os.path.join(os.path.dirname(mat_legacy_file()), f"materials_{nid}.txt")
+        try:
+            shutil.copyfile(src["file"] if os.path.exists(src["file"]) else MAT_DEFAULT, dst)
+        except OSError as e:
+            QMessageBox.warning(self, "Bazy materiałów", f"Nie można skopiować bazy:\n{e}")
+            return None
+        nb = dict(id=nid, name=self._unique_name(f"{src['name']} - kopia"), file=dst)
+        self.bases.insert(self.bases.index(src) + 1, nb)
+        self._save()
+        self.sel = nid
+        self.refresh()
+        return nid
+
+    def delete(self, bid):
+        if len(self.bases) <= 1:
+            return False
+        b = self._get(bid)
+        B = QMessageBox.StandardButton
+        if QMessageBox.question(self, "Bazy materiałów", f"Usunąć bazę „{b['name']}” wraz z jej plikiem?"
+                                + (" Niezapisane zmiany w niej przepadną." if bid == self.default else ""),
+                                B.Yes | B.No, B.No) != B.Yes:
+            return False
+        try:
+            if os.path.exists(b["file"]):
+                os.remove(b["file"])
+        except OSError as e:
+            QMessageBox.warning(self, "Bazy materiałów", f"Nie można usunąć pliku:\n{e}")
+            return False
+        self.bases.remove(b)
+        was_default = bid == self.default
+        if was_default:
+            self.default = self.bases[0]["id"]
+        self._save()
+        if was_default:
+            self.owner.switch_base()
+        if self.sel == bid:
+            self.sel = None
+        self.refresh()
+        return True
+
+    def tile_menu(self, tile, gpos):
+        from PySide6.QtWidgets import QMenu
+        self.select(tile.b["id"])
+        m = QMenu(self)
+        acts = [("Zmień nazwę", tile.rename)]
+        if tile.b["id"] != self.default:
+            acts.append(("Ustaw jako domyślną", lambda: self.set_default(tile.b["id"])))
+        acts.append(("Duplikuj", lambda: self.duplicate(tile.b["id"])))
+        if len(self.bases) > 1:
+            acts.append(("Usuń", lambda: self.delete(tile.b["id"])))
+        for txt, fn in acts:
+            m.addAction(txt).triggered.connect(lambda checked=False, fn=fn: fn())
+        m.exec(gpos)
+
+    # --- order: the ⠿ handle moves the tile
+    def drag_press(self, tile, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._drag = dict(tile=tile, start=e.globalPosition().toPoint(), on=False)
+
+    def drag_move(self, tile, e):
+        d = self._drag
+        if d is None or d["tile"] is not tile:
+            return
+        gp = e.globalPosition().toPoint()
+        if not d["on"]:
+            if (gp - d["start"]).manhattanLength() < 5:
+                return
+            d["on"] = True
+            QApplication.setOverrideCursor(Qt.CursorShape.ClosedHandCursor)
+        if d.get("slot") is None:                        # as in the other lists: the tile is lifted, the others make room
+            geo = tile.geometry()
+            slot = QLabel("")
+            slot.setObjectName("dropSlot")
+            slot.setFixedHeight(tile.height())
+            idx = self.vl.indexOf(tile)
+            self.vl.removeWidget(tile)
+            self.vl.insertWidget(idx, slot)
+            tile.setGeometry(geo)
+            tile.setStyleSheet(f"QFrame#tile {{ border: 2px solid {ACCENT}; }}")
+            tile.raise_()
+            d.update(slot=slot, off=self.inner.mapFromGlobal(gp).y() - geo.y())
+        y = clamp(self.inner.mapFromGlobal(gp).y(), 0, self.inner.height())
+        tile.move(tile.x(), int(y - d["off"]))
+        idx = sum(1 for t in self.tiles if t is not tile and t.y() + t.height() / 2 < y)
+        if self.vl.indexOf(d["slot"]) != idx:
+            self.vl.removeWidget(d["slot"])
+            self.vl.insertWidget(idx, d["slot"])
+            self.vl.activate()
+            tile.raise_()
+
+    def drag_release(self, tile, e):
+        d, self._drag = self._drag, None
+        if d is None or not d["on"]:
+            return
+        QApplication.restoreOverrideCursor()
+        idx = self.vl.indexOf(d["slot"])
+        self.vl.removeWidget(d["slot"])
+        d["slot"].hide()
+        d["slot"].deleteLater()
+        tile.setStyleSheet("")
+        self.vl.insertWidget(idx, tile)
+        self.vl.activate()
+        self.tiles.sort(key=lambda t: self.vl.indexOf(t))
+        self.bases = [t.b for t in self.tiles]
+        self._save()
 
 
 class ProjectWindow(QWidget):
@@ -6601,11 +7342,16 @@ class ProjectWindow(QWidget):
         bh.setSpacing(4)
         for txt, on in (("Rozwiń wszystko", True), ("Zwiń wszystko", False)):
             b = QPushButton(txt)
-            b.setObjectName("linkBtn")
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(lambda checked=False, on=on: self.set_all_open(on))
             bh.addWidget(b)
         bh.addStretch(1)
+        self.btn_del_sel = QPushButton("Usuń zaznaczone")        # visible while any case is selected
+        self.btn_del_sel.setToolTip("Usuwa zaznaczone przypadki")
+        self.btn_del_sel.clicked.connect(lambda checked=False: self.delete_selected())
+        self.btn_del_sel.setVisible(False)
+        bh.addWidget(self.btn_del_sel)
+        self.sel = set()                             # selected cases (ids; only visible ones)
+        self._anchor = None                          # the case a Shift+click range starts from
         self.list_bar.setVisible(False)
         lay.addWidget(self.list_bar)
         sc = QScrollArea()
@@ -6747,6 +7493,75 @@ class ProjectWindow(QWidget):
         self.empty.setVisible(not self.cards)
         self.list_bar.setVisible(bool(self.cards))
         self.list.update()                           # watermark of an empty project
+        self._apply_sel()
+
+    # --- selection of cases (click; Ctrl – add / remove; Shift – range from the last clicked)
+    def _apply_sel(self):
+        """Selection limited to the visible cases (a collapsed group never hides a selected case that a bulk
+        action could delete); look of the cards and the Usuń zaznaczone button."""
+        vis = {r["node"]["case"] for r in self.rows if "case" in r["node"]}
+        self.sel &= vis
+        if self._anchor not in vis:
+            self._anchor = None
+        for c in self.cards:
+            c.set_selected(c.case["id"] in self.sel)
+        self.btn_del_sel.setVisible(bool(self.sel))
+
+    def clear_selection(self):
+        if self.sel:
+            self.sel = set()
+            self._apply_sel()
+
+    def card_clicked(self, card, mods):
+        cid = card.case["id"]
+        ctrl = bool(mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier))
+        vis = [r["node"]["case"] for r in self.rows if "case" in r["node"]]
+        if mods & Qt.KeyboardModifier.ShiftModifier and self._anchor in vis and cid in vis:
+            a, b = sorted((vis.index(self._anchor), vis.index(cid)))
+            rng = set(vis[a:b + 1])
+            self.sel = (self.sel | rng) if ctrl else rng
+        elif ctrl:
+            self.sel ^= {cid}
+            self._anchor = cid
+        else:
+            self.sel = {cid}
+            self._anchor = cid
+        self._apply_sel()
+
+    def menu_ids(self, case):
+        """Cases the right-click menu of a card acts on: the selection when the card belongs to it, else the card."""
+        return set(self.sel) if case["id"] in self.sel and len(self.sel) > 1 else {case["id"]}
+
+    def group_cases(self, ids):
+        """Utwórz grupę: a new group „Grupa przypadków” at the place of the first of the cases (in list order);
+        the cases move into it (the rest of the list stays ungrouped); the name is edited at once."""
+        tree = self.app.project["tree"]
+        nodes = [n for n, _, _, _ in ptree_walk(tree) if "case" in n and n["case"] in ids]
+        if not nodes:
+            return None
+        lst = self._list_of(nodes[0])
+        moved = {id(n) for n in nodes}
+        pos = sum(1 for n in lst[:lst.index(nodes[0])] if id(n) not in moved)
+        for n in nodes:
+            self._list_of(n).remove(n)
+        g = ptree_new_group(tree, items=nodes)
+        lst.insert(pos, g)
+        self.sel = set()
+        self.keep_view(self.relayout)
+        self.app.project_changed()
+        self.rename_new(g)
+        return g
+
+    def delete_selected(self):
+        cases = [c for c in self.app.project["cases"] if c["id"] in self.sel]
+        if not cases:
+            return
+        B = QMessageBox.StandardButton
+        if QMessageBox.question(self, "Usuń zaznaczone", f"Usunąć zaznaczone przypadki ({len(cases)}) z projektu?",
+                                B.Yes | B.No, B.No) != B.Yes:
+            return
+        self.sel = set()
+        self.remove_cases(cases)
 
     # --- groups of cases (structure by dragging; right-click on a group header)
     def drop_options(self, xr, a_row, b_row, dx):
@@ -6755,6 +7570,7 @@ class ProjectWindow(QWidget):
         opts = []
         if a_row is None:
             opts.append((0, "first", None))
+            opts.append((1, "wrap", None))           # even the first case: a new group at the top
         else:
             a = a_row["node"]
             if "group" in a:
@@ -6774,17 +7590,31 @@ class ProjectWindow(QWidget):
         return next(lst for n, lst, _, _ in ptree_walk(self.app.project["tree"]) if n is node)
 
     def drop_row(self, xr, opt):
-        """After dragging: the node of the row xr at the place opt. „wrap” (to the right of a case) – a new group
-        „Grupa przypadków” with only this node; the cases right above it at that level go into another new group
-        (the level then holds groups only, numbers 1.1, 1.2 … / 2.1)."""
+        """After dragging: the node of the row xr at the place opt. „wrap” (to the right of a case, also of the
+        first one) – a new group „Grupa przypadków” with only this node; the other cases stay ungrouped."""
         if opt is None:
             self.relayout()
             return
         tree = self.app.project["tree"]
         x = xr["node"]
         lvl, act, n = opt
-        self._list_of(x).remove(x)
-        if act == "first":
+        many = act == "wrap" and "case" in x and x["case"] in self.sel and len(self.sel) > 1
+        newg = None
+        if many:                                     # all the selected cases into one new group
+            moved = [nd for nd, _, _, _ in ptree_walk(tree) if "case" in nd and nd["case"] in self.sel]
+            lst = tree if n is None else self._list_of(n)
+            pos = 0 if n is None else lst.index(n) + 1
+            pos -= sum(1 for nd in lst[:pos] if any(nd is m_ for m_ in moved))
+            for nd in moved:
+                self._list_of(nd).remove(nd)
+            newg = ptree_new_group(tree, items=moved)
+            lst.insert(pos, newg)
+            self.sel = set()
+        else:
+            self._list_of(x).remove(x)
+        if many:
+            pass
+        elif act == "first":
             tree.insert(0, x)
         elif act == "into":
             n["items"].insert(0, x)
@@ -6793,19 +7623,18 @@ class ProjectWindow(QWidget):
         elif act == "after":
             lst = self._list_of(n)
             lst.insert(lst.index(n) + 1, x)
-        else:                                        # wrap
-            lst = self._list_of(n)
-            i = lst.index(n)
-            j = i
-            while j > 0 and "case" in lst[j - 1]:
-                j -= 1
-            g1 = ptree_new_group(tree, items=lst[j:i + 1])
-            lst[j:i + 1] = [g1]
-            g2 = ptree_new_group(tree, items=[x])
-            lst.insert(j + 1, g2)
+        else:                                        # wrap – only the dragged node gets a group
+            g = newg = ptree_new_group(tree, items=[x])
+            if n is None:
+                tree.insert(0, g)
+            else:
+                lst = self._list_of(n)
+                lst.insert(lst.index(n) + 1, g)
         self.keep_view(self.relayout)
         self.app.project_changed()
         self.update_buttons()
+        if newg is not None:
+            self.rename_new(newg)                    # the new group – name edited at once
 
     def move_case(self, cid, idx):
         """The case cid before the case now at position idx of the list (its group), idx ≥ number – at the end."""
@@ -6839,11 +7668,24 @@ class ProjectWindow(QWidget):
             m.addAction(txt).triggered.connect(lambda checked=False, fn=fn: fn())
         m.exec(gpos)
 
-    def rename_group(self, node, name):
+    def rename_group(self, node, name, focus=False):
         node["name"] = name
         node["auto"] = False                         # named by the user – stays even when emptied
         self.keep_view(self.relayout)
         self.app.project_changed()
+        if focus:
+            self.focus_group(node)
+
+    def focus_group(self, node):
+        hd = next((h for h in self.heads if h.node is node), None)
+        if hd is not None:
+            hd.setFocus()
+
+    def rename_new(self, g):
+        """A new group: its name is edited at once (Enter keeps the default name)."""
+        hd = next((h for h in self.heads if h.node is g), None)
+        if hd is not None:
+            QTimer.singleShot(0, hd.start_rename)
 
     def new_subgroup(self, node):
         g = ptree_new_group(self.app.project["tree"], auto=False)
@@ -6951,18 +7793,23 @@ class ProjectWindow(QWidget):
         if QMessageBox.question(self, "Usuń przypadek", f"Usunąć „{case['name']}” z projektu?",
                                 B.Yes | B.No, B.No) != B.Yes:
             return
-        self.app.project["cases"].remove(case)
-        card = self.card_of(case)
-        if card is not None:
-            self.cards.remove(card)
-            self.list.lay.removeWidget(card)
-            card.hide()
-            card.deleteLater()
+        self.remove_cases([case])
+
+    def remove_cases(self, cases):
+        """Removes cases from the project (cards, editing of them ends without saving); the list stays in place."""
         ed, lw = self.app.editor, getattr(self.app, "lab_ed", None)
-        if ed is not None and ed.editing is case:
-            ed.end_edit(save=False)
-        if lw is not None and lw.editing is case:
-            lw.end_edit(save=False)
+        for case in cases:
+            self.app.project["cases"].remove(case)
+            card = self.card_of(case)
+            if card is not None:
+                self.cards.remove(card)
+                self.list.lay.removeWidget(card)
+                card.hide()
+                card.deleteLater()
+            if ed is not None and ed.editing is case:
+                ed.end_edit(save=False)
+            if lw is not None and lw.editing is case:
+                lw.end_edit(save=False)
         self.keep_view(self.relayout)
         self.app.project_changed()
 
@@ -7869,6 +8716,10 @@ class App:
             return False
         if not self._ask_save():
             return False
+        for lw in (getattr(self, "lab", None), getattr(self, "lab_ed", None)):
+            db = getattr(lw, "_db", None)             # material database with unsaved changes – the question
+            if db is not None and not db.confirm_close():
+                return False
         self._quitting = True
         for app in (self.editor, self):
             if app is None:
