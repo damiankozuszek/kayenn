@@ -83,5 +83,6 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: packaging/*
+          files: release/*              # the artifacts are downloaded to release/ (not packaging/)
+          fail_on_unmatched_files: true # without this a wrong path silently gave a release with only the source code
           draft: true

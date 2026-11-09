@@ -65,12 +65,11 @@ KAYENN Manager (the main window) is the core module from which the other parts o
 
 ## Stage 4. Full compliance of KAYENN Codes with PN-EN 1991-1-1/-3/-4
 
-Still missing to cover the whole scope of the three codes:
-- wind: orography c0 (Annex A), friction forces (7.5, Table 7.10), free-standing walls and parapets (7.4,
-  Table 7.9), multi-skin walls and roofs (7.2.10), multispan configuration c) of Fig. 7.10, cylindrical walls of
-  vaulted roofs and domes (7.9), cscd (6), structures other than buildings and canopies (7.6–7.13);
-- snow: Annex B2 is excluded by the National Annex (NB1.3) – nothing missing; check B3(2) (nearby buildings);
-- imposed loads: forklifts and transport vehicles (6.3.2.3, 6.3.2.4, Tables 6.5, 6.6), barrier impact (Annex B).
+Buildings and canopies are covered completely (orography, cscd, friction, parapets, multi-skin walls, multispan
+configuration c, cylindrical walls of domes; snow guards, B3(2), B4(5); forklifts, transport vehicles, barriers).
+Still outside the scope – structures other than buildings:
+- wind: free-standing walls and signboards (7.4.1, 7.4.3), structural elements and sections (7.6–7.13: rectangular,
+  polygonal, circular cylinders, spheres, lattice structures, flags), bridges (8).
 
 ---
 

@@ -23,6 +23,7 @@ import html
 import json
 import math
 import os
+import re
 import sys
 import time
 
@@ -47,6 +48,158 @@ CHAR_NOTE = ("Wszystkie obciążenia podane w programie są wartościami charakt
              "(PN-EN 1990) należy wyznaczyć odrębnie.")
 
 
+def basis_html(ref):
+    """The „Podstawa” line of a result: the fragment of the code the value comes from."""
+    return (f'<br><span style="color:{ACCENT}; font-size:8pt;">Podstawa: {html.escape(ref)}</span>')
+
+
+# Fragments of PN-EN 1991-1-3 for the results of the snow load (after „PN-EN 1991-1-3, ”)
+SNOW_SHAPE_REF = {
+    "flat": "5.3.2, Tabl. 5.2 (μ₁ dla dachu płaskiego); 6.2 (zaspy przy przeszkodach)",
+    "mono": "5.3.2, Tabl. 5.2, Rys. 5.2",
+    "duo": "5.3.3, Tabl. 5.2, Rys. 5.3",
+    "multi": "5.3.4, Tabl. 5.2, Rys. 5.4; Załącznik krajowy, NB1.9 (μ₂ dla połaci > 60°)",
+    "vault": "5.3.5, Rys. 5.6",
+    "abut": "5.3.6, wzory (5.5)–(5.7), Rys. 5.7",
+    "obst": "6.2, Rys. 6.1 (zaspy przy attykach i przeszkodach)",
+}
+SNOW_ACC_REF = "Załącznik B (zaspy wyjątkowe), B3 – dachy przy wyższych budowlach, B4 – przy przeszkodach i attykach; " \
+               "Załącznik krajowy, NB1.10, NB1.11"
+SNOW_CASE_REF = {
+    "flat": "5.3.2", "mono": "5.3.2, Rys. 5.2", "duo": "5.3.3, Rys. 5.3", "multi": "5.3.4, Rys. 5.4",
+    "vault": "5.3.5, Rys. 5.6", "abut": "5.3.6, Rys. 5.7", "obst": "6.2, Rys. 6.1",
+}
+# Fragments of PN-EN 1991-1-4 for the results of the wind load
+WIND_CPI_REF = ("(6), Uwaga 2 (wartości +0,2 i −0,3)", "(6), Rys. 7.13 (wskaźnik otworów μ)",
+                "(5), wzory (7.1), (7.2) (ściana dominująca)")
+WIND_CPE_REF = {   # pressure coefficients cpe of the summary table
+    "flat": "7.2.2, Tabl. 7.1 (ściany); 7.2.3, Tabl. 7.2 (dach płaski), Rys. 7.2 (pole obciążone A)",
+    "mono": "7.2.2, Tabl. 7.1 (ściany); 7.2.4, Tabl. 7.3a, 7.3b (dach jednospadowy)",
+    "duo": "7.2.2, Tabl. 7.1 (ściany); 7.2.5, Tabl. 7.4a, 7.4b (dach dwuspadowy)",
+    "trough": "7.2.2, Tabl. 7.1 (ściany); 7.2.5, Tabl. 7.4a, 7.4b (dach dwuspadowy zagłębiony)",
+    "hip": "7.2.2, Tabl. 7.1 (ściany); 7.2.6, Tabl. 7.5 (dach czterospadowy)",
+    "multi": "7.2.2, Tabl. 7.1 (ściany); 7.2.7, Rys. 7.10 (dachy wielopołaciowe)",
+    "vault": "7.2.2, Tabl. 7.1 (ściany); 7.2.8, Rys. 7.11 (dach łukowy)",
+    "dome": "7.2.8, Rys. 7.12 (kopuła); 7.9.1 (ściany walcowe)",
+    "can1": "7.3, Tabl. 7.6 (wiata jednospadowa), cp,net",
+    "can2": "7.3, Tabl. 7.7 (wiata dwuspadowa), cp,net",
+}
+_NL = r"(?<![^\W\d_])"          # not preceded by a letter
+_NR = r"(?![^\W\d_₀-₉])"        # not followed by a letter or a subscript digit
+
+
+def snow_legend(kind, acc, case_text, linear):
+    """Symbols of the snow report: (regular expression looked for in the report, symbol, meaning). Only those found in
+    the report of the current case end up in the legend (`legend_items`)."""
+    e = [("sₖ", "sₖ", "wartość charakterystyczna obciążenia śniegiem gruntu [kN/m²]"),
+         ("sₙ", "sₙ", "obciążenie śniegiem gruntu dla średniego okresu powrotu n [kN/m²]"),
+         ("okresie powrotu n", "n", "średni okres powrotu [lata]"),
+         (r"V = ", "V", "współczynnik zmienności rocznych maksimów obciążenia śniegiem gruntu"),
+         ("Cₑ", "Cₑ", "współczynnik ekspozycji"), ("Cₜ", "Cₜ", "współczynnik termiczny"),
+         (r"(?<!\w)s = ", "s", "obciążenie śniegiem dachu [kN/m²]"),
+         ("μ", "μ", "współczynnik kształtu dachu"),
+         (r"α(?![₀-₉])", "α", "kąt nachylenia połaci dachu [°]"),
+         (r"α[₁₂]", "α₁, α₂", "kąty nachylenia połaci 1 i 2 [°]"),
+         ("ᾱ", "ᾱ", "średni kąt nachylenia połaci przylegających do kosza, (α₁ + α₂)/2")]
+    if acc:
+        e += [("μ₁", "μ₁", "współczynnik kształtu zaspy wyjątkowej – przy kalenicy lub po jednej stronie przeszkody"),
+              ("μ₂", "μ₂", "współczynnik kształtu zaspy wyjątkowej – przy okapie lub po drugiej stronie przeszkody"),
+              ("μ₃", "μ₃", "współczynnik kształtu zaspy wyjątkowej przy wyższej budowli (Tabl. B1)"),
+              (_NL + "h" + _NR, "h", "wysokość przeszkody lub attyki albo różnica wysokości dachów [m]"),
+              (r"b[₁₂]", "b₁, b₂", "odległości od okapu, kalenicy lub kosza albo szerokości dachów (Rys. B2–B4)"),
+              (r"(?<![\w/])b(?![\w/₀-₉])", "b", "większy z wymiarów b₁, b₂")]
+    else:
+        e += [("μ₁", "μ₁", "współczynnik kształtu dachu wg Tablicy 5.2 (zależny od kąta α)"),
+              ("μ₂", "μ₂", {"multi": "współczynnik kształtu dla zaspy w koszu",
+                            "abut": "współczynnik kształtu dla zaspy przy wyższej budowli, μ₂ = μₛ + μw",
+                            "obst": "współczynnik kształtu dla zaspy przy przeszkodzie, μ₂ = γh/sₖ"}.get(kind, "")),
+              ("μ₃", "μ₃", "współczynnik kształtu dachu walcowego"),
+              ("μₛ", "μₛ", "udział śniegu zsuwającego się z dachu wyższego"),
+              ("μw", "μw", "udział śniegu nawiewanego przez wiatr"),
+              (r"h/b", "h/b", "wyniosłość łuku / rozpiętość"),
+              ("β", "β", "kąt nachylenia stycznej do łuku"),
+              (r"b[₁₂]", "b₁, b₂", "szerokość budowli wyższej i dachu niższego"),
+              (_NL + "h" + _NR, "h", {"abut": "różnica wysokości dachów [m]",
+                                      "obst": "wysokość przeszkody [m]"}.get(kind, "wysokość [m]"))]
+    e += [("lₛ", "lₛ", "długość zaspy [m]"),
+          ("γ", "γ", "ciężar objętościowy śniegu [kN/m³]"),
+          (_NL + "d" + _NR + r" = ", "d", "grubość warstwy śniegu na dachu, s/γ [m]"),
+          (_NL + "k" + _NR + r" = ", "k", "współczynnik nieregularności kształtu nawisu"),
+          ("sₑ", "sₑ", "obciążenie nawisem śnieżnym na 1 m krawędzi okapu [kN/m]"),
+          ("Fₛ", "Fₛ", "siła przypadająca na 1 m barierki przeciwśnieżnej [kN/m]"),
+          (r"Przyp\.", "Przyp.", case_text),
+          ("Miejsce", "Miejsce", "część dachu, której dotyczy wartość")]
+    if linear:
+        e.append(("Miejsce", "a → b", "wartość zmienia się liniowo od a do b"))
+    return [x for x in e if x[2]]
+
+
+def wind_legend(kind, can, aload):
+    """Symbols of the wind report (see `snow_legend`)."""
+    e = [(r"vb,0", "vb,0", "podstawowa wartość bazowej prędkości wiatru [m/s]"),
+         (r"c_dir", "c_dir", "współczynnik kierunkowy"), (r"c_season", "c_season", "współczynnik sezonowy"),
+         (r"(?<![\w,])vb =", "vb", "bazowa prędkość wiatru [m/s]"),
+         (r"qb,0", "qb,0", "podstawowa wartość bazowego ciśnienia prędkości [kN/m²]"),
+         (r"(?<![\w,])qb =", "qb", "wartość bazowa ciśnienia prędkości [kN/m²]"),
+         (r"\bze = |\(ze\)|^ze \[", "ze", "wysokość odniesienia [m]"),
+         (r"Φ", "Φ, Le", "wskaźnik wzniesienia H/Lu i efektywna długość stoku nawietrznego [m]"),
+         (r"c₀", "c₀", "współczynnik orografii"),
+         (r"cₑ", "cₑ", "współczynnik ekspozycji"),
+         (r"\bcr\b", "cr", "współczynnik chropowatości terenu"),
+         (r"qp", "qp", "wartość szczytowa ciśnienia prędkości [kN/m²]"),
+         (_NL + "b" + _NR + r" = ", "b", "wymiar budynku prostopadły do kierunku wiatru [m]"),
+         (_NL + "d" + _NR + r" = ", "d", "wymiar budynku równoległy do kierunku wiatru [m]"),
+         (_NL + "h" + _NR + r" = ", "h", "wysokość budynku [m]"),
+         (r"(?<!\w)e = ", "e", "wymiar wyznaczający szerokość pól, min(b; 2h) [m]"),
+         (r"h/d", "h/d", "smukłość budynku"),
+         (r"f/d", "f/d", "wyniosłość łuku lub kopuły / rozpiętość"),
+         (r"θ = ", "θ", "kierunek wiatru względem budynku [°]"),
+         (r"cpi", "cpi", "współczynnik ciśnienia wewnętrznego"),
+         (r"wi\b", "wi", "ciśnienie wewnętrzne, wi = qp·cpi [kN/m²]"),
+         (r"φ = ", "φ", "współczynnik blokowania przestrzeni pod wiatą"),
+         (r"cf = ", "cf", "globalny współczynnik siły"),
+         (r"Fw", "Fw", "wypadkowa siła wiatru na wiatę [kN]"),
+         (r"cₛcd", "cₛcd", "współczynnik konstrukcyjny"),
+         (r"zs = ", "zs", "wysokość odniesienia do wyznaczania cₛcd [m]"),
+         (r"vm\(", "vm", "średnia prędkość wiatru [m/s]"),
+         (r"Iv", "Iv", "intensywność turbulencji"),
+         (r"L\(zs\)", "L(zs)", "skala turbulencji [m]"),
+         (r"n₁", "n₁", "częstotliwość drgań własnych [Hz]"),
+         (r"δ = ", "δ", "logarytmiczny dekrement tłumienia konstrukcji"),
+         (r"B² = ", "B², R², kp", "część pozarezonansowa, część rezonansowa, współczynnik wartości szczytowej"),
+         (r"cfr", "cfr", "współczynnik tarcia"),
+         (r"Afr", "Afr", "powierzchnia, na którą działa tarcie [m²]"),
+         (r"Ffr", "Ffr", "siła tarcia [kN]"),
+         (r"hₚ", "hₚ", "wysokość attyki [m]"),
+         (r"Re = ", "Re, v(ze)", "liczba Reynoldsa i prędkość wiatru dla ściany walcowej kopuły"),
+         (r"cpe", "cpe", "współczynnik ciśnienia netto cp,net (góra i spód dachu wiaty)" if can else
+          f"współczynnik ciśnienia zewnętrznego dla pola obciążonego A = {aload} m²"),
+         (r"cp,net", "cp,net", "współczynnik ciśnienia netto (góra i spód dachu wiaty)"),
+         (r"\bPole\b", "Pole", "oznaczenie pola: ściany A–E (Rys. 7.5), dach F–N (Rys. 7.6–7.10), wiaty A–D"),
+         (r"Pow\.", "Pow.", "powierzchnia pola [m²]"),
+         (r"\bwe\b", "we", "obciążenie wiatrem, we = qp·cp,net; (+) ku dołowi, (−) ku górze [kN/m²]" if can else
+          "ciśnienie zewnętrzne, we = qp(ze)·cpe; (+) parcie, (−) ssanie [kN/m²]"),
+         (r"netto", "netto", "we − wi; min i max z wartości cpi [kN/m²]")]
+    if kind == "multi":
+        e.append((r"H·0|I·0", "H·0.8, I·0.6", "pole kolejnej nawy z cpe zredukowanym współczynnikiem (Rys. 7.10)"))
+    return e
+
+
+def legend_items(items, entries):
+    """Legend of a report: the entries (regex, symbol, meaning) whose symbol occurs in the report `items` (values,
+    descriptions, notes, headings and tables), as ("s", symbol, meaning) items – nothing that is not used."""
+    parts = []
+    for x in items:
+        if x[0] == "t":
+            parts += list(x[1].heads)
+            for vals, _ in x[1].rows:
+                parts += [str(v) for v in vals]
+        elif x[0] != "s":
+            parts += [y for y in x[1:] if isinstance(y, str)]
+    text = "\n".join(parts)
+    return [("s", lab, desc) for rx, lab, desc in entries if re.search(rx, text, re.M)]
+
+
 def char_note_html():
     """Standing information at the end of every report (case card, printout)."""
     return f"<p style='color:{MUTED}; font-size:8pt; margin:8px 0 0 0;'><i>{html.escape(CHAR_NOTE)}</i></p>"
@@ -59,6 +212,7 @@ OVH_COL = "#7c3aed"            # snow overhang
 DIM_STEP = 0.09                # dimension offset module (× model size)
 ZOOM_MIN, ZOOM_MAX = 0.3, 40.0  # 3D model zoom range (close look at the roof of a tall building)
 DIM_COL = "#1d4ed8"            # load-field dimensions (wind and snow)
+ORO_COL = "#15803d"            # orography dimensions (green)
 BDIM_COL = "#9a3412"           # building dimensions
 SDIM_COL = "#1d4ed8"           # snow-field dimensions
 WALL_COL, WALL_OUT = "#e7e3dc", "#8a8378"
@@ -537,6 +691,18 @@ def prof_saw(B, H, n, a):
     return pts
 
 
+def prof_multi_valley(B, H, n, a):
+    """Fig. 7.10 c: monopitch spans at both ends (rising inwards), troughs between them."""
+    w = B / n
+    t = math.tan(math.radians(a))
+    hp = H + w * t
+    pts = [(0.0, H), (w, hp)]
+    for k in range(1, n - 1):
+        pts += [(k * w + w / 2, hp - w / 2 * t), ((k + 1) * w, hp)]
+    pts.append((B, H))
+    return pts
+
+
 def prof_vault(B, H, f, N=24):
     R = (f * f + (B / 2) ** 2) / (2 * f)
     zc = H + f - R
@@ -638,7 +804,12 @@ SNOW_CE = {      # Table 5.1
     "Osłonięty": (1.2, "Budowla znacznie niższa niż otaczający teren albo otoczona wysokimi drzewami "
                        "lub wyższymi budowlami."),
 }
-CT_MODES = ("Cₜ = 1,0 (przypadek ogólny)", "Cₜ wg wzoru NA.1 (U > 1 W/m²K)")
+CT_MODES = ("Cₜ = 1,0 (przypadek ogólny)", "Cₜ obliczany z U i tᵢ (U > 1 W/m²K)")
+# Option texts of older files (they carried references to the code, which now belong only to the results)
+LEGACY_OPTS = {"Cₜ wg wzoru NA.1 (U > 1 W/m²K)": CT_MODES[1],
+               "wg Rys. 7.13 – wskaźnik otworów μ": "wg wskaźnika otworów μ",
+               "ściana dominująca – wzory (7.1), (7.2)": "ściana dominująca",
+               "Kosze, jednospadowe na końcach (Rys. 7.10 c)": "Kosze, jednospadowe na końcach"}
 OBST_TYPES = ("Attyka na obwodzie dachu", "Ścianka / przeszkoda w poprzek dachu")
 
 
@@ -717,6 +888,7 @@ class SnowGeo:
         L, B, H = p["L"], p["B"], p["H"]
         self.L, self.B, self.H = L, B, H
         self.upper = None
+        self.gap = 0.0
         self.a1 = self.a2 = 0.0
         if kind in ("flat", "obst"):
             self.main = Prism(L, B, prof_flat(B, H))
@@ -734,7 +906,9 @@ class SnowGeo:
         elif kind == "abut":
             self.main = Prism(L, B, prof_flat(B, H))
             Hu = H + p["dh"]
-            self.upper = Prism(L, p["b1"], prof_duo(p["b1"], Hu, p["aup"], p["aup"]), oy=-p["b1"])
+            ex_ = p.get("exc") or {}
+            self.gap = ex_["gd"] if ex_.get("gap") else 0.0       # B3(2): taller building close, not adjoining
+            self.upper = Prism(L, p["b1"], prof_duo(p["b1"], Hu, p["aup"], p["aup"]), oy=-p["b1"] - self.gap)
         # elements for exceptional drifts (Annex B) – only with the „Wyjątkowe” option on
         self.exc = p.get("exc")
         self.solids = []
@@ -748,7 +922,7 @@ class SnowGeo:
             w, d, a = min(e["xw"], L), e["xd"], e["xa"]
             he = H + p["dh"] - e["xh"]          # h – difference of eaves heights (as in Fig. B2)
             x0, x1, xm = (L - w) / 2, (L + w) / 2, L / 2
-            yb = -p["b1"]
+            yb = -p["b1"] - self.gap
             ya = yb - d
             zr = he + w / 2 * math.tan(math.radians(a))
             walls = [([(x0, yb, 0), (x0, ya, 0), (x0, ya, he), (x0, yb, he)], (-1, 0, 0)),
@@ -793,7 +967,23 @@ class SnowGeo:
                                              fill=OBST_FILL, out=OBST_OUT))
                     self.eave_par.append((ye, dr))
                     self.keepout.append((0.0, L, ya, yb))
-            if e.get("gpar"):            # gable parapets – along the roof profile, flush with the wall
+            if e.get("gpar") and kind == "multi":   # B4(5): flat-topped gable walls, ≤ 0.3 m above the ridges
+                ztop = max(z for _, z in pr.prof) + e["gvh"]
+                e["gah"] = ztop - H
+                for gx, dr in ((0.0, 1), (L, -1)):
+                    xa, xb = (gx, gx + TW_OBST) if dr > 0 else (gx - TW_OBST, gx)
+                    fs = []
+                    for (y0, z0), (y1, z1) in zip(pr.prof, pr.prof[1:]):
+                        if y1 - y0 > 1e-9:
+                            fs += [([(xa, y1, z1), (xa, y0, z0), (xa, y0, ztop), (xa, y1, ztop)], (-1, 0, 0)),
+                                   ([(xb, y0, z0), (xb, y1, z1), (xb, y1, ztop), (xb, y0, ztop)], (1, 0, 0))]
+                    fs += [([(xa, 0.0, ztop), (xb, 0.0, ztop), (xb, B, ztop), (xa, B, ztop)], (0, 0, 1)),
+                           ([(xa, 0.0, H), (xb, 0.0, H), (xb, 0.0, ztop), (xa, 0.0, ztop)], (0, -1, 0)),
+                           ([(xb, B, H), (xa, B, H), (xa, B, ztop), (xb, B, ztop)], (0, 1, 0))]
+                    self.solids.append(Solid(fs, [], fill=OBST_FILL, out=OBST_OUT))
+                    self.gable_par.append((gx, dr))
+                    self.keepout.append((xa, xb, 0.0, B))
+            elif e.get("gpar"):          # gable parapets – along the roof profile, flush with the wall
                 hg = e["gah"]
                 for gx, dr in ((0.0, 1), (L, -1)):
                     xa, xb = (gx, gx + TW_OBST) if dr > 0 else (gx - TW_OBST, gx)
@@ -876,7 +1066,7 @@ def calc_snow(sg, sp):
                   ("ii", [(0, yr, .5 * m1, .5 * m1, "połać 1"), (yr, B, m2_, m2_, "połać 2")]),
                   ("iii", [(0, yr, m1, m1, "połać 1"), (yr, B, .5 * m2_, .5 * m2_, "połać 2")])]
         eaves = [("y0", m1), ("yB", m2_)]
-        notes.append("(i) – równomierne; (ii), (iii) – nierównomierne (Rys. 5.3).")
+        notes.append(("(ii), (iii) – nierównomierne, wiatr z jednej lub z drugiej strony (Rys. 5.3).", "ii,iii"))
     elif sg.kind == "multi":
         n = p["n"]
         w = B / n
@@ -896,7 +1086,7 @@ def calc_snow(sg, sp):
         cii.append(((n - 1) * w + yr, B, m2_, m2_, "połać skrajna 2"))
         cases += [("i", ci), ("ii", cii)]
         eaves = [("y0", m1), ("yB", m2_)]
-        notes.append("(ii) – zaspy we wszystkich koszach jednocześnie (Rys. 5.4); NA.9: połać > 60° → μ₂ = 1,6.")
+        notes.append(("(ii) – zaspy we wszystkich koszach jednocześnie (Rys. 5.4); NA.9: połać > 60° → μ₂ = 1,6.", "ii"))
 
     elif sg.kind == "vault":
         f = p["f"]
@@ -912,8 +1102,8 @@ def calc_snow(sg, sp):
                           (q[2], q[3], 0, m3, "ćwiartka 3"), (q[3], q[4], m3, 0, "ćwiartka 4")]),
                   ("iii", [(q[0], q[1], 0, m3, "ćwiartka 1"), (q[1], q[2], m3, 0, "ćwiartka 2"),
                            (q[2], q[3], 0, .5 * m3, "ćwiartka 3"), (q[3], q[4], .5 * m3, 0, "ćwiartka 4")])]
-        notes.append("Rys. 5.6: (ii) i (iii) – zaspy nierównomierne (wiatr z jednej lub z drugiej strony); "
-                     "dla β > 60° μ₃ = 0.")
+        notes.append(("Rys. 5.6: (ii) i (iii) – zaspy nierównomierne (wiatr z jednej lub z drugiej strony); "
+                      "dla β > 60° μ₃ = 0.", "ii,iii"))
     elif sg.kind == "abut":
         h, b1, b2, au = p["dh"], p["b1"], B, p["aup"]
         ls = clamp(2 * h, 5, 15)
@@ -930,8 +1120,12 @@ def calc_snow(sg, sp):
             cii = [(0, b2, m2, m2 + (0.8 - m2) * b2 / ls, "zaspa (ucięta, b₂ < lₛ)")]
         cases += [("i", [(0, b2, 0.8, 0.8, "dach niższy")]), ("ii", cii)]
         mu_up = mu1(au, g)
-        extra = segs_to_patches(sg.upper, [(-b1, -b1 / 2, mu_up, mu_up, "dach wyższy"),
-                                           (-b1 / 2, 0, mu_up, mu_up, "dach wyższy")])
+        gp_ = sg.gap
+        extra = segs_to_patches(sg.upper, [(-b1 - gp_, -b1 / 2 - gp_, mu_up, mu_up, "dach wyższy"),
+                                           (-b1 / 2 - gp_, -gp_, mu_up, mu_up, "dach wyższy")])
+        if gp_ > 0:
+            notes.append(f"Budowla wyższa w odległości {f2(gp_)} m: przypadki trwałe (5.3.6) przyjęto jak dla budowli "
+                         "przylegającej (po stronie bezpiecznej).")
         for pt in extra[1:]:
             pt["label"] = None
         notes.append("μₛ: 50% obciążenia przyległej połaci dachu wyższego (b₁/2) rozłożone trójkątnie na lₛ.")
@@ -1002,8 +1196,30 @@ def calc_snow(sg, sp):
         if per:
             overhang = dict(max(per, key=lambda o: o["se"]))
             overhang["per"] = per
+    # load on snow guards (6.4): Fs = s·b·sin α – s: the most onerous undrifted load of the slope (μ₁ ≥ 0,8 with
+    # guards), b – plan width from the guard at the eaves to the ridge (no intermediate guards)
+    guards = []
+    if g and sg.kind in ("mono", "duo", "multi", "vault"):
+        sl_ = []
+        if sg.kind == "mono":
+            sl_ = [("połać (okap y = 0)", sg.a1, B)]
+        elif sg.kind == "duo":
+            yr = pr.prof[1][0]
+            sl_ = [("połać 1 (okap y = 0)", sg.a1, yr), ("połać 2 (okap y = B)", sg.a2, B - yr)]
+        elif sg.kind == "multi":
+            w_ = B / p["n"]
+            yr = ridge_pos(w_, sg.a1, sg.a2)
+            sl_ = [("połać skrajna (okap y = 0)", sg.a1, yr), ("połać skrajna (okap y = B)", sg.a2, w_ - yr)]
+        else:
+            Rv = (p["f"] ** 2 + (B / 2) ** 2) / (2 * p["f"])
+            sl_ = [("dach walcowy (okap, α – nachylenie stycznej)", math.degrees(math.asin(min(B / 2 / Rv, 1.0))),
+                    B / 2)]
+        for lab, a_, b_ in sl_:
+            mu_ = 0.8 if sg.kind == "vault" else mu1(a_, True)
+            s_ = mu_ * base
+            guards.append(dict(label=lab, alpha=a_, b=b_, mu=mu_, s=s_, F=s_ * b_ * math.sin(math.radians(a_))))
     return dict(sk=sk, sk50=sk50, nret=nret, fret=fret, Ce=Ce, Ct=Ct, ct_note=ct_note, base=base,
-                params=params, notes=notes,
+                params=params, notes=notes, guards=guards,
                 cases=res, extra=extra, smax=smax, overhang=overhang)
 
 
@@ -1037,7 +1253,22 @@ def exc_cases(sg, sk, cases, params, notes):
         m3 = min(2 * h / sk, 2 * bb / ls, 8.0)
         params.append(f"B3 – dach niższy: lₛ = min(5h; b₂; 15 m) = {f2(ls)} m, b = max(b₁; b₂) = {f2(bb)} m → "
                       f"μ₃ = min(2h/sₖ; 2b/lₛ; 8) = {f2(m3, 3)}; α = 0° → μ₁ = μ₂ = μ₃")
-        add([(0, ls, m3, 0.0, "zaspa wyjątkowa przy ścianie")], "B3 – dach niższy przy ścianie")
+        gp_ = sg.gap
+        if gp_ > 0:                                # B3(2): only the lower roof; the area between the buildings omitted
+            params.append(f"B3(2) – budowla bliska, nieprzylegająca: odstęp {f2(gp_)} m – zaspa od ściany budowli "
+                          f"wyższej, na dachu niższym μ = μ₃·(1 − {f2(gp_)}/lₛ) = {f2(m3 * max(1 - gp_ / ls, 0), 3)} "
+                          "przy krawędzi; obciążenie między budynkami pominięte")
+            if gp_ < ls:
+                add([(0, ls - gp_, m3 * (1 - gp_ / ls), 0.0, "zaspa wyjątkowa (budowla bliska)")],
+                    "B3(2) – dach niższy, budowla wyższa nieprzylegająca")
+            else:
+                add([(0, B, 0.0, 0.0, "poza zasięgiem zaspy (odstęp ≥ lₛ)")],
+                    "B3(2) – dach niższy, budowla wyższa nieprzylegająca")
+            if gp_ >= 1.5:
+                notes.append("Uwaga do B3(2): sąsiednią budowlę oddaloną o 1,5 m lub więcej można w przybliżeniu "
+                             "pominąć.")
+        else:
+            add([(0, ls, m3, 0.0, "zaspa wyjątkowa przy ścianie")], "B3 – dach niższy przy ścianie")
         if sg.annex:
             an = sg.annex.g
             h2 = sg.upper.prof[0][1] - an["he"]        # eaves of the taller building above the eaves of the annex
@@ -1136,7 +1367,32 @@ def exc_cases(sg, sk, cases, params, notes):
                 seg = (ye, ye + ls, m, 0.0, "zaspa wyjątkowa za attyką") if dr > 0 else \
                     (ye - ls, ye, 0.0, m, "zaspa wyjątkowa za attyką")
                 add([seg], f"B4 – zaspa za attyką przy okapie {i + 1}")
-        for i, (gx, dr) in enumerate(sg.gable_par):  # gable parapet – as at the eaves, drift along the ridge
+        for i, (gx, dr) in enumerate(sg.gable_par if sg.kind == "multi" else []):   # B4(5) – valleys
+            n_ = p["n"]
+            w_ = B / n_
+            yr_ = ridge_pos(w_, sg.a1, sg.a2)
+            zr_ = max(z for _, z in pr.prof)
+            h = e["gah"]                             # parapet top above the valley line
+            b1 = L
+            ls = min(5 * h, b1, 15.0)
+            m = min(2 * h / sk, 2 * b1 / ls, 8.0)
+            params.append(f"B4(4), (5) – attyka szczytowa {i + 1}: h = {f2(h)} m (nad koszem; attyka "
+                          f"{f2(e['gvh'], 2)} m ponad kalenicą ≤ 0,3 m), b₁ = L = {f2(b1)} m, lₛ = min(5h; b₁; 15 m) = "
+                          f"{f2(ls)} m → μ₁ = min(2h/sₖ; 2b/lₛ; 8) = {f2(m, 3)}; w koszu μ maleje liniowo do zera przy "
+                          "sąsiednich kalenicach")
+            xe = gx + dr * ls
+            pts = []
+            for kv in range(1, n_):
+                yv = kv * w_
+                for yk in ((kv - 1) * w_ + yr_, kv * w_ + yr_):
+                    pts.append(dict(poly=[(gx, yk, zr_), (gx, yv, sg.H), (xe, yv, sg.H), (xe, yk, zr_)],
+                                    mu=[0.0, m, 0.0, 0.0], label="zaspa wyjątkowa w koszu" if not pts else None,
+                                    seg=(m, 0.0)))
+            u0, u1 = sorted((gx, xe))
+            add(dict(patches=pts, rows=[("kosz przy attyce szczytowej (μ₁ → 0)", m, 0.0)],
+                     xdim=[("x", 0.0, B, None, [(u0, u1)])]),
+                f"B4(5) – zaspa w koszach przy attyce szczytowej {i + 1}")
+        for i, (gx, dr) in enumerate(sg.gable_par if sg.kind != "multi" else []):  # gable parapet – drift along ridge
             hg = e["gah"]
             b1 = L
             ls = min(5 * hg, b1, 15.0)
@@ -1780,11 +2036,12 @@ __INIT__
 
 # Internal pressure (7.2.9): only the methods of the code. 0 – (6) Note 2 (μ cannot be estimated), 1 – (6) Fig. 7.13
 # (no dominant wall, μ = openings with cpe ≤ 0 / all openings), 2 – (5) dominant wall, expressions (7.1) and (7.2)
-CPI_MODES = ("+0,2 i −0,3 (niekorzystniejsza)", "wg Rys. 7.13 – wskaźnik otworów μ",
-             "ściana dominująca – wzory (7.1), (7.2)")
+CPI_MODES = ("+0,2 i −0,3 (niekorzystniejsza)", "wg wskaźnika otworów μ",
+             "ściana dominująca")
 DOM_ZONES = ("D – ściana nawietrzna", "E – ściana zawietrzna", "A – ściana boczna, pole A",
              "B – ściana boczna, pole B", "C – ściana boczna, pole C")
-MULTI_TYPES = ("Nawy dwuspadowe", "Nawy jednospadowe (piłokształtny)")
+MULTI_TYPES = ("Nawy dwuspadowe", "Nawy jednospadowe (piłokształtny)",
+               "Kosze, jednospadowe na końcach")
 EDGE_TYPES = ("Ostre krawędzie lub attyka", "Krawędzie zaokrąglone", "Krawędzie mansardowe")   # Table 7.2
 
 # Directional factor c_dir – Table NA.2 (sectors 0°, 30° … 330°; wind blowing FROM the sector); 1.0 – any direction
@@ -1793,6 +2050,219 @@ CDIR_SECTORS = tuple(f"sektor {a}°" for a in range(0, 360, 30))
 CDIR_NA2 = {"1": (0.8, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.8, 0.9, 1.0, 1.0, 0.9),
             "2": (1.0, 0.9, 0.8, 0.7, 0.7, 0.7, 0.7, 0.8, 0.9, 1.0, 1.0, 1.0),
             "3": (0.8, 0.7, 0.7, 0.7, 0.7, 0.7, 0.9, 1.0, 1.0, 1.0, 1.0, 1.0)}
+
+
+# Orography – Annex A.3 (formulas (A.4)–(A.13) with Ap1:2010); 0 – none (c0 = 1)
+OROGRAPHY = ("brak (c₀ = 1)", "wzgórze lub łańcuch wzgórz", "klif lub skarpa")
+# Table NA.3: roughness factor cr(z) = a·(z/10)^k (the exposure factor ce(z) – TERRAIN); Table 4.1: z0
+TERRAIN_CR = {"0": (1.3, 0.11), "I": (1.2, 0.13), "II": (1.0, 0.17), "III": (0.8, 0.19), "IV": (0.6, 0.24)}
+TERRAIN_Z0 = {"0": 0.003, "I": 0.01, "II": 0.05, "III": 0.3, "IV": 1.0}
+# friction (7.5, Table 7.10)
+CFR_TYPES = ("gładka – stal, beton gładki (cfr = 0,01)", "chropowata – beton surowy, papa (cfr = 0,02)",
+             "bardzo chropowata – fale, żebra, fałdy (cfr = 0,04)")
+CFR_VALUES = (0.01, 0.02, 0.04)
+# structural factor (6.3.1, Annex B – procedure 1, NA.10): logarithmic decrement δs – Table F.2 (buildings)
+CSCD_STRUCT = ("budynek żelbetowy (δs = 0,10)", "budynek stalowy (δs = 0,05)",
+               "konstrukcja zespolona stal–beton (δs = 0,08)")
+CSCD_DELTA = (0.10, 0.05, 0.08)
+# multi-skin walls and roofs (7.2.10(3), Note 2 – recommended rules, NA does not change them)
+SKIN_TYPES = ("jednopowłokowa (bez podziału)",
+              "wewn. nieprzepuszczalna, zewn. przepuszczalna",
+              "wewn. nieprzepuszczalna, zewn. nieprzepuszczalna i sztywniejsza",
+              "wewn. przepuszczalna, zewn. nieprzepuszczalna",
+              "zewn. nieprzepuszczalna, wewn. nieprzepuszczalna i sztywniejsza")
+
+
+def wind_cr(cat, z):
+    """Roughness factor cr(z) – Table NA.3 (z < zmin → zmin, z > zmax → zmax)."""
+    a, k = TERRAIN_CR[cat]
+    zz = clamp(z, TERRAIN[cat][2], TERRAIN_ZMAX[cat])
+    return a * (zz / 10) ** k
+
+
+def wind_ce(cat, z, c0=1.0):
+    """Exposure factor: Table NA.3 for c0 = 1; with orography (NA.8 – expression (4.8)):
+    qp = [1 + 7·Iv]·c0²·cr²·qb, Iv = Iv(c0 = 1)/c0 (4.7) → ce = c0²·cr² + c0·(ce,NA − cr²)."""
+    a, k, zmin, _ = TERRAIN[cat]
+    ce0 = a * (clamp(z, zmin, TERRAIN_ZMAX[cat]) / 10) ** k
+    if abs(c0 - 1.0) < 1e-12:
+        return ce0
+    cr = wind_cr(cat, z)
+    return c0 * c0 * cr * cr + c0 * (ce0 - cr * cr)
+
+
+def wind_iv(cat, z, c0=1.0):
+    """Turbulence intensity consistent with Table NA.3: ce = (1 + 7·Iv)·cr² → Iv = (ce/cr² − 1)/7, divided by c0 (4.7)."""
+    cr = wind_cr(cat, z)
+    return (wind_ce(cat, z) / (cr * cr) - 1.0) / 7.0 / c0
+
+
+def oro_s(kind, H, Lu, Ld, x, z):
+    """Annex A.3 – location factor s (expressions (A.4)–(A.13), Ap1:2010). kind 1 – hill or ridge, 2 – cliff
+    or escarpment; x – horizontal distance of the site from the crest (negative – upwind slope), z – height above
+    the ground at the site."""
+    phi = H / Lu
+    Le = Lu if phi <= 0.3 else H / 0.3                     # Table A.2
+    u = max(z, 0.0) / Le
+
+    def a_up(v):                                           # (A.12) – the same as A in (A.4)
+        return 0.1552 * v ** 4 - 0.8575 * v ** 3 + 1.8133 * v ** 2 - 1.9115 * v + 1.0124
+    if x <= 0:                                             # upwind section – all types (A.4)
+        X = x / Lu
+        if X < -1.5 or u > 2.0:
+            return 0.0
+        return a_up(u) * math.exp((0.3542 * u * u - 1.0577 * u + 2.6456) * X)
+    if kind == 2:                                          # downwind – cliffs and escarpments (A.5), (A.8)–(A.10)
+        X = x / Le
+        if X > 3.5 or u > 2.0:
+            return 0.0
+
+        def down(xv):
+            lz, lx = math.log10(max(u, 0.1)), math.log10(xv)
+            A = -1.3420 * lz ** 3 - 0.8222 * lz ** 2 + 0.4609 * lz - 0.0791
+            B = -1.0196 * lz ** 3 - 0.8910 * lz ** 2 + 0.5343 * lz - 0.1156
+            C = 0.8030 * lz ** 3 + 0.4236 * lz ** 2 - 0.5738 * lz + 0.1606
+            return A * lx * lx + B * lx + C
+        if X < 0.1:                                        # (A.6): interpolation between X = 0 (A.4) and 0.1
+            return interp(X, [0.0, 0.1], [a_up(u), down(0.1)])
+        return down(X)
+    X = x / Ld                                             # downwind – hills and ridges (A.11)–(A.13)
+    if X > 2.0 or u > 2.0:
+        return 0.0
+    return a_up(u) * math.exp((-0.3056 * u * u + 1.0212 * u - 1.7637) * X)
+
+
+def oro_c0(o, z):
+    """Orography factor c0(z) – (A.1)–(A.3); o = dict(kind, H, Lu, Ld, x) or None. Returns (c0, s)."""
+    if not o or not o.get("kind") or o["Lu"] <= 0 or o["H"] <= 0:
+        return 1.0, 0.0
+    phi = o["H"] / o["Lu"]
+    if phi < 0.05:
+        return 1.0, 0.0
+    s = max(oro_s(o["kind"], o["H"], o["Lu"], max(o.get("Ld", o["Lu"]), 1e-6), o["x"], z), 0.0)
+    return (1.0 + 2.0 * s * phi if phi <= 0.3 else 1.0 + 0.6 * s), s
+
+
+def oro_profile(o, d, B0):
+    """Terrain along the wind for the 3D model of orography (Annex A.3). o = dict(kind, H, Lu, Ld, x); d – building
+    depth along the wind, B0 – building size. The site (the centre of the building) is the origin q = 0 and the
+    height z = 0 – the building stands on a flat shelf (width of the building + a margin) cut into the terrain.
+    Horizontal distances and heights are scaled by one factor kap ≤ 1 when the terrain is much larger than the
+    building (a schematic drawing; the dimension texts show the true values). Returns the dict with the vertices
+    V = [(q, z)] of the profile (a vertical step = the wall of the shelf), kap and the key positions."""
+    H, Lu = o["H"], o["Lu"]
+    hill = o["kind"] == 1
+    Ld = max(o.get("Ld") or Lu, 1e-6) if hill else 0.0
+    qc = -o["x"]                                           # crest relative to the site (+ – downwind)
+    foot, foot2 = qc - Lu, qc + Ld
+
+    def h(q):
+        if q <= foot:
+            return 0.0
+        if q < qc:
+            return H * (q - foot) / Lu
+        if not hill:
+            return H
+        return H * (1.0 - (q - qc) / Ld) if q < foot2 else 0.0
+    brk = [foot, qc] + ([foot2] if hill else [])
+    lo, hi = min(brk + [-d / 2]), max(brk + [d / 2])
+    mar = max(0.18 * (hi - lo), d)
+    lo, hi = lo - mar, hi + mar
+    kap = 1.0                                              # always the real scale
+    padq = d / 2 + 0.35 * B0
+    h0 = h(0.0)
+    zf = lambda qs: kap * (h(qs / kap) - h0)
+    lo_s = min(kap * lo, -(padq + 0.6 * B0))
+    hi_s = max(kap * hi, padq + 0.6 * B0)
+    cand = sorted({kap * q for q in brk} | {lo_s, hi_s})
+    V = [(q, zf(q)) for q in cand if q < -padq]
+    V += [(-padq, zf(-padq)), (-padq, 0.0), (padq, 0.0), (padq, zf(padq))]
+    V += [(q, zf(q)) for q in cand if q > padq]
+    out = []
+    for v in V:
+        if not out or abs(v[0] - out[-1][0]) > 1e-9 or abs(v[1] - out[-1][1]) > 1e-9:
+            out.append(v)
+    return dict(V=out, kap=kap, hill=hill, zf=zf, padq=padq, lo=lo_s, hi=hi_s, qc=kap * qc, foot=kap * foot,
+                foot2=kap * foot2, z_foot=zf(kap * foot), z_crest=zf(kap * qc), H=H, Lu=Lu, Ld=Ld, x=abs(o["x"]),
+                before=o["x"] < 0)
+
+
+def cscd_building(cat, h, b, d, vb, c0f, delta):
+    """Structural factor cscd – 6.2 and 6.3.1 with Annex B (procedure 1, NA.10) for a building: zs = 0.6·h (Fig. 6.1),
+    n1 = 46/h (F.2), δ = δs (Table F.2; δa and δd omitted – on the safe side), T = 600 s."""
+    out = dict(h=h, b=b, d=d, delta=delta)
+    if h < 15.0:
+        out.update(value=1.0, rule="a")
+        return out
+    zmin = TERRAIN[cat][2]
+    zs = max(0.6 * h, zmin)
+    c0 = c0f(zs)
+    vm = c0 * wind_cr(cat, zs) * vb
+    Iv = wind_iv(cat, zs, c0)
+    alpha = 0.67 + 0.05 * math.log(TERRAIN_Z0[cat])      # (B.1)
+    Lz = 300.0 * (zs / 200.0) ** alpha
+    n1 = 46.0 / h
+    fL = n1 * Lz / vm                                       # (B.2)
+    SL = 6.8 * fL / (1 + 10.2 * fL) ** (5.0 / 3.0)
+    B2 = 1.0 / (1.0 + 0.9 * ((b + h) / Lz) ** 0.63)        # (B.3)
+
+    def Rl(eta):                                            # (B.7), (B.8)
+        return 1.0 if eta <= 1e-9 else 1.0 / eta - (1.0 - math.exp(-2.0 * eta)) / (2.0 * eta * eta)
+    eh, eb = 4.6 * h / Lz * fL, 4.6 * b / Lz * fL
+    R2 = math.pi ** 2 / (2.0 * delta) * SL * Rl(eh) * Rl(eb)   # (B.6)
+    nu = max(n1 * math.sqrt(R2 / (B2 + R2)), 0.08)         # (B.5)
+    lt = math.sqrt(2.0 * math.log(nu * 600.0))
+    kp = max(lt + 0.6 / lt, 3.0)                            # (B.4)
+    val = (1.0 + 2.0 * kp * Iv * math.sqrt(B2 + R2)) / (1.0 + 7.0 * Iv)    # (6.1)
+    out.update(value=val, rule="calc", zs=zs, vm=vm, Iv=Iv, Lz=Lz, n1=n1, fL=fL, SL=SL, B2=B2, R2=R2, nu=nu, kp=kp,
+               c_rule=h < 100.0 and h < 4.0 * d)
+    return out
+
+
+# Fig. 7.27 / Table 7.12 – pressure distribution on a circular cylinder: Re → (αmin, cp0,min, αA, cp0,h)
+CYL_RE = ((5e5, 85.0, -2.2, 135.0, -0.4), (2e6, 80.0, -1.9, 120.0, -0.7), (1e7, 75.0, -1.5, 105.0, -0.8))
+
+
+def cyl_cp0(alpha, re):
+    """cp0(α) of a circular cylinder (Fig. 7.27): 1,0 at α = 0, minimum cp0,min at αmin (cosine curve between the key
+    points of Table 7.12), linear rise to cp0,h at αA (flow separation), then constant; Re between the curves –
+    linear interpolation (Note 1), below 5·10⁵ – as for 5·10⁵, above 10⁷ – as for 10⁷."""
+    def one(row):
+        _, am, cmin, aA, ch = row
+        a = abs(alpha) % 360.0
+        a = 360.0 - a if a > 180.0 else a
+        if a <= am:
+            return cmin + (1.0 - cmin) * (1.0 + math.cos(math.pi * a / am)) / 2.0
+        if a <= aA:
+            return cmin + (ch - cmin) * (a - am) / (aA - am)
+        return ch
+    rows = CYL_RE
+    if re <= rows[0][0]:
+        return one(rows[0])
+    if re >= rows[-1][0]:
+        return one(rows[-1])
+    for r0, r1 in zip(rows, rows[1:]):
+        if r0[0] <= re <= r1[0]:
+            t = (re - r0[0]) / (r1[0] - r0[0])
+            return one(r0) + (one(r1) - one(r0)) * t
+    return one(rows[-1])
+
+
+def parapet_zones(l, h):
+    """Fig. 7.19 / Table 7.9 – parapet on a building (return corners of length ≥ h, φ = 1): zones from each end
+    A: 0…0,3h, B: …2h, C: …4h, D – the rest; cp,net A 2,1, B 1,8, C 1,4, D 1,2. Returns [(name, a, b, cp)]."""
+    cps = dict(A=2.1, B=1.8, C=1.4, D=1.2)
+    marks = [("A", 0.3 * h), ("B", 2.0 * h), ("C", 4.0 * h)]
+    out, a = [], 0.0
+    half = l / 2.0
+    for nm, b in marks:
+        bb = min(b, half)
+        if bb > a + 1e-9:
+            out.append((nm, a, bb, cps[nm]))
+        a = max(a, bb)
+    if half > a + 1e-9:
+        out.append(("D", a, half, cps["D"]))
+    return out
 
 
 def cdir_value(zone, sector):
@@ -2017,6 +2487,7 @@ class WindGeo:
                 prof = prof_trough(B, H, p["alpha"])
             elif kind == "multi":
                 prof = (prof_multi_duo(B, H, p["n"], p["alpha"], p["alpha"]) if p["mtype"] == MULTI_TYPES[0]
+                        else prof_multi_valley(B, H, p["n"], p["alpha"]) if p["mtype"] == MULTI_TYPES[2]
                         else prof_saw(B, H, p["n"], p["alpha"]))
             elif kind == "vault":
                 prof = prof_vault(B, H, p["f"])
@@ -2112,11 +2583,13 @@ def calc_wind(g, wp, theta, var):
     vb = cc * vb0
     dens = (20000 - g.A) / (20000 + g.A) if (wp["zone"] == "3" and g.A > 300) else 1.0
     qb = qb0 * cc ** 2 * dens                    # qb = ½ρvb², vb = c_dir·c_season·vb,0
-    a, k, zmin, _ = TERRAIN[wp["cat"]]
-    zmax = TERRAIN_ZMAX[wp["cat"]]
+    oro = wp.get("oro")                          # orography (Annex A.3) – None: c0 = 1
 
-    def ce(z):                                   # Table NA.3; for z > zmax – as for zmax
-        return a * (min(max(z, zmin), zmax) / 10) ** k
+    def c0(z):
+        return oro_c0(oro, z)[0] if oro else 1.0
+
+    def ce(z):                                   # Table NA.3 (z > zmax – as for zmax); with c0 – expression (4.8), NA.8
+        return wind_ce(wp["cat"], z, c0(z))
 
     def qp(z):
         return ce(z) * qb
@@ -2156,6 +2629,17 @@ def calc_wind(g, wp, theta, var):
                                       ("C", e, d, (-0.5, -0.5))):
                     if s1 - s0 > 1e-9:
                         add("wall", nm, clip_poly(poly, so, s0, s1), c, h, srange=(s0, s1))
+
+    if g.kind == "dome":                         # cylindrical walls of the dome – 7.9.1, Fig. 7.27 (ψλα = 1)
+        sh = g.shape
+        vpk = math.sqrt(2.0 * qp(sh.H) * 1000.0 / 1.25)     # v(ze) = √(2·qp/ρ) – Note 2 to Fig. 7.27
+        re = sh.D * vpk / 15e-6                               # (7.15), ν = 15·10⁻⁶ m²/s
+        info["cyl"] = dict(re=re, v=vpk, ze=sh.H)
+        for poly, nrm in sh.wall_facets():
+            ca = -(nrm[0] * fr["w"][0] + nrm[1] * fr["w"][1])
+            ang = math.degrees(math.acos(clamp(ca, -1.0, 1.0)))
+            c = cyl_cp0(ang, re)
+            add("wall", f"α {ang:.0f}°", poly, (c, c), sh.H, cyl=True)
 
     # ---------- roof
     ztop = g.href
@@ -2252,6 +2736,34 @@ def calc_wind(g, wp, theta, var):
     elif canopy:
         canopy_zones(g, R, b, d, wp["phi"], sw, info)
 
+    # ---------- friction (7.5, Table 7.10, Fig. 7.22; 5.3(4) – negligible when the parallel surfaces ≤ 4× the
+    # surfaces perpendicular to the wind); surfaces with |n·w| ≤ sin 10° count as parallel (incl. slightly inclined)
+    if not canopy:
+        w0, w1 = fr["w"]
+        lim = math.sin(math.radians(10.0))
+        slim = min(2 * b, 4 * h)
+        apar = aperp = afr = 0.0
+        for z in zones:
+            nx, ny, nz = unit(newell(z["poly"]))
+            cdot = abs(nx * w0 + ny * w1)
+            if cdot <= lim:
+                apar += z["area"]
+                P = clip_poly(z["poly"], so, slim, 1e9)
+                if P and len(P) >= 3:
+                    afr += poly_area(P)
+            else:
+                aperp += z["area"] * cdot
+        cfr = wp.get("cfr", 0.02)
+        info["friction"] = dict(cfr=cfr, apar=apar, aperp=aperp, slim=slim, afr=afr, ze=h, qp=qp(h),
+                                F=cfr * qp(h) * afr, negl=apar <= 4 * aperp)
+    # ---------- structural factor (6.2, 6.3.1, Annex B)
+    info["cscd"] = cscd_building(wp["cat"], h, b, d, vb, c0, wp.get("delta", 0.10))
+    # ---------- parapet on a flat roof (7.4.1, Table 7.9, Fig. 7.19; ze = h + hp)
+    if g.kind == "flat" and g.hp > 0 and g.p.get("edge", EDGE_TYPES[0]) == EDGE_TYPES[0]:
+        zep = g.H + g.hp
+        info["parapet"] = dict(hp=g.hp, ze=zep, qp=qp(zep),
+                               sides=[(lab, ln, parapet_zones(ln, g.hp)) for lab, ln in (("L", g.L), ("B", g.B))])
+
     # ---------- internal pressure (7.2.9) – not for canopies
     ck = wp.get("cpi_kind", 0)
     if canopy:
@@ -2286,17 +2798,22 @@ def calc_wind(g, wp, theta, var):
         nets = [pt["we"] - qi * c for c in cpis] or [pt["we"]]
         pt["wn_min"], pt["wn_max"] = min(nets), max(nets)
     if canopy:
-        info["Fw"] = info["cf"] * qp(ztop) * g.L * g.B
+        info["Fw"] = info["cscd"]["value"] * info["cf"] * qp(ztop) * g.L * g.B
+    if oro:
+        c0t, st = oro_c0(oro, ztop)
+        info["oro"] = dict(oro, c0=c0t, s=st, phi=oro["H"] / oro["Lu"],
+                           Le=oro["Lu"] if oro["H"] / oro["Lu"] <= 0.3 else oro["H"] / 0.3)
     return dict(vb0=vb0, qb0=qb0, cdir=wp["cdir"],
                 cseason=wp["cseason"], vb=vb, qb=qb, dens=dens, ze=ztop, ce=ce(ztop), qp=qp(ztop), e=e, b=b, d=d,
                 hd=hd, zones=zones, points=points, cpis=cpis, qi=qi, theta=theta, info=info)
 
 
-def mono90_zones(R, e, d, al, t0, t1, factor=1.0):
-    """Monopitch roof, θ = 90° (Table 7.3b) – high edge on the t1 side."""
+def mono90_zones(R, e, d, al, t0, t1, factor=1.0, high_t0=False):
+    """Monopitch roof, θ = 90° (Table 7.3b) – high edge on the t1 side (high_t0 – on the t0 side)."""
     T = T_MONO_90
-    R("Flow", 0, e / 10, t0, t0 + e / 4, tab_cpe(T, "Flow", al, "n"), factor)
-    R("Fup", 0, e / 10, t1 - e / 4, t1, tab_cpe(T, "Fup", al, "n"), factor)
+    lo_, up_ = ("Fup", "Flow") if high_t0 else ("Flow", "Fup")
+    R(lo_, 0, e / 10, t0, t0 + e / 4, tab_cpe(T, lo_, al, "n"), factor)
+    R(up_, 0, e / 10, t1 - e / 4, t1, tab_cpe(T, up_, al, "n"), factor)
     if t1 - t0 > e / 2:
         R("G", 0, e / 10, t0 + e / 4, t1 - e / 4, tab_cpe(T, "G", al, "n"), factor)
     R("H", e / 10, e / 2, t0, t1, tab_cpe(T, "H", al, "n"), factor)
@@ -2488,6 +3005,34 @@ def multi_zones(g, R, e, b, d, h, theta, sw, sl, info):
     al = g.p["alpha"]
     duo = g.p["mtype"] == MULTI_TYPES[0]
     fac = lambda k: 1.0 if k == 0 else (0.8 if k == 1 else 0.6)
+    if g.p["mtype"] == MULTI_TYPES[2]:                    # Fig. 7.10 c – monopitch ends, troughs inside
+        dep = clamp(al, 5, 45)
+        if theta == 90:
+            ek = min(w, 2 * h)
+            for k in range(n):
+                if k == 0 or k == n - 1:
+                    mono90_zones(R, ek, d, al, k * w, (k + 1) * w, high_t0=(k == n - 1 and k > 0))
+                else:
+                    duo90_zones(R, ek, d, T_TROUGH_90, k * w, (k + 1) * w, alphas=ALPHAS_T, fixed=dep)
+            info["multi"] = "θ = 90°: każda nawa jak pojedynczy dach (b = szerokość nawy, 7.2.7(1))."
+            return
+        F, G, H_ = (tab_cpe(T_MONO_0, z, al, sw) for z in ("F", "G", "H"))
+        Ht, It = (tab_cpe(T_TROUGH_0, z, dep, sl, ALPHAS_T) for z in ("H", "I"))
+        R("F", 0, min(e / 10, w), 0, e / 4, F)
+        R("F", 0, min(e / 10, w), b - e / 4, b, F)
+        R("G", 0, min(e / 10, w), e / 4, b - e / 4, G)
+        R("H", e / 10, w, 0, b, H_)
+        for k in range(1, n):
+            f_ = 1.0 if k == 1 else 0.6
+            sfx = "" if f_ == 1.0 else "·0.6"
+            if k == n - 1:                               # monopitch at the leeward end
+                R("I" + sfx, k * w, (k + 1) * w, 0, b, It, factor=f_)
+            else:                                        # trough: the windward and the leeward slope
+                R("H" + sfx, k * w, k * w + w / 2, 0, b, Ht, factor=f_)
+                R("I" + sfx, k * w + w / 2, (k + 1) * w, 0, b, It, factor=f_)
+        info["multi"] = ("Rys. 7.10 c: nawa 1 – cpe dachu jednospadowego (Tabl. 7.3a), nawa 2 – cpe kosza dachu "
+                         "dwuspadowego (Tabl. 7.4a, α < 0), kolejne – 0,6·cpe kosza (Uwaga 2).")
+        return
     if theta == 90:
         ek = min(w, 2 * h)
         for k in range(n):
@@ -2687,26 +3232,33 @@ EXC_SECTIONS = {
     "flat": [("fobst", "Przeszkoda na dachu", [FL("s_fh", "Wysokość przeszkody h", hi=20),
                                                FL("s_fw", "Szerokość przeszkody"), FL("s_fd", "Głębokość przeszkody")]),
              _SEC_CANOPY],
-    "multi": [_SEC_CANOPY],
+    "multi": [_SEC_CANOPY, ("gpar", "Attyka na ścianach szczytowych – zaspa w koszach",
+                            [FL("s_gvh", "Attyka ponad kalenicą", "m", 0, 0.3, False)])],
     "abut": [("annex", "Przybudówka z dachem dwuspadowym", [
         FL("s_xw", "Szerokość przybudówki"), FL("s_xd", "Głębokość przybudówki"),
         FL("s_xh", "Różnica wys. okapów h", hi=200), FL("s_xa", "Kąt dachu przybudówki α", "°", 0, 75, False)]),
-        _SEC_CANOPY],
+        _SEC_CANOPY,
+        ("gap", "Budowla wyższa bliska, nieprzylegająca", [FL("s_gd", "Odstęp od budowli wyższej", "m", 0, 50)])],
     "obst": [_SEC_CANOPY],
     "mono": _SEC_PITCH, "duo": _SEC_PITCH, "vault": _SEC_PITCH,
 }
-EXC_SEC_DEFAULT = dict(fobst=True, canopy=False, annex=True, epar=True, gpar=False, pobst=False)
+EXC_SEC_DEFAULT = dict(fobst=True, canopy=False, annex=True, epar=True, gpar=False, pobst=False, gap=False)
 EXC_FIELDS = {k: [f for _, _, fl in secs for f in fl] for k, secs in EXC_SECTIONS.items()}
 FIELD_DEFS = {f[0]: f for t in (SNOW_TYPES, WIND_TYPES) for _, fl in t.values() for f in fl
               if not isinstance(f, str)}
 FIELD_DEFS.update({f[0]: f for fl in EXC_FIELDS.values() for f in fl})
+FIELD_DEFS.update({f[0]: f for f in (          # orography (Annex A.3) – dimensions edited on the 3D model
+    ("oH", "Wysokość wzniesienia H", "m", 0, 2000, True, False),
+    ("oLu", "Dł. stoku nawietrznego Lu", "m", 0, 1e5, True, False),
+    ("oLd", "Dł. stoku zawietrznego Ld", "m", 0, 1e5, True, False),
+    ("ox", "Odległość od grzbietu x (< 0 – na stoku nawietrznym)", "m", -1e5, 1e5, False, False))})
 DEFAULTS = dict(A="210", s_L="12", s_B="10", s_H="5", s_alpha="25", s_alpha2="25", s_n="3", s_f="3",
                 s_dh="3", s_b1="10", s_aup="30", s_hob="1.0", s_yob="5",
                 s_xw="6", s_xd="5", s_xh="5", s_xa="20", s_cb="2", s_cw="3", s_ch="2.5",
-                s_pah="0.6", s_gah="0.6", s_poh="0.8", s_pol="6", s_poy="2", s_fh="0.8", s_fw="2", s_fd="2",
+                s_pah="0.6", s_gah="0.6", s_gvh="0.2", s_gd="1.0", s_poh="0.8", s_pol="6", s_poy="2", s_fh="0.8", s_fw="2", s_fd="2",
                 w_L="12", w_B="10", w_H="5", w_hp="0", w_r="0.5", w_am="45", w_alpha="25", w_alpha2="25",
                 w_a90="45", w_n="3", w_f="3", w_D="12", U="2.0", ti="20", nret="50", cseason="1.0", Aload="10",
-                mu="0.5", ndom="3", phi="0")
+                mu="0.5", ndom="3", phi="0", oH="20", oLu="200", oLd="200", ox="0")
 
 PROJECT_EXT = ".kayenn"
 
@@ -2715,6 +3267,24 @@ PROJECT_EXT = ".kayenn"
 # q = (from, to, recommended) – uniformly distributed load [kN/m²] (6.4: line load [kN/m]); Q – concentrated [kN];
 # low_min – the lower limit is mandatory (NB1).
 TAB_USE, TAB_SNOW, TAB_WIND = 0, 1, 2
+# Table 6.5 (net weight, hoisting load [kN], axle width a, overall width b, overall length l [m]) and Table 6.6 (Qk)
+USE_FL = ((21, 10, 0.85, 1.00, 2.60, 26.0), (31, 15, 0.95, 1.10, 3.00, 40.0), (44, 25, 1.00, 1.20, 3.30, 63.0),
+          (60, 40, 1.20, 1.40, 4.00, 90.0), (90, 60, 1.50, 1.90, 4.60, 140.0), (110, 80, 1.80, 2.30, 5.10, 170.0))
+USE_TYRES = ("opony pneumatyczne (φ = 1,40)", "opony twarde (φ = 2,00)")       # 6.3.2.3(4)
+USE_TYRE_PHI = (1.40, 2.00)
+USE_BCLASS = ("pojazdy ≤ 2500 kg (m = 1500 kg)", "pojazdy > 2500 kg (m – rzeczywista masa)")
+USE_BSIT = ("bariera parkingu – F", "bariera podjazdu – F/2 na wysokości 610 mm",
+            "naprzeciw końca prostego zjazdu > 20 m – 2F na wysokości 610 mm")
+USE_BSIT_REF = ("B(2)–B(5)", "B(6)", "B(7)")        # paragraphs of Annex B – only in the report
+
+
+def _dec(x):
+    return f"{x:.2f}".replace(".", ",")
+
+
+def use_barrier_F(m, dc, db, v=4.5):
+    """Annex B(2): F = 0.5·m·v²/(δc + δb) [kN] (m in kg, v in m/s, δ in mm)."""
+    return 0.5 * m * v * v / (dc + db)
 REPORT_ONLY = ("użytkowe", "własne")         # cases without a 3D model: only the report on the card and in the printout
 _C_DESC = "Powierzchnie, na których mogą gromadzić się ludzie (z wyłączeniem powierzchni kategorii A, B i D). "
 USE_GROUPS = [
@@ -2754,7 +3324,7 @@ USE_GROUPS = [
         dict(code="D2", name="D2 – domy towarowe", q=(4.0, 5.0, 5.0), Q=(3.5, 7.0, 7.0), low_min=True,
              desc="Powierzchnie handlowe. D2: powierzchnie w domach towarowych."),
     ]),
-    ("6.3.2", "6.3.2 – Powierzchnie składowania i działalności przemysłowej", "Tablice 6.3 i 6.4", [
+    ("6.3.2", "6.3.2 – Powierzchnie składowania i działalności przemysłowej (także podnośniki, pojazdy)", "Tablice 6.3 i 6.4", [
         dict(code="E1", name="E1 – powierzchnie składowania", q=(7.5, 7.5, 7.5), Q=(7.0, 7.0, 7.0),
              desc="Powierzchnie, na których mogą być gromadzone towary, łącznie z powierzchniami dostępu, "
                   "np. powierzchnie składowania, z włączeniem składowania książek i innych dokumentów.",
@@ -2764,6 +3334,19 @@ USE_GROUPS = [
              desc="Powierzchnie użytkowania przemysłowego.",
              note="Norma nie podaje wartości – obciążenia ustala się indywidualnie dla danej działalności; "
                   "podnośniki widłowe wg 6.3.2.3 (Tablice 6.5 i 6.6), pojazdy transportowe wg 6.3.2.4."),
+        *[dict(code=f"FL{i + 1}", name=f"Podnośnik widłowy FL {i + 1} (ciężar netto {fl[0]:g} kN, udźwig {fl[1]:g} kN)",
+               q=None, Q=(fl[5], fl[5], fl[5]), fl=fl, tab="6.3.2.3, Tablice 6.5 i 6.6",
+               desc=f"Podnośnik widłowy klasy FL {i + 1} (Tablica 6.5): ciężar netto {fl[0]:g} kN, udźwig {fl[1]:g} kN, "
+                    f"rozstaw kół a = {_dec(fl[2])} m, szerokość całkowita b = {_dec(fl[3])} m, długość całkowita "
+                    f"l = {_dec(fl[4])} m.",
+               note="Qₖ – statyczne obciążenie osi (Tablica 6.6), dwa koła w rozstawie a (Rysunek 6.1); "
+                    "oddziaływanie skupione przykładane razem z obciążeniem rozłożonym z Tablic 6.2, 6.4 lub 6.8 "
+                    "(6.3.2.2(7)).")
+          for i, fl in enumerate(USE_FL)],
+        dict(code="VT", name="Pojazdy transportowe (6.3.2.4)", q=None, Q=None, tab="6.3.2.4",
+             desc="Pojazdy transportowe poruszające się swobodnie po stropach lub po szynach.",
+             note="Norma nie podaje wartości – obciążenia pionowe i poziome oraz ich układ ustala się dla przypadków "
+                  "szczególnych na podstawie wzorca obciążeń koła (6.3.2.4); można stosować modele EN 1991-2."),
     ]),
     ("6.3.3", "6.3.3 – Garaże i powierzchnie ruchu pojazdów (z wyłączeniem mostów)", "Tablice 6.7 i 6.8", [
         dict(code="F", name="F – pojazdy lekkie (≤ 30 kN)", q=(1.5, 2.5, 2.5), Q=(10.0, 20.0, 20.0),
@@ -2810,20 +3393,21 @@ USE_GROUPS = [
                   "niż 1,20 m – powierzchnie kategorii E.",
              note="Obciążenia poziome zależą od sposobu użytkowania – wartość jest minimalna i należy ją sprawdzić "
                   "dla określonego sposobu użytkowania."),
-        dict(code="HFG", name="kategorie F i G (bariery parkingów)", q=None, line=True,
-             desc="Bariery i ściany ograniczające na parkingach samochodowych – Załącznik B.",
-             note="Siła pozioma od uderzenia pojazdu F = 0,5·m·v² / (δc + δb), na długości 1,5 m bariery (B(2)). "
-                  "Dla pojazdów ≤ 2500 kg i sztywnych barier F = 150 kN (B(3)), na wysokości 375 mm nad stropem "
-                  "(B(5))."),
+        dict(code="HFG", name="kategorie F i G", q=None, Q=None, barrier=True,
+             tab="Załącznik B",
+             desc="Bariery i ściany ograniczające na parkingach samochodowych – Załącznik B: siła pozioma od uderzenia "
+                  "pojazdu, prostopadła do bariery i rozłożona równomiernie na dowolnej długości 1,5 m bariery.",
+             note="F = 0,5·m·v²/(δc + δb) (B(2)); pojazdy ≤ 2500 kg: m = 1500 kg, v = 4,5 m/s, δc = 100 mm (B(3)); "
+                  "> 2500 kg: m – rzeczywista masa, v = 4,5 m/s (B(4))."),
     ]),
 ]
-USE_LIKE = [e for gk, _, _, es in USE_GROUPS[:3] for e in es]     # category I – use as A to G
+USE_LIKE = [e for gk, _, _, es in USE_GROUPS[:3] for e in es if not e.get("fl") and e["code"] != "VT"]  # I: A–G
 USE_PSI0 = {"A": 0.7, "B": 0.7, "C": 0.7, "D": 0.7, "E": 1.0}      # ψ0 – EN 1990, Table A1.1 (NB: no changes)
 # 6.3.1.2(8): weight of movable partitions as an addition to qk (self-weight per 1 m of the wall → qk)
 USE_PARTS = ("brak", "ciężar ścianki ≤ 1,0 kN/m", "ciężar ścianki ≤ 2,0 kN/m", "ciężar ścianki ≤ 3,0 kN/m")
 USE_PART_Q = (0.0, 0.50, 0.80, 1.20)
-USE_REDS = ("bez redukcji", "α_A – wg powierzchni obciążonej (6.1)",
-            "α_n – słupy i ściany z kilku kondygnacji (6.2)")
+USE_REDS = ("bez redukcji", "α_A – wg powierzchni obciążonej",
+            "α_n – słupy i ściany z kilku kondygnacji")
 
 
 def use_alpha_A(psi0, A, code):
@@ -2893,10 +3477,15 @@ WARTOŚCI CHARAKTERYSTYCZNE
     kalenicy: μ₁ = min(2h/sₖ; 2b/lₛ; 8), b = b₁ = L, lₛ = min(5h; L; 15 m), stała na szerokości dachu
     (h – wysokość attyki nad połacią); osobny przypadek dla każdej ściany szczytowej.
 • Nie stosuje się zasp wyjątkowych w koszach dachów wielopołaciowych – NB1.3 wyłącza B2(1)–B2(3).
-• Pominięto: zaspy w zagłębieniu za attyką szczytową dachu wielopołaciowego (B4(5)), budowle bliskie, lecz
-  nieprzylegające (B3(2)),
-  obciążenie barierek (6.4); przeszkody i attyki dodane w opcji „Wyjątkowe” nie zmieniają przypadków
-  trwałych (i)–(iii).
+• Dach wielopołaciowy z attyką szczytową (B4(5)): attyka pozioma ≤ 0,3 m ponad kalenicą; w koszach
+  μ₁ = min(2h/sₖ; 2b/lₛ; 8), h – od wierzchu attyki do linii kosza, lₛ = min(5h; L; 15 m), μ maleje liniowo do zera
+  przy sąsiednich kalenicach i na długości lₛ; osobny przypadek dla każdej ściany szczytowej.
+• Budowla wyższa bliska, nieprzylegająca (B3(2)): jak B3, obciążony tylko dach niższy, obciążenie między
+  budynkami pominięte (zaspa liczona od ściany budowli wyższej); przypadki trwałe – jak dla budowli
+  przylegającej (po stronie bezpiecznej). Uwaga: przy odstępie ≥ 1,5 m budowlę można w przybliżeniu pominąć.
+• Barierki przeciwśnieżne (6.4): Fₛ = s·b·sin α (6.5), s = μ₁·Cₑ·Cₜ·sₖ (μ₁ ≥ 0,8), b – rzut od barierki
+  przy okapie do kalenicy (bez barierek pośrednich); dach walcowy – μ = 0,8, α – nachylenie stycznej przy okapie.
+• Przeszkody i attyki dodane w opcji „Wyjątkowe” nie zmieniają przypadków trwałych (i)–(iii).
 
 WIATR – PN-EN 1991-1-4:2008 z poprawkami AC:2009, Ap1:2010, Ap2:2010, Ap3:2011
 • vb,0 i qb,0 wg Tablicy NA.1: strefa 1 i 3: 22 m/s, 0,30 kN/m² (A ≤ 300 m), dla A > 300 m ×[1 + 0,0006(A − 300)]
@@ -2907,9 +3496,20 @@ WIATR – PN-EN 1991-1-4:2008 z poprawkami AC:2009, Ap1:2010, Ap2:2010, Ap3:2011
 • qp(z) = cₑ(z)·qb, cₑ(z) wg Tablicy NA.3 opublikowanej normy (2008):
   0: 3,0(z/10)^0,17 · I: 2,8(z/10)^0,19 · II: 2,3(z/10)^0,24 · III: 1,9(z/10)^0,26 · IV: 1,5(z/10)^0,29,
   dla z < z_min przyjmuje się z_min (1, 1, 2, 5, 10 m), dla z > z_max – z_max (200, 200, 300, 400, 500 m).
-• Brak w programie (nie liczone): wpływ orografii c₀ (Zał. A, c₀ = 1), siły tarcia (7.5), ściany wolno stojące i
-  attyki (7.4), konstrukcje inne niż budynki i wiaty (7.6–7.13), współczynnik konstrukcyjny cₛcd (6; dla
-  budynków o h < 15 m cₛcd = 1), ściany i dachy wielopowłokowe (7.2.10).
+• Orografia (Zał. A.3, wzory (A.4)–(A.13) wg Ap1): wzgórze / łańcuch wzgórz albo klif / skarpa – H, Lu, Ld, x;
+  c₀ = 1 dla Φ < 0,05, 1 + 2sΦ dla 0,05 ≤ Φ ≤ 0,3, 1 + 0,6s dla Φ > 0,3; poza zakresem wzorów s = 0. Z orografią
+  qp ze wzoru (4.8) (NA.8): cₑ = c₀²·cr² + c₀·(cₑ,NA − cr²), cr i cₑ,NA z Tabl. NA.3 (Iv = Iv(c₀ = 1)/c₀ wg (4.7)).
+• Współczynnik konstrukcyjny cₛcd (6): h < 15 m → 1 (6.2(1)a); wyższe budynki – 6.3.1, procedura 1 wg
+  Załącznika B (NA.10): zs = 0,6h, n₁ = 46/h (F.2), δ = δs z Tabl. F.2 (δa, δd pominięte – po stronie bezpiecznej),
+  L(z) wg (B.1), T = 600 s. cₛcd dotyczy sił wypadkowych (wiaty: Fw = cₛcd·cf·qp·Aref); ciśnienia we, wi – bez cₛcd.
+• Siły tarcia (7.5, Tabl. 7.10): cfr = 0,01 / 0,02 / 0,04; Afr – powierzchnie równoległe do wiatru (|n·w| ≤ sin 10°)
+  dalej niż min(2b; 4h) od krawędzi nawietrznej, ze = h; pomijane, gdy pow. równoległe ≤ 4 × prostopadłe (5.3(4)).
+• Attyka na dachu płaskim (7.4.1, Tabl. 7.9, Rys. 7.19): φ = 1, attyka z załamaniem w narożniku (obiega naroża):
+  cp,net A 2,1 / B 1,8 / C 1,4 / D 1,2, pola 0,3hₚ / 2hₚ / 4hₚ od obu końców boku, ze = h + hₚ.
+• Ściany i dachy wielopowłokowe (7.2.10(3), Uwaga 2): cztery układy powłok – cp,net powłoki zewnętrznej
+  i wewnętrznej (przestrzeń zamknięta na krańcach, odstęp < 100 mm); jedna powłoka przepuszczalna – we − wi.
+• Poza zakresem (konstrukcje inne niż budynki): ściany wolno stojące i tablice (7.4.1, 7.4.3), elementy
+  o przekrojach prostokątnych, wielobocznych, walce, kule, kratownice, flagi (7.6–7.13), mosty (8).
 • Ściany: Tablica 7.1, ze wg Rys. 7.4; e = min(b; 2h); h – najwyższy punkt dachu.
 • Dachy płaskie (7.2.3, Tabl. 7.2): ostre krawędzie, z attyką (hₚ/h), krawędzie zaokrąglone (r/h; poniżej
   0,05 – interpolacja do krawędzi ostrych) i mansardowe (α = 30°…60°; powyżej 60° – interpolacja do dachu
@@ -2923,10 +3523,13 @@ WIATR – PN-EN 1991-1-4:2008 z poprawkami AC:2009, Ap1:2010, Ap2:2010, Ap3:2011
   kątach połaci, dlatego taki dach nie jest dostępny w obliczeniach wiatru.
 • Wielospadowe (7.2.7, Rys. 7.10): F/G/J tylko na nawie nawietrznej; kolejne nawy: 0,8·cpe, 0,6·cpe
   (piłokształtny, 1. nawa z cpe > 0: −0,4); θ = 90°: każda nawa jak pojedynczy dach.
-  Konfiguracja c) z Rys. 7.10 (kosze z połaciami jednospadowymi na końcach) nie jest modelowana.
+  Konfiguracja c) z Rys. 7.10 (jednospadowe na końcach, kosze pomiędzy): nawa 1 – cpe dachu jednospadowego
+  (Tabl. 7.3a), nawa 2 – cpe kosza (Tabl. 7.4a, α < 0; połacie H i I), kolejne – 0,6·cpe (Uwaga 2).
 • Łukowe (Rys. 7.11 z AC) i kopuły (Rys. 7.12): cpe,10 z węzłów wykresów (odcinki proste); ze = h + f;
   łuk – pola A, B, C = d/4, d/2, d/4, tylko wiatr prostopadły do tworzącej; kopuła – cpe liniowo
-  A → B → C wzdłuż łuku. Ściany kopuły (walec, 7.9) nie są liczone.
+  A → B → C wzdłuż łuku. Ściany kopuły – walec (7.9.1): cpe = ψλα·cp0, cp0(α) z Rys. 7.27 / Tabl. 7.12 wg Re
+  (ν = 15·10⁻⁶ m²/s, v = √(2qp/ρ), ze = h ścian), między punktami charakterystycznymi krzywa kosinusowa
+  (0…αmin) i liniowo (αmin…αA); ψλα = 1 (po stronie bezpiecznej).
 • Wiaty (7.3, Tabl. 7.6 z AC i 7.7): cp,net i cf; min. interpolowane liniowo po φ; |α| < 5° dla wiaty
   dwuspadowej → wartości dla ±5°. Siła Fw = cf·qp(ze)·L·d (cs·cd = 1). Środek parcia: d/4 od krawędzi
   nawietrznej (jednospadowa), środki połaci (dwuspadowa); sprawdzić też obciążenie jednej połaci.
@@ -2947,6 +3550,12 @@ UŻYTKOWE – PN-EN 1991-1-1:2004 z poprawkami AC:2009, Ap1:2010, Ap2:2011 (Zał
   nie jest redukowany. Przy oddziaływaniu towarzyszącym stosuje się tylko jeden ze współczynników ψ₀ i αn (3.3.2(2)).
 • Kombinacje oddziaływań i współczynniki częściowe (EN 1990) – poza zakresem programu: podawane są wartości
   charakterystyczne.
+• Podnośniki widłowe FL 1–FL 6 (6.3.2.3, Tabl. 6.5, 6.6): Qₖ osi, Qₖ,dyn = φ·Qₖ (φ = 1,40 opony pneumatyczne,
+  2,00 twarde), obciążenie poziome 0,3·Qₖ; razem z qₖ z Tablic 6.2, 6.4 lub 6.8 (6.3.2.2(7)). Pojazdy transportowe
+  (6.3.2.4) – norma nie podaje wartości: przyjmowane indywidualnie.
+• Bariery parkingów (Załącznik B): F = 0,5·m·v²/(δc + δb); ≤ 2500 kg: m = 1500 kg, v = 4,5 m/s, δc = 100 mm,
+  na wysokości 375 mm (B(3), B(5)); > 2500 kg: m rzeczywista (B(4)); podjazdy F/2 na 610 mm (B(6)); naprzeciw końca
+  prostego zjazdu > 20 m – 2F na 610 mm (B(7)); siła na dowolnej długości 1,5 m bariery.
 
 LOKALIZACJA
 • Strefy obciążenia śniegiem i wiatrem wyznaczane są z punktu wskazanego na mapie (OpenStreetMap
@@ -3671,7 +4280,7 @@ class Win3D(QWidget):
 #  PROJECT – list of cases (saved 3D models with results)
 # ===================================================================
 VIEW_KEYS = ("yaw", "pitch", "zoom", "pan_x", "pan_y", "piv")     # piv – rotation point (None – model centre)
-TOGGLE_KEYS = ("labels3d", "arrows3d", "dims3d", "bdims3d")
+TOGGLE_KEYS = ("labels3d", "arrows3d", "dims3d", "bdims3d", "odims3d")
 
 
 def html_body(doc):
@@ -3733,10 +4342,11 @@ class CaseCanvas(Canvas3D):
             CaseCanvas.active = None
         super().hideEvent(e)
 
-    def __init__(self, app, card):
+    def __init__(self, app, card, idx=0):
         super().__init__(app)
         self.card = card
-        self.view = dict(card.case["extra"].get("view") or {})
+        self.idx = idx                               # viewport number in the card (0 – the first)
+        self.view = dict(card.vp_data(idx).get("view") or {})
         for k, v in (("yaw", math.radians(-32)), ("pitch", math.radians(24)), ("zoom", 1.0), ("pan_x", 0.0),
                      ("pan_y", 0.0)):
             self.view.setdefault(k, v)
@@ -3746,12 +4356,20 @@ class CaseCanvas(Canvas3D):
         self._moved = False
         self.setMinimumHeight(540)
 
+    @property
+    def vp(self):
+        """Data of this viewport (view, toggles) – see CaseCard.vp_data."""
+        return self.card.vp_data(self.idx)
+
     def redraw(self):
         self.app.render_case(self, self.card.case)
         self.update()
 
     def resizeEvent(self, e):
         self.redraw()
+
+    def contextMenuEvent(self, e):
+        self.card.viewport_menu(self, e.globalPos())
 
     def mousePressEvent(self, e):
         if not self.is_active():
@@ -3795,7 +4413,7 @@ class CaseCanvas(Canvas3D):
                     self.card.edit_value(self._edit_keys[tag][0])
                     return
         if self._moved:
-            self.card.view_changed(self.view)
+            self.card.view_changed(self.view, self.idx)
 
     def wheelEvent(self, e):
         if not self.is_active():
@@ -3813,12 +4431,12 @@ class CaseCanvas(Canvas3D):
             f = 1.1 if dy > 0 else 1 / 1.1 if dy else 1.0
         self.zoom_view(f, self._xy(e))
         self.redraw()
-        self.card.view_changed(self.view)
+        self.card.view_changed(self.view, self.idx)
 
     def zoom_view(self, f, at):
         """Zoom by f about the point under the cursor at = (x, y)."""
         old = self.view["zoom"]
-        self.view["zoom"] = clamp(old * f, ZOOM_MIN, ZOOM_MAX)
+        self.view["zoom"] = clamp(old * f, getattr(self, "_zmin", ZOOM_MIN), ZOOM_MAX)
         if old > 0:
             self.view["pan_x"], self.view["pan_y"] = zoom_pan(self.view["pan_x"], self.view["pan_y"],
                                                               self.view["zoom"] / old, at, self.width(), self.height())
@@ -4080,23 +4698,12 @@ class CaseCard(QFrame):
             self._body_mode = calc["mode"]
             self.layout().addWidget(body)
             return
-        tg = ex.setdefault("toggles", {})
-        # only the view and building dimensions here (click a dimension in the preview); other changes – Edytuj button
-        for key, lab in (("labels3d", "Etykiety"), ("dims3d", "Wymiary pól"),
-                         ("bdims3d", "Wymiary budynku")):
-            if key == "arrows3d" and calc["mode"] != "wiatr":
-                continue
-            ch = QCheckBox(lab)
-            ch.setChecked(bool(tg.get(key, True)))
-            ch.toggled.connect(lambda on, key=key: self._toggle(key, on))
-            bar.addWidget(ch)
-        bar.addStretch(1)
-        b = QPushButton("Widok domyślny")
-        b.clicked.connect(lambda checked=False: self._reset_view())
-        bar.addWidget(b)
-        bl.addLayout(bar)
-        self.canvas = CaseCanvas(self.app, self)
-        bl.addWidget(self.canvas)
+        self.vps = []
+        for k in range(1 + len(ex.get("viewports") or [])):
+            box = self._viewport_box(k, calc)
+            bl.addWidget(box)
+            self.vps.append(box)
+        self.canvas = self.vps[0].canvas
         self.report = FitBrowser()
         self.report.setOpenLinks(False)
         self.report.setHtml(self.case.get("report", ""))
@@ -4104,6 +4711,97 @@ class CaseCard(QFrame):
         self.body = body
         self._body_mode = calc["mode"]
         self.layout().addWidget(body)
+
+    def _viewport_box(self, k, calc):
+        """One viewport: bar (view toggles, Widok domyślny) + 3D preview. Right click on the preview – Duplikuj."""
+        box = QWidget()
+        vl = QVBoxLayout(box)
+        vl.setContentsMargins(0, 0, 0, 0)
+        vl.setSpacing(6)
+        bar = QHBoxLayout()
+        tg = self.vp_data(k).setdefault("toggles", {})
+        # only the view and building dimensions here (click a dimension in the preview); other changes – Edytuj button
+        for key, lab in (("labels3d", "Etykiety"), ("dims3d", "Wymiary pól"), ("bdims3d", "Wymiary budynku")):
+            ch = QCheckBox(lab)
+            ch.setChecked(bool(tg.get(key, True)))
+            ch.toggled.connect(lambda on, key=key, k=k: self._toggle(key, on, k))
+            bar.addWidget(ch)
+        box.ck_odims = None
+        if calc["mode"] == "wiatr":                      # dimensions of the orography – visible when it is on
+            ch = QCheckBox("Wymiary orografii")
+            ch.setChecked(bool(tg.get("odims3d", True)))
+            ch.toggled.connect(lambda on, k=k: self._toggle("odims3d", on, k))
+            ch.setVisible(bool(((calc["wind"] or {}).get("info") or {}).get("oro")))
+            bar.addWidget(ch)
+            box.ck_odims = ch
+        box.title = QLabel("")
+        box.title.setObjectName("muted")
+        bar.addWidget(box.title)
+        bar.addStretch(1)
+        b = QPushButton("Widok domyślny")
+        b.clicked.connect(lambda checked=False, k=k: self._reset_view(k))
+        bar.addWidget(b)
+        vl.addLayout(bar)
+        box.canvas = CaseCanvas(self.app, self, k)
+        vl.addWidget(box.canvas)
+        n = 1 + len(self.case["extra"].get("viewports") or [])
+        box.title.setText(f"   Viewport {k + 1}" if n > 1 else "")
+        return box
+
+    # --- viewports: the first one keeps its data in extra["view"] / extra["toggles"], the others in
+    # extra["viewports"] = [{"view": …, "toggles": …}, …]
+    def vp_data(self, k):
+        ex = self.case["extra"]
+        vps = ex.get("viewports") or []
+        return ex if k == 0 or k > len(vps) else vps[k - 1]
+
+    def viewport_menu(self, canvas, gpos):
+        from PySide6.QtWidgets import QMenu
+        m = QMenu(self)
+        a_dup = m.addAction("Duplikuj")
+        a_del = m.addAction("Usuń viewport") if len(self.vps) > 1 else None
+        act = m.exec(gpos)
+        if act is a_dup:
+            self.duplicate_viewport(canvas.idx)
+        elif act is not None and act is a_del:
+            self.remove_viewport(canvas.idx)
+
+    def duplicate_viewport(self, k):
+        """Duplikuj (right click on a viewport): a copy of the view right below it – the case can be shown from
+        more than one side."""
+        ex = self.case["extra"]
+        src = self.vp_data(k)
+        cp = {"view": dict(self.vps[k].canvas.view) if k < len(self.vps) else dict(src.get("view") or {}),
+              "toggles": dict(src.get("toggles") or {})}
+        ex.setdefault("viewports", []).insert(k, copy.deepcopy(cp))
+        self._rebuild_body()
+        self.app.project_changed()
+
+    def remove_viewport(self, k):
+        """Usuń viewport: any of them, but at least one stays (removing the first – the next one takes its place)."""
+        ex = self.case["extra"]
+        vps = ex.get("viewports") or []
+        if not vps or k < 0 or k > len(vps):
+            return
+        if k == 0:
+            first = vps.pop(0)
+            ex["view"], ex["toggles"] = first.get("view") or {}, first.get("toggles") or {}
+        else:
+            del vps[k - 1]
+        if not vps:
+            ex.pop("viewports", None)
+        self._rebuild_body()
+        self.app.project_changed()
+
+    def _rebuild_body(self):
+        """The body again (a different number of viewports); the list keeps its place."""
+        def go():
+            self.layout().removeWidget(self.body)
+            self.body.hide()
+            self.body.deleteLater()
+            self.body = None
+            self._build_body()
+        self.pw.keep_view(go)
 
     def refresh(self):
         """After recalculating a case: header, report and model – in the same widgets (the card height does not
@@ -4122,26 +4820,33 @@ class CaseCard(QFrame):
             self.body = None
             self._build_body()
             return
-        self.canvas.view.update({k: v for k, v in (self.case["extra"].get("view") or {}).items() if k in VIEW_KEYS})
-        self.canvas._scene_key = None
-        self.canvas.redraw()
+        if len(self.vps) != 1 + len(self.case["extra"].get("viewports") or []):    # e.g. after Cofnij
+            self._rebuild_body()
+            return
+        oro = bool(((self.case["_calc"].get("wind") or {}).get("info") or {}).get("oro"))
+        for k, box in enumerate(self.vps):
+            if box.ck_odims is not None:
+                box.ck_odims.setVisible(oro)
+            box.canvas.view.update({a: v for a, v in (self.vp_data(k).get("view") or {}).items() if a in VIEW_KEYS})
+            box.canvas._scene_key = None
+            box.canvas.redraw()
         self.report.setHtml(self.case.get("report", ""))
 
-    def _toggle(self, key, on):
-        self.case["extra"].setdefault("toggles", {})[key] = bool(on)
-        self.canvas._scene_key = None
-        self.canvas.redraw()
+    def _toggle(self, key, on, k=0):
+        self.vp_data(k).setdefault("toggles", {})[key] = bool(on)
+        self.vps[k].canvas._scene_key = None
+        self.vps[k].canvas.redraw()
         self.app.project_changed()
 
-    def _reset_view(self):
+    def _reset_view(self, k=0):
         th = self.case["_calc"]["wind"]["theta"] if self.case["_calc"]["mode"] == "wiatr" else 0
-        self.canvas.view.update(yaw=self.app.default_yaw(th), pitch=math.radians(24), zoom=1.0, pan_x=0.0, pan_y=0.0,
-                                piv=None)
-        self.canvas.redraw()
-        self.view_changed(self.canvas.view)
+        cv = self.vps[k].canvas
+        cv.view.update(yaw=self.app.default_yaw(th), pitch=math.radians(24), zoom=1.0, pan_x=0.0, pan_y=0.0, piv=None)
+        cv.redraw()
+        self.view_changed(cv.view, k)
 
-    def view_changed(self, view):
-        self.case["extra"]["view"] = dict(view)
+    def view_changed(self, view, k=0):
+        self.vp_data(k)["view"] = dict(view)
         self.app.project_changed()
 
     def edit_value(self, key):
@@ -4650,9 +5355,6 @@ def user_data_dir():
     return os.path.join(base, "KAYENN")
 
 
-LANGUAGES = {"pl": "Polski"}          # interface languages (code → name shown in the Język menu)
-
-
 def migrate_user_file(new, old):
     """Rename a user file from its former Polish name (once, silently)."""
     try:
@@ -4692,6 +5394,86 @@ def settings_set(key, value):
             json.dump(d, f, ensure_ascii=False, indent=1)
     except OSError:
         pass
+
+
+# --- About the program: update check; page header of the printout
+REPO = "damiankozuszek/kayenn"
+RELEASES_URL = f"https://github.com/{REPO}/releases"
+UPDATE_EVERY = 24 * 3600              # automatic check at most once a day (seconds)
+
+
+def version_tuple(v):
+    """'v0.1.2' / '0.1.2-beta' → (0, 1, 2); unreadable → ()."""
+    m = re.match(r"\s*v?(\d+(?:\.\d+)*)", v or "")
+    return tuple(int(x) for x in m.group(1).split(".")) if m else ()
+
+
+def check_update(timeout=10):
+    """Asks GitHub for the latest published release. Returns dict(ok, newer, version, url, msg)."""
+    import urllib.error
+    import urllib.request
+    try:
+        req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/releases/latest",
+                                     headers={"User-Agent": "KAYENN/" + APP_VERSION,
+                                              "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            d = json.loads(r.read().decode("utf-8", "replace"))
+        tag = d.get("tag_name", "")
+        new, cur = version_tuple(tag), version_tuple(APP_VERSION)
+        if not new:
+            return dict(ok=False, msg="Nie udało się odczytać numeru najnowszej wersji.")
+        return dict(ok=True, newer=new > cur, version=tag.lstrip("vV"), url=d.get("html_url") or RELEASES_URL)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return dict(ok=True, newer=False, version=APP_VERSION, url=RELEASES_URL, none=True)
+        return dict(ok=False, msg=f"Serwer aktualizacji odpowiedział błędem {e.code}.")
+    except Exception as e:     # no network, timeout
+        return dict(ok=False, msg="Brak połączenia z serwerem aktualizacji (" + str(e) + ").")
+
+
+class UpdateChecker(QObject):
+    """Update check in a background thread; the result arrives in the GUI thread (signal done)."""
+    done = Signal(dict)
+
+    def start(self):
+        import threading
+        threading.Thread(target=lambda: self.done.emit(check_update()), daemon=True).start()
+
+
+def odt_fix_frames(path):
+    """Images in the .odt written by Qt: the frame sits inside a text:span without a wrap setting, so OnlyOffice
+    wraps the text around it (the report ends up in a narrow column). The frame goes directly into the paragraph
+    with a graphic style without wrapping (as LibreOffice writes it)."""
+    import zipfile
+    with zipfile.ZipFile(path) as z:
+        items = [(i, z.read(i.filename)) for i in z.infolist()]
+    out = []
+    for i, data in items:
+        if i.filename == "content.xml":
+            c = data.decode("utf-8")
+            c = re.sub(r"<text:span[^>]*>\s*(<draw:frame\b.*?</draw:frame>)\s*</text:span>", r"\1", c, flags=re.S)
+            c = c.replace("<draw:frame ", '<draw:frame draw:style-name="kfr" ')
+            st = ('<style:style style:name="kfr" style:family="graphic"><style:graphic-properties style:wrap="none" '
+                  'style:vertical-pos="top" style:vertical-rel="baseline" style:horizontal-pos="center" '
+                  'style:horizontal-rel="paragraph"/></style:style>')
+            c = c.replace("<office:automatic-styles>", "<office:automatic-styles>" + st, 1)
+            data = c.encode("utf-8")
+        out.append((i, data))
+    with zipfile.ZipFile(path, "w") as z:
+        for i, data in out:
+            z.writestr(i, data, compress_type=i.compress_type)
+
+
+def page_header_doc(project, bw, dev):
+    """Page header of the printout (every page): the project name. Returns (QTextDocument laid out for the width
+    bw at the device dev, height)."""
+    from PySide6.QtGui import QTextDocument
+    d = QTextDocument()
+    d.setDefaultFont(QFont(FONT, 9))
+    d.documentLayout().setPaintDevice(dev)
+    d.setHtml(f'<p style="margin:0; color:{TEXT};">Projekt: <b>{html.escape(project)}</b></p>')
+    d.setTextWidth(bw)
+    return d, d.size().height()
 
 
 def mat_legacy_file():
@@ -6684,8 +7466,16 @@ class MaterialDialog(QDialog):
                 self._open_path(e, self._path(rename))
             self.rebuild(rename=(e, self._path(rename)) if rename is not None else None)
             hd = self.heads.get(self.sel_group)
-            if hd is not None:
-                QTimer.singleShot(0, lambda: self.scroll.ensureWidgetVisible(hd, 50, 80))
+            for ms in (0, 150, 500):                     # again after the layout settles
+                QTimer.singleShot(ms, lambda key=self.sel_group: self._show_head(key))
+
+    def _show_head(self, key):
+        hd = self.heads.get(key)
+        if hd is not None:
+            try:
+                self.scroll.ensureWidgetVisible(hd, 50, 80)
+            except RuntimeError:
+                pass
 
     def _node_of(self, row, tree):
         roots, groups, items = tree
@@ -6704,7 +7494,7 @@ class MaterialDialog(QDialog):
         roots, groups, items = self._tree()
         par = roots[hd.e] if hd.kind == "unit" else groups[(hd.e, hd.path)]
         g = self._new_group_node(par, "Nowa grupa" if hd.kind == "unit" else "Nowa podgrupa")
-        par["ch"].append(g)
+        par["ch"].insert(0, g)                           # a new group goes to the start
         self._unique(g)
         self._open_path(hd.e, self._path(g))
         self._finish(roots, g, rename=g)
@@ -6892,8 +7682,8 @@ class MaterialDialog(QDialog):
         if act == "into":
             n["ch"].insert(0, x)
             x["parent"] = n
-        elif act == "end":
-            n["ch"].append(x)
+        elif act == "end":                               # a group goes to the start of the target, an item to its end
+            n["ch"].insert(0, x) if x["kind"] == "group" else n["ch"].append(x)
             x["parent"] = n
         elif act == "after":
             sib = n["parent"]["ch"]
@@ -7329,7 +8119,7 @@ class ProjectWindow(QWidget):
         mb = QMenuBar(self)
         app.file_menu(mb, project=True)
         self.edit_menu = edit_menu(mb, app.proj_hist, app.undo_project, app.redo_project)
-        app.language_menu(mb)
+        app.about_menu(mb)
         lay.setMenuBar(mb)
         self.menu_bar = mb
         self.empty = QLabel("Projekt nie zawiera przypadków. Kliknij „Obciążenia normowe” albo „Obciążenia własne” "
@@ -7841,6 +8631,437 @@ class ProjectWindow(QWidget):
             e.ignore()
 
 
+PRINT_DPI = 96          # the document is laid out at this resolution on every system (not at the screen's)
+
+
+def _doc_tables(frame, out):
+    from PySide6.QtGui import QTextTable
+    for f in frame.childFrames():
+        if isinstance(f, QTextTable):
+            out.append(f)
+        _doc_tables(f, out)
+    return out
+
+
+def keep_tables_whole(doc, page_h):
+    """A table that would be split between two pages moves in whole to the next page (together with the heading
+    directly above it). Tables taller than a page cannot be kept whole. Marks from an earlier call (another
+    page size) are removed first."""
+    from PySide6.QtGui import QTextCursor, QTextFormat
+    lay = doc.documentLayout()
+    policy = QTextFormat.PageBreakFlag.PageBreak_AlwaysBefore
+    for kind, obj in getattr(doc, "_marks", []):
+        if kind == "block":
+            cur = QTextCursor(obj)
+            fm = cur.blockFormat()
+            fm.setPageBreakPolicy(QTextFormat.PageBreakFlag(0))
+            cur.setBlockFormat(fm)
+        else:
+            fm = obj.format()
+            fm.setPageBreakPolicy(QTextFormat.PageBreakFlag(0))
+            obj.setFormat(fm)
+    doc._marks = []
+    done = set()
+    for _ in range(60):
+        lay.pageCount()
+        moved = False
+        for t in _doc_tables(doc.rootFrame(), []):
+            if id(t.lastCursorPosition().block()) in done:
+                continue
+            r = lay.frameBoundingRect(t)
+            if r.height() > page_h - 1 or int(r.top() // page_h) == int((r.bottom() - 0.5) // page_h):
+                continue
+            done.add(id(t.lastCursorPosition().block()))
+            before = doc.findBlock(max(t.firstPosition() - 2, 0))
+            heading = (before.isValid() and before.text().strip() and before.length() < 120
+                       and before.charFormat().fontWeight() >= 600)
+            if heading:
+                cur = QTextCursor(before)
+                fm = cur.blockFormat()
+                fm.setPageBreakPolicy(policy)
+                cur.setBlockFormat(fm)
+                doc._marks.append(("block", before))
+            else:
+                fm = t.format()
+                fm.setPageBreakPolicy(policy)
+                t.setFormat(fm)
+                doc._marks.append(("table", t))
+            moved = True
+            break
+        if not moved:
+            break
+
+
+def print_document(doc, printer):
+    """Prints the report document page by page (own pagination: tables are not split between pages).
+    The layout is at PRINT_DPI and the painter is scaled to the printer, so sizes are the same everywhere."""
+    from PySide6.QtCore import QRectF, QSizeF
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtPrintSupport import QPrinter
+    dev = getattr(doc, "_dev", None)
+    if dev is None:
+        dev = doc._dev = QImage(1, 1, QImage.Format.Format_ARGB32)
+        dev.setDotsPerMeterX(round(PRINT_DPI / 0.0254))
+        dev.setDotsPerMeterY(round(PRINT_DPI / 0.0254))
+        doc.documentLayout().setPaintDevice(dev)
+    page = printer.pageRect(QPrinter.Unit.DevicePixel)          # the painter's origin is its corner
+    dpi = printer.logicalDpiX()
+    sc = dpi / PRINT_DPI
+    foot = 0.5 * dpi                                       # room for the page number (0.5 in)
+    bw, bh = page.width() / sc, (page.height() - foot) / sc
+    hd, hh = page_header_doc(getattr(doc, "_project", ""), bw, dev)     # project name on every page
+    hh += 8                                                # a gap (and the line) below the header
+    bh -= hh
+    doc.setPageSize(QSizeF(bw, bh))
+    keep_tables_whole(doc, bh)
+    doc._page_h = bh
+    n = max(doc.pageCount(), 1)
+    first, last = 1, n
+    if printer.printRange() == QPrinter.PrintRange.PageRange and printer.fromPage() > 0:
+        first, last = max(printer.fromPage(), 1), min(printer.toPage() or n, n)
+    painter = QPainter(printer)
+    try:
+        painter.setFont(QFont(FONT, 9))
+        for i in range(first - 1, last):
+            if i > first - 1:
+                printer.newPage()
+            painter.save()
+            painter.scale(sc, sc)
+            hd.drawContents(painter)
+            painter.setPen(QPen(QColor("#9ca3af"), 0.8))
+            painter.drawLine(0, int(hh - 4), int(bw), int(hh - 4))
+            painter.translate(0, hh)
+            painter.setClipRect(QRectF(0, 0, bw, bh))
+            painter.translate(0, -i * bh)
+            doc.drawContents(painter, QRectF(0, i * bh, bw, bh))
+            painter.restore()
+            painter.save()
+            painter.setPen(QColor(TEXT))
+            painter.drawText(QRectF(0, page.height() - foot, page.width(), foot * 0.8),
+                             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, str(i + 1))
+            painter.restore()
+    finally:
+        painter.end()
+
+
+class PrintManager(QDialog):
+    """Plik → Drukuj…: the program's own print manager – settings on the left, a live preview of the pages on the
+    right (the Windows 11 system print dialog cannot show a preview for Qt programs, and it carries the name of
+    the executable instead of KAYENN). Non-blocking; the printer and the document live as long as the window."""
+
+    PDF = "Zapisz jako PDF"
+    PAPERS = ("A4", "A3", "A5", "Letter")
+    MARGINS = (("Normalne – 20 mm", 20.0), ("Wąskie – 10 mm", 10.0), ("Szerokie – 30 mm", 30.0))
+    # (text, QPrinter.PaperSource name) – the tray; it works as far as the printer driver supports it
+    SOURCES = (("Automatyczny wybór", "Auto"), ("Podajnik górny", "Upper"), ("Podajnik środkowy", "Middle"),
+               ("Podajnik dolny", "Lower"), ("Kaseta", "Cassette"), ("Podawanie ręczne", "Manual"))
+    # (text, QPrinter.DuplexMode name, name in QPrinterInfo.supportedDuplexModes)
+    DUPLEX = (("Jednostronny", "DuplexNone"), ("Dwustronny – po długiej krawędzi", "DuplexLongSide"),
+              ("Dwustronny – po krótkiej krawędzi", "DuplexShortSide"))
+
+    def __init__(self, app, parent, doc, title):
+        super().__init__(parent)
+        from PySide6.QtGui import QPageLayout, QPageSize
+        from PySide6.QtPrintSupport import QPrinter, QPrinterInfo, QPrintPreviewWidget
+        from PySide6.QtWidgets import QLineEdit, QSpinBox
+        self.app, self.doc, self.title = app, doc, title
+        self._QPageLayout, self._QPageSize, self._QPrinter = QPageLayout, QPageSize, QPrinter
+        self.printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        self.printer.setDocName(title)
+        self.setWindowTitle(f"Drukowanie – {title}")
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(8)
+        body = QHBoxLayout()
+        body.setSpacing(12)
+        root.addLayout(body, 1)
+
+        side = QVBoxLayout()
+        side.setSpacing(6)
+        body.addLayout(side)
+        side_w = 320
+
+        def field(label, widget):
+            side.addWidget(QLabel(label))
+            widget.setFixedWidth(side_w)
+            side.addWidget(widget)
+
+        self.cb_printer = QComboBox()
+        self.cb_printer.addItems([self.PDF] + [p.printerName() for p in QPrinterInfo.availablePrinters()])
+        default = QPrinterInfo.defaultPrinterName()
+        i = self.cb_printer.findText(default) if default else -1
+        self.cb_printer.setCurrentIndex(i if i >= 0 else 0)
+        field("Drukarka", self.cb_printer)
+        self.cb_orient = QComboBox()
+        self.cb_orient.addItems(["Pionowa", "Pozioma"])
+        field("Orientacja", self.cb_orient)
+        self.cb_paper = QComboBox()
+        self.cb_paper.addItems(self.PAPERS)
+        field("Rozmiar papieru", self.cb_paper)
+        self.cb_margin = QComboBox()
+        self.cb_margin.addItems([t for t, _ in self.MARGINS])
+        field("Marginesy", self.cb_margin)
+        self.cb_range = QComboBox()
+        self.cb_range.addItems(["Wszystkie strony", "Zakres stron"])
+        field("Strony", self.cb_range)
+        self.ed_range = QLineEdit()
+        self.ed_range.setPlaceholderText("np. 2-4")
+        self.ed_range.setVisible(False)
+        self.ed_range.setFixedWidth(side_w)
+        side.addWidget(self.ed_range)
+        self.cb_duplex = QComboBox()
+        self.cb_duplex.addItems([t for t, _ in self.DUPLEX])
+        field("Druk", self.cb_duplex)
+        self.cb_source = QComboBox()
+        self.cb_source.addItems([t for t, _ in self.SOURCES])
+        field("Podajnik papieru", self.cb_source)
+        self.sp_copies = QSpinBox()
+        self.sp_copies.setRange(1, 99)
+        field("Liczba kopii", self.sp_copies)
+        self.lb_pages = QLabel("")
+        self.lb_pages.setObjectName("muted")
+        side.addWidget(self.lb_pages)
+        self.lb_msg = QLabel("")
+        self.lb_msg.setObjectName("muted")
+        self.lb_msg.setWordWrap(True)
+        self.lb_msg.setFixedWidth(side_w)
+        side.addWidget(self.lb_msg)
+        side.addStretch(1)
+
+        right = QVBoxLayout()
+        right.setSpacing(6)
+        body.addLayout(right, 1)
+        nav = QHBoxLayout()
+        nav.setSpacing(6)
+        self.b_prev, self.b_next = QPushButton("Poprzednia"), QPushButton("Następna")
+        self.lb_page = QLabel("")
+        self.b_width, self.b_fit = QPushButton("Dopasuj do szerokości"), QPushButton("Cała strona")
+        for b in (self.b_prev, self.b_next):
+            nav.addWidget(b)
+        nav.addWidget(self.lb_page)
+        nav.addStretch(1)
+        nav.addWidget(self.b_width)
+        nav.addWidget(self.b_fit)
+        right.addLayout(nav)
+        self.preview = QPrintPreviewWidget(self.printer)
+        self.preview.paintRequested.connect(lambda p: print_document(self.doc, p))
+        right.addWidget(self.preview, 1)
+
+        bb = QHBoxLayout()
+        bb.setSpacing(6)
+        self.b_print, self.b_cancel = QPushButton("Drukuj"), QPushButton("Anuluj")
+        for b in (self.b_print, self.b_cancel):
+            b.setObjectName("big")
+            bb.addWidget(b, 1)
+        root.addLayout(bb)
+
+        self.cb_printer.currentIndexChanged.connect(lambda *_: self.apply())
+        self.cb_orient.currentIndexChanged.connect(lambda *_: self.apply())
+        self.cb_paper.currentIndexChanged.connect(lambda *_: self.apply())
+        self.cb_margin.currentIndexChanged.connect(lambda *_: self.apply())
+        self.cb_duplex.currentIndexChanged.connect(lambda *_: self._printer_options())
+        self.cb_source.currentIndexChanged.connect(lambda *_: self._printer_options())
+        self.cb_range.currentIndexChanged.connect(lambda *_: self._range_mode())
+        self.ed_range.textChanged.connect(lambda *_: self._range_check())
+        self.b_prev.clicked.connect(lambda checked=False: self._go(-1))
+        self.b_next.clicked.connect(lambda checked=False: self._go(1))
+        self.b_width.clicked.connect(lambda checked=False: self.preview.fitToWidth())
+        self.b_fit.clicked.connect(lambda checked=False: self.preview.fitInView())
+        self.preview.previewChanged.connect(self._pages_changed)
+        self.b_print.clicked.connect(lambda checked=False: self.do_print())
+        self.b_cancel.clicked.connect(self.close)
+        self.apply()
+        self.preview.fitToWidth()
+
+    # ---------------------------------------------------------------- settings
+    def apply(self):
+        """Printer, paper and orientation from the controls → printer → refreshed preview."""
+        QP = self._QPrinter
+        pdf = self.cb_printer.currentText() == self.PDF
+        if pdf:
+            self.printer.setOutputFormat(QP.OutputFormat.PdfFormat)
+        else:
+            self.printer.setOutputFormat(QP.OutputFormat.NativeFormat)
+            self.printer.setPrinterName(self.cb_printer.currentText())
+        self.sp_copies.setEnabled(not pdf)
+        self.cb_source.setEnabled(not pdf)
+        self._duplex_modes(pdf)
+        self.b_print.setText("Zapisz PDF…" if pdf else "Drukuj")
+        sid = getattr(self._QPageSize.PageSizeId, self.cb_paper.currentText())
+        self.printer.setPageSize(self._QPageSize(sid))
+        self.printer.setPageOrientation(self._QPageLayout.Orientation.Landscape if self.cb_orient.currentIndex()
+                                        else self._QPageLayout.Orientation.Portrait)
+        mm = self.MARGINS[self.cb_margin.currentIndex()][1]
+        from PySide6.QtCore import QMarginsF
+        self.printer.setPageMargins(QMarginsF(mm, mm, mm, mm), self._QPageLayout.Unit.Millimeter)
+        self._printer_options()
+        self.preview.updatePreview()
+
+    def _duplex_modes(self, pdf):
+        """Only the duplex modes the chosen printer supports are available (PDF – none)."""
+        from PySide6.QtPrintSupport import QPrinterInfo
+        QP = self._QPrinter
+        ok = {"DuplexNone"}
+        if not pdf:
+            info = QPrinterInfo.printerInfo(self.cb_printer.currentText())
+            ok |= {getattr(m_, "name", str(m_)) for m_ in info.supportedDuplexModes()}
+        model = self.cb_duplex.model()
+        for i_, (_t, nm) in enumerate(self.DUPLEX):
+            item = model.item(i_)
+            if item is not None:
+                item.setEnabled(nm in ok)
+        if not model.item(self.cb_duplex.currentIndex()).isEnabled():
+            self.cb_duplex.setCurrentIndex(0)
+        self.cb_duplex.setEnabled(len(ok) > 1)
+
+    def _printer_options(self):
+        """Duplex and the tray → printer (not for PDF)."""
+        if self.cb_printer.currentText() == self.PDF:
+            return
+        QP = self._QPrinter
+        self.printer.setDuplex(getattr(QP.DuplexMode, self.DUPLEX[self.cb_duplex.currentIndex()][1]))
+        self.printer.setPaperSource(getattr(QP.PaperSource, self.SOURCES[self.cb_source.currentIndex()][1]))
+
+    def _range_mode(self):
+        self.ed_range.setVisible(self.cb_range.currentIndex() == 1)
+        self._range_check()
+
+    def page_range(self):
+        """(from, to) of the chosen range; None – all pages; False – invalid text."""
+        if self.cb_range.currentIndex() == 0:
+            return None
+        t = self.ed_range.text().strip().replace("–", "-").replace(" ", "")
+        m_ = re.fullmatch(r"(\d+)(?:-(\d+))?", t)
+        if not m_:
+            return False
+        a, b = int(m_.group(1)), int(m_.group(2) or m_.group(1))
+        if a < 1 or b < a or b > self.preview.pageCount():
+            return False
+        return a, b
+
+    def _range_check(self):
+        bad = self.page_range() is False
+        self.ed_range.setStyleSheet(f"background:{ERR_BG};" if bad and self.ed_range.text().strip() else "")
+        self.b_print.setEnabled(not bad)
+
+    def _pages_changed(self):
+        n = self.preview.pageCount()
+        self.lb_pages.setText(f"Liczba stron: {n}")
+        self.lb_page.setText(f"Strona {self.preview.currentPage()} z {n}")
+        self._range_check()
+
+    def _go(self, d):
+        n = self.preview.pageCount()
+        self.preview.setCurrentPage(min(max(self.preview.currentPage() + d, 1), max(n, 1)))
+        self._pages_changed()
+
+    # ---------------------------------------------------------------- printing
+    def print_to(self, path=None):
+        """Prints the document with the current settings; path – PDF file (PDF output)."""
+        QP = self._QPrinter
+        if path:
+            self.printer.setOutputFormat(QP.OutputFormat.PdfFormat)
+            self.printer.setOutputFileName(path)
+        rng = self.page_range()
+        if rng:
+            self.printer.setPrintRange(QP.PrintRange.PageRange)
+            self.printer.setFromTo(*rng)
+        else:
+            self.printer.setPrintRange(QP.PrintRange.AllPages)
+        self.printer.setCopyCount(1 if self.cb_printer.currentText() == self.PDF else self.sp_copies.value())
+        self.preview.print_()
+        self.printer.setPrintRange(QP.PrintRange.AllPages)      # the preview shows all the pages again
+        self.preview.updatePreview()
+
+    def do_print(self):
+        from PySide6.QtWidgets import QFileDialog
+        if self.page_range() is False:
+            return
+        if self.cb_printer.currentText() == self.PDF:
+            name = re.sub(r'[\\/:*?"<>|]+', "_", self.title) or "wydruk"
+            path, _ = QFileDialog.getSaveFileName(self, "Zapisz jako PDF", name + ".pdf", "PDF (*.pdf)")
+            if not path:
+                return
+            if not path.lower().endswith(".pdf"):
+                path += ".pdf"
+            self.print_to(path)
+            self.lb_msg.setText(f"Zapisano: {path}")
+        else:
+            self.print_to()
+            self.lb_msg.setText("Wysłano do drukarki.")
+        self.close()
+
+
+class AboutDialog(QDialog):
+    """O programie (menu bar): logo, version, update check and automatic checking. The content is centred
+    vertically. The automatic-check switch is saved at once (settings.json)."""
+
+    def __init__(self, app, parent):
+        super().__init__(parent)
+        self.app = app
+        self.setWindowTitle("O programie")
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        self.setMinimumSize(460, 340)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(20, 16, 20, 16)
+        v.setSpacing(10)
+        v.addStretch(1)
+        self.logo_kayenn = QLabel()
+        self.logo_kayenn.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.logo_kayenn.setPixmap(self._wordmark(320))
+        v.addWidget(self.logo_kayenn)
+        self.ver_label = QLabel(f"KAYENN – wersja {APP_VERSION}")
+        self.ver_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        v.addWidget(self.ver_label)
+        self.b_update = QPushButton("Sprawdź aktualizacje")
+        self.b_update.clicked.connect(lambda checked=False: self.check())
+        v.addWidget(self.b_update, 0, Qt.AlignmentFlag.AlignCenter)
+        self.upd_label = QLabel("")
+        self.upd_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.upd_label.setWordWrap(True)
+        self.upd_label.setOpenExternalLinks(True)
+        v.addWidget(self.upd_label)
+        self.ck_auto = QCheckBox("Sprawdzaj automatycznie")
+        self.ck_auto.setChecked(bool(settings_get("update_auto", True)))
+        self.ck_auto.toggled.connect(lambda on: settings_set("update_auto", bool(on)))
+        v.addWidget(self.ck_auto, 0, Qt.AlignmentFlag.AlignCenter)
+        v.addStretch(1)
+        self._checker = None
+
+    @staticmethod
+    def _wordmark(w):
+        from PySide6.QtGui import QPixmap
+        pm = QPixmap(os.path.join(ASSETS, "kayenn_wordmark.png"))
+        return pm.scaledToWidth(w, Qt.TransformationMode.SmoothTransformation) if not pm.isNull() else QPixmap()
+
+    def check(self):
+        """Sprawdź aktualizacje – in the background, the result in the label."""
+        self.b_update.setEnabled(False)
+        self.upd_label.setText("Sprawdzanie…")
+        self._checker = UpdateChecker(self)
+        self._checker.done.connect(self.show_result)
+        self._checker.start()
+
+    def show_result(self, r):
+        self.b_update.setEnabled(True)
+        self.upd_label.setText(update_text(r))
+
+
+def update_text(r):
+    """Update check result as rich text for the label / message."""
+    if not r.get("ok"):
+        return html.escape(r.get("msg", "Nie udało się sprawdzić aktualizacji."))
+    if r.get("newer"):
+        return (f'Dostępna jest nowa wersja <b>{html.escape(r["version"])}</b>. '
+                f'<a href="{html.escape(r["url"])}">Pobierz</a>')
+    if r.get("none"):
+        return "Brak opublikowanych wydań – masz najnowszą wersję."
+    return "Masz najnowszą wersję programu."
+
+
 class ProjectInfoDialog(QDialog):
     """Plik → Informacje o projekcie…: project name and location (shared by all cases)."""
 
@@ -7904,8 +9125,10 @@ class ProjectInfoDialog(QDialog):
 class App:
     NSLOT = 6
     STATE_VARS = ("snow_type", "wind_type", "snow_zone", "snow_ce", "ct_mode", "guard", "s_diff", "s_obst", "s_exc",
-                  "sx_fobst", "sx_canopy", "sx_annex", "sx_epar", "sx_gpar", "sx_pobst",
-                  "w_mtype", "wind_zone", "terrain", "theta", "variant", "cpi_mode", "cdir_sec", "dom_zone", "w_edge")
+                  "sx_fobst", "sx_canopy", "sx_annex", "sx_epar", "sx_gpar", "sx_pobst", "sx_gap",
+                  "w_mtype", "wind_zone", "terrain", "theta", "variant", "cpi_mode", "cdir_sec", "dom_zone", "w_edge",
+                  "w_oro", "w_cfr", "w_struct", "w_skin")
+    OPT_DEFAULTS = dict(w_oro=OROGRAPHY[0], w_cfr=CFR_TYPES[1], w_struct=CSCD_STRUCT[0], w_skin=SKIN_TYPES[0])
 
     @staticmethod
     def _shared(name):
@@ -7972,6 +9195,8 @@ class App:
         self.cdir_sec = Var(CDIR_ANY)
         self.dom_zone = Var(DOM_ZONES[0])
         self.w_edge = Var(EDGE_TYPES[0])
+        for k_, v_ in self.OPT_DEFAULTS.items():  # orography, friction, cscd, multi-skin walls (wind)
+            setattr(self, k_, Var(v_))
         self.loc = Var(None)                       # location: dict(lat, lon, alt, name) or None
         self.mode3d = Var("śnieg")
         self.snow_case = Var("i")
@@ -7979,6 +9204,7 @@ class App:
         self.arrows3d = Var(True)
         self.dims3d = Var(True)
         self.bdims3d = Var(True)
+        self.odims3d = Var(True)                   # dimensions of the orography (separate from the others)
         if self.host is self:
             self.project = {"cases": [], "next": 1, "globals": None, "name": "", "tree": []}   # cases (newest first)
             self.pw = None                         # main window (KAYENN Manager)
@@ -7997,12 +9223,12 @@ class App:
             var.trace(lambda k=k: self._var_changed(k))
         for var in (self.guard, self.s_diff, self.w_diff, self.snow_type, self.wind_type, self.snow_zone,
                     self.snow_ce, self.ct_mode, self.s_obst, self.s_exc, self.sx_fobst, self.sx_canopy,
-                    self.sx_annex, self.sx_epar, self.sx_gpar, self.sx_pobst, self.w_mtype, self.wind_zone, self.terrain,
+                    self.sx_annex, self.sx_epar, self.sx_gpar, self.sx_pobst, self.sx_gap, self.w_mtype, self.wind_zone, self.terrain,
                     self.theta, self.variant, self.cpi_mode, self.cdir_sec, self.dom_zone, self.w_edge,
-                    self.loc):
+                    self.w_oro, self.w_cfr, self.w_struct, self.w_skin, self.loc):
             var.trace(self._opt_changed)
         self.snow_case.trace(self._case_changed)
-        for var in (self.labels3d, self.arrows3d, self.dims3d, self.bdims3d):
+        for var in (self.labels3d, self.arrows3d, self.dims3d, self.bdims3d, self.odims3d):
             var.trace(self.draw3d)
         if self.host is self:
             self.project_path = None
@@ -8385,8 +9611,8 @@ class App:
         self.combo(c, 1, 0, self.ct_mode, "Współczynnik termiczny", CT_MODES, span=2)
         self.num(c, 2, 0, "U", "U przegrody dachowej", "W/m²K")
         self.num(c, 2, 1, "ti", "Temperatura tᵢ", "°C")
-        self.num(c, 5, 0, "nret", "Średni okres powrotu n (Zał. D)", "lat")
-        c.grid.addWidget(self._mk_check("Barierki przeciwśnieżne lub attyka przy okapie (μ ≥ 0,8)", self.guard),
+        self.num(c, 5, 0, "nret", "Średni okres powrotu n", "lat")
+        c.grid.addWidget(self._mk_check("Barierki przeciwśnieżne lub attyka przy okapie", self.guard),
                          3, 0, 1, 6)
         self.case_boxes.append(self.combo(c, 4, 0, self.snow_case, "Wariant (przypadek)", ["i"], width=6))
         self.case_desc = LabelX("")
@@ -8405,6 +9631,13 @@ class App:
         self.num(c, 2, 1, "A", "Wysokość n.p.m. A", "m")
         self.combo(c, 3, 0, self.terrain, "Kategoria terenu", list(TERRAIN), width=4)
         self.wind_desc = self.text_label(c, 4)
+        self.combo(c, 5, 0, self.w_oro, "Orografia", OROGRAPHY, span=2)
+        self.num(c, 6, 0, "oH", "Wysokość wzniesienia H", "m")
+        self.num(c, 6, 1, "oLu", "Dł. stoku nawietrznego Lu", "m")
+        self.num(c, 7, 0, "oLd", "Dł. stoku zawietrznego Ld", "m")
+        self.num(c, 7, 1, "ox", "Odległość od grzbietu x", "m")
+        for e_ in self.entries["ox"]:
+            e_.setToolTip("x < 0 – na stoku nawietrznym, x > 0 – za grzbietem")
 
         c = self.card(lay, "Budynek")
         self.combo(c, 1, 0, self.wind_type, "Kształt", list(WIND_TYPES), span=2)
@@ -8429,17 +9662,20 @@ class App:
         c.grid.addWidget(ex2, 7, 0, 1, 6)
 
         c = self.card(lay, "Parametry")
-        self.combo(c, 1, 0, self.cdir_sec, "Sektor kierunku wiatru (c_dir, Tabl. NA.2)",
+        self.combo(c, 1, 0, self.cdir_sec, "Sektor kierunku wiatru (c_dir)",
                    (CDIR_ANY,) + CDIR_SECTORS, span=2)
         self.num(c, 2, 0, "cseason", "c_season", "–")
         self.num(c, 2, 1, "Aload", "Pole obciążone A", "m²")
         self.theta_boxes.append(self.combo(c, 3, 0, self.theta, "Kierunek wiatru θ", ["0°", "90°"], width=6))
         self.num(c, 3, 1, "phi", "Blokowanie wiaty φ", "0…1")
         self.variant_boxes.append(self.combo(c, 4, 0, self.variant, "Wariant", [], span=2))
-        self.combo(c, 5, 0, self.cpi_mode, "Ciśnienie wewn. cpi (7.2.9)", CPI_MODES, span=2)
+        self.combo(c, 5, 0, self.cpi_mode, "Ciśnienie wewnętrzne cpi", CPI_MODES, span=2)
         self.num(c, 6, 0, "mu", "Wskaźnik otworów μ", "0,33…1")
         self.num(c, 6, 1, "ndom", "Stosunek otworów n", "≥ 2")
         self.dom_cb = self.combo(c, 7, 0, self.dom_zone, "Ściana dominująca", DOM_ZONES, span=2)
+        self.combo(c, 8, 0, self.w_cfr, "Powierzchnia – tarcie", CFR_TYPES, span=2)
+        self.combo(c, 9, 0, self.w_struct, "Konstrukcja – cₛcd", CSCD_STRUCT, span=2)
+        self.combo(c, 10, 0, self.w_skin, "Przegroda", SKIN_TYPES, span=2)
 
         c = self.card(lay, "Wyniki", stretch=1)
         self.wind_text, self.wind_tree = self._results(
@@ -8454,7 +9690,8 @@ class App:
         self._s_layout = self._w_layout = None
 
     def fill_text(self, t, items):
-        """items: ("v", value, description) | ("h", heading) | ("n", note) | ("s", symbol, description)."""
+        """items: ("v", value, description[, basis]) | ("h", heading) | ("n", note) | ("s", symbol, description) |
+        ("r", basis) | ("t", table). Basis – the fragment of the code the calculation comes from."""
         esc = html.escape
         mono = f"font-family:'{MONO}',monospace; font-weight:bold; color:{TEXT};"
         out = []
@@ -8463,7 +9700,11 @@ class App:
                 s = f'<span style="{mono}">{esc(it[1])}</span>'
                 if it[2]:
                     s += f'<span style="color:{MUTED};">&nbsp; – {esc(it[2])}</span>'
-                out.append(f'<p style="margin:0 0 1px 0;">{s}</p>')
+                if len(it) > 3 and it[3]:
+                    s += basis_html(it[3])
+                out.append(f'<p style="margin:0 0 3px 0;">{s}</p>')
+            elif it[0] == "r":                       # basis only (under a table / a group of lines)
+                out.append(f'<p style="margin:0 0 3px 0;">{basis_html(it[1])}</p>')
             elif it[0] == "s":
                 out.append(f'<p style="margin:0 0 1px 12px;"><span style="{mono}">{esc(it[1])}</span>'
                            f'<span style="color:{MUTED};"> – {esc(it[2])}</span></p>')
@@ -8509,6 +9750,7 @@ class App:
                        ("Otwórz plik projektu…", "Ctrl+O", self.file_open), None,
                        ("Zapisz", "Ctrl+S", self.file_save), ("Zapisz jako…", "Ctrl+Shift+S", self.file_save_as),
                        None, ("Informacje o projekcie…", None, self.project_info),
+                       ("Otwórz w edytorze tekstu", None, self.open_in_editor),
                        ("Drukuj…", "Ctrl+P", self.print_project), None] + entries
         for entry in entries:
             if entry is None:
@@ -8521,23 +9763,71 @@ class App:
             act.triggered.connect(lambda checked=False, fn=fn: fn())
         return mf
 
-    def language_menu(self, mb):
-        """Language menu (main window). The interface is Polish only for now; the choice is stored in the user
-        settings so further languages can be added (LANGUAGES)."""
-        from PySide6.QtGui import QActionGroup
-        m = mb.addMenu("Język")
-        grp = QActionGroup(m)
-        grp.setExclusive(True)
-        cur = settings_get("language", "pl")
-        for code, name in LANGUAGES.items():
-            act = m.addAction(name)
-            act.setCheckable(True)
-            act.setChecked(code == cur or (cur not in LANGUAGES and code == "pl"))
-            act.setData(code)
-            grp.addAction(act)
-            act.triggered.connect(lambda checked=False, code=code: settings_set("language", code))
-        self.lang_menu = m
-        return m
+    def about(self):
+        """O programie (menu bar): non-blocking window with the version and the update check."""
+        host = self.host
+        d = getattr(host, "_about_dlg", None)
+        if d is None:
+            d = AboutDialog(host, host.pw)
+            d.setModal(False)
+            host._about_dlg = d
+            d.finished.connect(lambda r: (setattr(host, "_about_dlg", None), d.deleteLater()))
+        d.show()
+        d.raise_()
+        d.activateWindow()
+        return d
+
+    def open_in_editor(self):
+        """Plik → Otwórz w edytorze tekstu: the report as an .odt file in the default text editor, so the engineer
+        can add the office data and correct the printout."""
+        if not self.project["cases"]:
+            QMessageBox.information(self.pw or self.win, "Otwórz w edytorze tekstu", "Projekt nie zawiera przypadków.")
+            return None
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices, QTextDocumentWriter
+        import tempfile
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            doc = self.project_document(title=True)
+            name = re.sub(r'[\\/:*?"<>|]+', "_", self.project_title()).strip() or "projekt"
+            path = os.path.join(tempfile.mkdtemp(prefix="kayenn_"), f"{name}.odt")
+            ok = QTextDocumentWriter(path, b"ODF").write(doc)
+            if ok:
+                odt_fix_frames(path)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not ok or not QDesktopServices.openUrl(QUrl.fromLocalFile(path)):
+            QMessageBox.warning(self.pw or self.win, "Otwórz w edytorze tekstu",
+                                "Nie udało się otworzyć raportu w edytorze tekstu.\nPlik: " + path)
+            return None
+        return path
+
+    def auto_update_check(self):
+        """At start: when allowed and at most once a day – a quiet check; a new version → a notice."""
+        if not settings_get("update_auto", True):
+            return
+        if time.time() - float(settings_get("update_checked", 0) or 0) < UPDATE_EVERY:
+            return
+        self._upd = UpdateChecker()
+
+        def done(r):
+            if r.get("ok"):
+                settings_set("update_checked", time.time())
+            if r.get("ok") and r.get("newer"):
+                mb = QMessageBox(QMessageBox.Icon.Information, "KAYENN", "Dostępna jest nowa wersja programu "
+                                 + r["version"] + ".", QMessageBox.StandardButton.Ok, self.host.pw)
+                mb.setInformativeText(f'<a href="{html.escape(r["url"])}">Otwórz stronę pobierania</a>')
+                mb.setModal(False)
+                mb.show()
+                self._upd_msg = mb
+        self._upd.done.connect(done)
+        self._upd.start()
+
+    def about_menu(self, mb):
+        """O programie – an item right on the menu bar (opens the window; no drop-down menu)."""
+        act = mb.addAction("O programie")
+        act.triggered.connect(lambda checked=False: self.about())
+        return act
 
     def _front(self):
         """Window above which dialogs are shown (active program window, otherwise the main window)."""
@@ -8924,16 +10214,39 @@ class App:
         self.use_red_note.setObjectName("muted")
         self.use_red_note.setWordWrap(True)
         g.addWidget(self.use_red_note, 6, 0, 1, 6)
+        self.use_tyre_lb, self.use_tyre = QLabel("Rodzaj opon"), QComboBox()
+        self.use_tyre.addItems(USE_TYRES)
+        g.addWidget(self.use_tyre_lb, 8, 0)
+        g.addWidget(self.use_tyre, 8, 1, 1, 5)
+        self.use_bcl_lb, self.use_bcl = QLabel("Pojazdy na parkingu"), QComboBox()
+        self.use_bcl.addItems(USE_BCLASS)
+        g.addWidget(self.use_bcl_lb, 9, 0)
+        g.addWidget(self.use_bcl, 9, 1, 1, 5)
+        self.use_bsit_lb, self.use_bsit = QLabel("Położenie bariery"), QComboBox()
+        self.use_bsit.addItems(USE_BSIT)
+        g.addWidget(self.use_bsit_lb, 10, 0)
+        g.addWidget(self.use_bsit, 10, 1, 1, 5)
+        self.use_bw = {}
+        for r_, (key, lab, un, val) in enumerate((("m", "Masa całkowita pojazdu m", "kg", "3000"),
+                                                  ("dc", "Odkształcenie pojazdu δc", "mm", "100"),
+                                                  ("db", "Odkształcenie bariery δb", "mm", "0"))):
+            lb, en, ul = QLabel(lab), self._mk_entry(), self._unit(un)
+            en.setText(val)
+            g.addWidget(lb, 11 + r_, 0)
+            g.addWidget(en, 11 + r_, 1, 1, 1, AL_R)
+            g.addWidget(ul, 11 + r_, 2)
+            en.textEdited.connect(lambda t: self._use_show())
+            self.use_bw[key] = (lb, en, ul)
         self.use_check = LabelX("")
         self.use_check.setWordWrap(True)
-        c.grid.addWidget(self.use_check, 7, 0, 1, 6)
+        c.grid.addWidget(self.use_check, 14, 0, 1, 6)
         lay.addStretch(1)
         self.use_group.currentIndexChanged.connect(lambda i: self._use_fill_cats())
         self.use_cat.currentIndexChanged.connect(lambda i: self._use_show(reset=True))
         self.use_like.currentIndexChanged.connect(lambda i: self._use_show(reset=True))
         for e in (self.use_q, self.use_Q, self.use_A, self.use_n):
             e.textEdited.connect(lambda t: self._use_check())
-        for cb in (self.use_part, self.use_red):
+        for cb in (self.use_part, self.use_red, self.use_tyre, self.use_bcl, self.use_bsit):
             cb.currentIndexChanged.connect(lambda i: self._use_show())
         self._use_fill_cats()
 
@@ -8953,7 +10266,7 @@ class App:
             v = USE_LIKE[max(self.use_like.currentIndex(), 0)]
             src = next(t for k, _, t, es_ in USE_GROUPS if v in es_)
             return e, v, f"Tablica 6.9 (kategoria I) → {src}"
-        return e, e, tab
+        return e, e, e.get("tab", tab)
 
     @staticmethod
     def _use_fmt(v):
@@ -8982,6 +10295,9 @@ class App:
             else:
                 rows.append(f"{sym}: od {f(lo)} do {f(hi)} {un} – {what}; "
                             f"<b>wartość zalecana {f(rec)} {un}</b>")
+        if v.get("barrier"):
+            rows.append("<b>F = 0,5·m·v²/(δc + δb)</b> – siła pozioma od uderzenia pojazdu (B(2)); pojazdy ≤ 2500 kg "
+                        "i bariera sztywna (δb = 0): F = 150 kN (B(3)) – obliczenie poniżej")
         if not rows:
             rows.append("Norma nie podaje wartości liczbowych.")
         notes = [n for n in (v.get("note"), e.get("note") if e is not v else None) if n]
@@ -8991,7 +10307,16 @@ class App:
         html_ = "<br>".join(rows) + f"<br><span style='color:{MUTED}'>PN-EN 1991-1-1, {src}" + \
             "".join(f"<br>{html.escape(n)}" for n in notes) + "</span>"
         self.use_norm.setText(html_)
-        has_q, has_Q = bool(v.get("q")) or v.get("q") is None and not v.get("Q"), bool(v.get("Q"))
+        fl, bar = bool(v.get("fl")), bool(v.get("barrier"))
+        for w_ in (self.use_tyre_lb, self.use_tyre):
+            w_.setVisible(fl)
+        for w_ in (self.use_bcl_lb, self.use_bcl, self.use_bsit_lb, self.use_bsit):
+            w_.setVisible(bar)
+        for key, ws in self.use_bw.items():
+            for w_ in ws:
+                w_.setVisible(bar and (key != "m" or self.use_bcl.currentIndex() == 1))
+        has_q = (bool(v.get("q")) or v.get("q") is None and not v.get("Q")) and not bar
+        has_Q = bool(v.get("Q"))
         self._use_has = (has_q, has_Q)
         for w_ in (self.use_q_lb, self.use_q, self.use_q_un):
             w_.setVisible(has_q)
@@ -9027,8 +10352,32 @@ class App:
         dict(part=qk of partitions or None, red=(kind, α, ψ0, parameter) or None, total=qk sum or None, err=text)."""
         e, v, _ = self._use_entry()
         pa, ra, na = self._use_applicable()
-        out = dict(part=None, red=None, total=None, err="")
+        out = dict(part=None, red=None, total=None, err="", fl=None, bar=None)
         q = parse_num(self.use_q.text()) if self.use_q.text().strip() else None
+        if v.get("fl"):
+            Q = parse_num(self.use_Q.text())
+            phi = USE_TYRE_PHI[max(self.use_tyre.currentIndex(), 0)]
+            if Q is not None and Q >= 0:
+                out["fl"] = dict(Q=Q, phi=phi, dyn=phi * Q, hor=0.3 * Q, data=v["fl"])
+        if v.get("barrier"):
+            big = self.use_bcl.currentIndex() == 1
+            vals = {k: parse_num(ws[1].text()) for k, ws in self.use_bw.items()}
+            m = vals["m"] if big else 1500.0
+            if big and (m is None or m <= 2500):
+                out["err"] = "Masa pojazdu m: wartość > 2500 kg (B(4))."
+            elif vals["dc"] is None or vals["dc"] <= 0 or vals["db"] is None or vals["db"] < 0:
+                out["err"] = "Odkształcenia δc > 0 i δb ≥ 0 [mm]."
+            else:
+                F = use_barrier_F(m, vals["dc"], vals["db"])
+                sit = max(self.use_bsit.currentIndex(), 0)
+                k = (1.0, 0.5, 2.0)[sit]
+                if sit == 2 and big:
+                    out["err"] = "B(7) dotyczy siły z B(3) (pojazdy ≤ 2500 kg)."
+                else:
+                    hgt = "610 mm ponad poziomem podjazdu" if sit else (
+                        "375 mm ponad poziomem stropu (B(5))" if not big else "wysokość zderzaka (B(5))")
+                    out["bar"] = dict(m=m, dc=vals["dc"], db=vals["db"], F=F, k=k, Fd=k * F, sit=sit, big=big,
+                                      hgt=hgt)
         if pa and self.use_part.currentIndex() > 0:
             out["part"] = USE_PART_Q[self.use_part.currentIndex()]
         k = self.use_red.currentIndex() if ra else 0
@@ -9093,13 +10442,22 @@ class App:
             msgs.append(f"+ ścianki działowe {f(ex['part'])} kN/m².")
         if ex["total"] is not None:
             msgs.append(f"Razem qₖ = {f(ex['total'])} kN/m².")
+        if ex["fl"]:
+            d_ = ex["fl"]
+            msgs.append(f"Qₖ,dyn = φ·Qₖ = {f(d_['phi'])}·{f(d_['Q'])} = {f(d_['dyn'])} kN (6.3); obciążenie poziome "
+                        f"0,3·Qₖ = {f(d_['hor'])} kN (6.3.2.3(7)).")
+        if ex["bar"]:
+            b = ex["bar"]
+            msgs.append(f"F = 0,5·{b['m']:g}·4,5²/({b['dc']:g} + {b['db']:g}) = {f(b['F'])} kN"
+                        + (f" → {'F/2' if b['k'] == 0.5 else '2F'} = {f(b['Fd'])} kN" if b["k"] != 1 else "")
+                        + f"; na długości 1,5 m, {b['hgt']}.")
         self.use_check.configure(text=" ".join(msgs))
         self.use_check.setStyleSheet(f"color:{MANUAL_COL};" if bad else f"color:{MUTED};")
         pa, ra, na = self._use_applicable()
         if ra:
-            self.use_red_note.configure(text=("Redukcja dotyczy qₖ z Tablicy 6.2 (nie Qₖ); dla qₖ do obliczeń "
+            self.use_red_note.configure(text=("Redukcja dotyczy qₖ (nie Qₖ); dla qₖ do obliczeń "
                                               "stosuje się zredukowaną wartość. Przy oddziaływaniu towarzyszącym "
-                                              "stosuje się tylko jeden ze współczynników ψ₀ lub αₙ (3.3.2(2))."
+                                              "stosuje się tylko jeden ze współczynników ψ₀ lub αₙ."
                                               if self.use_red.currentIndex() else ""))
         else:
             self.use_red_note.configure(text="")
@@ -9121,11 +10479,13 @@ class App:
             if rng and v.get("low_min") and x < rng[0] - 1e-9:
                 return False, f"{sym} poniżej dolnej granicy przedziału normowego (Załącznik krajowy NB1)."
             vals.append(x)
-        if not vals:
-            return False, "Podaj przyjętą wartość obciążenia."
         ex = self._use_extra()
         if ex["err"]:
             return False, ex["err"]
+        if v.get("barrier"):
+            return (True, "") if ex["bar"] else (False, "Uzupełnij dane bariery.")
+        if not vals:
+            return False, "Podaj przyjętą wartość obciążenia."
         return True, ""
 
     def _use_values(self):
@@ -9139,6 +10499,10 @@ class App:
             x = parse_num(ent.text()) if on and ent.text().strip() else None
             if x is not None:
                 out.append((sym, x, un, rng))
+        if v.get("barrier"):
+            b = self._use_extra()["bar"]
+            if b:
+                out.append(("Qₖ", b["Fd"], "kN", None))
         return out
 
     def _use_title(self):
@@ -9151,7 +10515,7 @@ class App:
         f = self._use_fmt
         gt = USE_GROUPS[max(self.use_group.currentIndex(), 0)][1]
         rows = []
-        for sym, x, un, rng in self._use_values():
+        for sym, x, un, rng in ([] if v.get("barrier") else self._use_values()):
             r = ""
             if rng:
                 lo, hi, rec = rng
@@ -9170,6 +10534,26 @@ class App:
                         f"({USE_PARTS[self.use_part.currentIndex()]}, 6.3.1.2(8))")
         if ex["total"] is not None:
             rows.append(f"<b>qₖ łącznie = {f(ex['total'])} kN/m²</b>")
+        if ex["fl"]:
+            d_ = ex["fl"]
+            nw, lift, a_, b_, l_, _ = d_["data"]
+            rows.append(f"φ = {f(d_['phi'])} ({USE_TYRES[max(self.use_tyre.currentIndex(), 0)].split(' (')[0]}, "
+                        f"6.3.2.3(4)) → <b>Qₖ,dyn = φ·Qₖ = {f(d_['dyn'])} kN</b> (6.3)")
+            rows.append(f"obciążenie poziome od przyspieszania i hamowania: <b>0,3·Qₖ = {f(d_['hor'])} kN</b> "
+                        "(6.3.2.3(7))")
+            rows.append(f"wymiary (Tablica 6.5, Rysunek 6.1): rozstaw kół a = {f(a_)} m, szerokość b = {f(b_)} m, "
+                        f"długość l = {f(l_)} m; ciężar netto {f(nw)} kN, udźwig {f(lift)} kN")
+            rows.append("Obciążenie przykładane razem z obciążeniem równomiernym z Tablic 6.2, 6.4 lub 6.8 "
+                        "(6.3.2.2(7)); podnośniki cięższe niż 110 kN – dokładniejsza analiza (6.3.2.3(5)).")
+        if ex["bar"]:
+            b = ex["bar"]
+            rows.append(f"{html.escape(USE_BSIT[b['sit']])} (Zał. B, {USE_BSIT_REF[b['sit']]}); "
+                        f"{html.escape(USE_BCLASS[1 if b['big'] else 0])} (B(3), B(4))")
+            rows.append(f"F = 0,5·m·v²/(δc + δb) = 0,5·{b['m']:g}·4,5²/({b['dc']:g} + {b['db']:g}) = {f(b['F'])} kN "
+                        "(B(2), m [kg], v [m/s], δ [mm])")
+            rows.append(f"<b>siła pozioma {'F' if b['k'] == 1 else ('F/2' if b['k'] == 0.5 else '2F')} = "
+                        f"{f(b['Fd'])} kN</b>, prostopadła do bariery, rozłożona równomiernie na dowolnej długości "
+                        f"1,5 m, na wysokości: {b['hgt']}")
         return (f"<p style='margin:0 0 4px 0;'><b>Obciążenia użytkowe</b> – {html.escape(gt)}<br>"
                 f"Kategoria: {html.escape(self._use_title())}</p>"
                 f"<p style='margin:0 0 4px 0;'>{'<br>'.join(rows)}</p>"
@@ -9180,7 +10564,10 @@ class App:
         return dict(grupa=USE_GROUPS[max(self.use_group.currentIndex(), 0)][0], kategoria=e["code"],
                     uzytkowanie=v["code"] if e.get("like") else None, qk=self.use_q.text().strip(),
                     Qk=self.use_Q.text().strip(), scianki=self.use_part.currentIndex(),
-                    redukcja=self.use_red.currentIndex(), A=self.use_A.text().strip(), n=self.use_n.text().strip())
+                    redukcja=self.use_red.currentIndex(), A=self.use_A.text().strip(), n=self.use_n.text().strip(),
+                    opony=self.use_tyre.currentIndex(), bariera=dict(
+                        klasa=self.use_bcl.currentIndex(), polozenie=self.use_bsit.currentIndex(),
+                        **{k: ws[1].text().strip() for k, ws in self.use_bw.items()}))
 
     def _use_set_state(self, d):
         if not d:
@@ -9200,6 +10587,12 @@ class App:
         self.use_red.setCurrentIndex(min(max(int(d.get("redukcja", 0) or 0), 0), len(USE_REDS) - 1))
         self.use_A.setText(str(d.get("A", "20")))
         self.use_n.setText(str(d.get("n", "3")))
+        self.use_tyre.setCurrentIndex(min(max(int(d.get("opony", 0) or 0), 0), len(USE_TYRES) - 1))
+        br = d.get("bariera") or {}
+        self.use_bcl.setCurrentIndex(min(max(int(br.get("klasa", 0) or 0), 0), len(USE_BCLASS) - 1))
+        self.use_bsit.setCurrentIndex(min(max(int(br.get("polozenie", 0) or 0), 0), len(USE_BSIT) - 1))
+        for k, val in (("m", "3000"), ("dc", "100"), ("db", "0")):
+            self.use_bw[k][1].setText(str(br.get(k, val)))
         self._use_show()
 
     # ---------------------------------------------------------------- form ---
@@ -9342,7 +10735,7 @@ class App:
         t = ""
         for d, z in zi["near"]:
             t += f"\nGranica ze strefą {z} w odległości ok. {f2(d, 0)} km"
-            t += (" – wg NB1.7 w pasie 10 km można przyjąć średnią sₖ obu stref (strefę można zmienić ręcznie)."
+            t += (" – w pasie 10 km można przyjąć średnią sₖ obu stref (strefę można zmienić ręcznie)."
                   if kind == "snow" else " – sprawdź lokalizację z mapą normy.")
         return t
 
@@ -9371,6 +10764,15 @@ class App:
         mu = self._read_simple("mu", 0.33, 1, active=cpi_kind == 1 and not canopy)
         ndom = self._read_simple("ndom", 2, 1000, active=cpi_kind == 2 and not canopy)
         phi = self._read_simple("phi", 0, 1, active=canopy)
+        oro_k = OROGRAPHY.index(self.w_oro.get()) if self.w_oro.get() in OROGRAPHY else 0
+        for k, on in (("oH", oro_k > 0), ("oLu", oro_k > 0), ("oLd", oro_k == 1), ("ox", oro_k > 0)):
+            for e in self.entries[k]:
+                if e.isEnabled() != on:
+                    e.setEnabled(on)
+        oro = dict(kind=oro_k, H=self._read_simple("oH", 0, 2000, True, oro_k > 0),
+                   Lu=self._read_simple("oLu", 0, 1e5, True, oro_k > 0),
+                   Ld=self._read_simple("oLd", 0, 1e5, True, oro_k == 1) or 1.0,
+                   x=self._read_simple("ox", -1e5, 1e5, False, oro_k > 0)) if oro_k else None
 
         # ---------- snow: building
         sdiff = skind == "duo" and self.s_diff.get()
@@ -9427,7 +10829,7 @@ class App:
         s_msg, w_msg = [], []
         bad = set(self._errors)
         S_KEYS = {"A", "U", "ti", "nret"}
-        W_KEYS = {"A", "cseason", "Aload", "mu", "ndom", "phi"}
+        W_KEYS = {"A", "cseason", "Aload", "mu", "ndom", "phi", "oH", "oLu", "oLd", "ox"}
         s_ok = not any(k in S_KEYS or k.startswith("s_") for k in bad)
         w_ok = not any(k in W_KEYS or k.startswith("w_") for k in bad)
         if not s_ok:
@@ -9497,7 +10899,11 @@ class App:
             wp = dict(zone=self.wind_zone.get(), cat=self.terrain.get(),
                       cdir=cdir_value(self.wind_zone.get(), self.cdir_sec.get()), cdir_sec=self.cdir_sec.get(),
                       cseason=cse, Aload=Al, cpi_kind=cpi_kind, mu=mu, ndom=ndom,
-                      dom_zone=self.dom_zone.get()[0], phi=phi)
+                      dom_zone=self.dom_zone.get()[0], phi=phi, oro=oro,
+                      cfr=CFR_VALUES[CFR_TYPES.index(self.w_cfr.get())] if self.w_cfr.get() in CFR_TYPES else 0.02,
+                      delta=CSCD_DELTA[CSCD_STRUCT.index(self.w_struct.get())]
+                      if self.w_struct.get() in CSCD_STRUCT else 0.10,
+                      skin=SKIN_TYPES.index(self.w_skin.get()) if self.w_skin.get() in SKIN_TYPES else 0)
             ths = [f"{t}°" for t in wind_thetas(wg)]
             for cb in self.theta_boxes:
                 self._set_items(cb, ths, len(ths) > 1)
@@ -9602,6 +11008,8 @@ class App:
         bar2.addWidget(self._mk_check("Etykiety", self.labels3d))
         bar2.addWidget(self._mk_check("Wymiary pól", self.dims3d))
         bar2.addWidget(self._mk_check("Wymiary budynku", self.bdims3d))
+        self.ck_odims = self._mk_check("Wymiary orografii", self.odims3d)
+        bar2.addWidget(self.ck_odims)
         bar2.addStretch(1)
         b = QPushButton("Widok domyślny")
         b.clicked.connect(lambda checked=False: self.reset_view())
@@ -9619,6 +11027,7 @@ class App:
 
     def update_toolbar(self, mode):
         """The 3D window bar shows only options for the displayed load."""
+        self.ck_odims.setVisible(mode == "wiatr" and self.w_oro.get() != OROGRAPHY[0])
         if self._tb_mode == mode:
             return
         self._tb_mode = mode
@@ -9814,11 +11223,12 @@ class App:
     def render_case(self, cv, case, image=False):
         self.ensure_calc(case)
         calc, ex = case["_calc"], case["extra"]
-        view = getattr(cv, "view", None) or ex.get("view") or {}
+        vpd = getattr(cv, "vp", None) or ex                   # the viewport's data (view, toggles)
+        view = getattr(cv, "view", None) or vpd.get("view") or {}
         miss = object()
         saved = {n: getattr(self, n, miss) for n in self._CTX_ATTRS}
         vars_ = {n: getattr(self, n)._v for n in ("snow_case", "mode3d") + TOGGLE_KEYS}
-        tg = ex.get("toggles") or {}
+        tg = vpd.get("toggles") or {}
         try:
             self.sgeo, self.snow, self.wgeo, self.wind = calc["sgeo"], calc["snow"], calc["wgeo"], calc["wind"]
             self.cv = cv
@@ -9850,7 +11260,7 @@ class App:
 
     SNAP_W, SNAP_H, SNAP_DPR = 780, 540, 3         # image for printing: logical size, pixel density
 
-    def snapshot(self, case, w=SNAP_W, h=SNAP_H, dpr=SNAP_DPR):
+    def snapshot(self, case, w=SNAP_W, h=SNAP_H, dpr=SNAP_DPR, vp=None):
         """Image of the case 3D model (for printing). Canvas of a size close to the image on paper (labels
         almost at natural size), painted at dpr-times pixel density (sharp lines and text)."""
         from PySide6.QtGui import QPixmap
@@ -9860,6 +11270,7 @@ class App:
             cv.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
         cv.resize(w, h)
         cv._scene_key = None
+        cv.vp = vp                                    # the viewport to draw (None – the first)
         self.render_case(cv, case, image=True)
         pm = QPixmap(int(w * dpr), int(h * dpr))
         pm.setDevicePixelRatio(dpr)
@@ -9982,6 +11393,8 @@ class App:
                                  default=str)
                 new = json.dumps([r["state"], extra], sort_keys=True, default=str)
                 if old != new:
+                    if case["extra"].get("viewports"):
+                        extra["viewports"] = case["extra"]["viewports"]      # other viewports of the case stay
                     case["extra"] = extra
                     self.info_msg(self._store_case(case, r, f"Zaktualizowano: „{case['name']}”."))
                     self.project_changed()
@@ -10031,6 +11444,8 @@ class App:
             self.project["cases"].insert(0, case)                    # newest on top
             msg = f"Dodano do projektu: „{case['name']}”."
         else:
+            if case["extra"].get("viewports"):
+                extra["viewports"] = case["extra"]["viewports"]              # other viewports of the case stay
             case["extra"] = extra
             msg = f"Zaktualizowano: „{case['name']}”."
         msg = self._store_case(case, r, msg)
@@ -10112,14 +11527,16 @@ class App:
         ptree_sync(self.project)
 
     # --- printing
-    def project_document(self):
+    def project_document(self, title=False):
+        """The printout as a QTextDocument; title – also the project name at the top (for the text editor; the
+        printout has it in the page header)."""
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QTextDocument
         esc = html.escape
         doc = QTextDocument()
         doc.setDefaultFont(QFont(FONT, 9))
-        parts = []
-        head = f"Projekt: <b>{esc(self.project_title())}</b>"       # project name only
+        parts = ([f'<p style="font-size:9pt;">Projekt: <b>{esc(self.project_title())}</b></p>'] if title else [])
+        head = ""                                         # the project name is in the page header (print_document)
         ptree_sync(self.project)
         nums = ptree_numbers(self.project["tree"])
         num_of, path_of = {}, {}                          # case number and the groups it is in (as in the list)
@@ -10134,7 +11551,7 @@ class App:
         for i, case in enumerate(self.project["cases"]):
             grp = " › ".join(path_of.get(case["id"], []))
             title = f"{num_of.get(case['id'], '')} {case['name']}".strip()
-            head_i = head + (f"<br>{esc(grp)}" if grp else "")
+            head_i = esc(grp)
             self.ensure_calc(case)
             ex, op = case["extra"], case["state"].get("opcje", {})
             mode = ex.get("mode", "śnieg")
@@ -10144,8 +11561,13 @@ class App:
                              f'<h2 style="margin:4px 0 2px 0;">{esc(title)}</h2>'
                              f'{html_body(case.get("report") or "")}</div>')
                 continue
-            img = self.snapshot(case).toImage()
-            doc.addResource(QTextDocument.ResourceType.ImageResource, QUrl(f"przypadek{i}.png"), img)
+            imgs = ""
+            iw = 560 if title else 620                      # the editor's page is narrower (A4, 2.54 cm margins)
+            for j, vp in enumerate([ex] + list(ex.get("viewports") or [])):     # every viewport of the case
+                img = self.snapshot(case, vp=vp).toImage()
+                doc.addResource(QTextDocument.ResourceType.ImageResource, QUrl(f"przypadek{i}_{j}.png"), img)
+                imgs += (f'<p align="center"><img src="przypadek{i}_{j}.png" width="{iw}" '
+                         f'height="{iw * img.height() / img.width():.0f}"></p>')
             sub = (f"Śnieg · {op.get('snow_type', '')} · przypadek ({case['_calc']['snow_case']})" if mode != "wiatr"
                    else f"Wiatr · {op.get('wind_type', '')} · θ = {op.get('theta', '')}"
                    + (f" · {op.get('variant')}" if op.get("variant") else ""))
@@ -10153,9 +11575,10 @@ class App:
             parts.append(f'<div{brk}><p style="color:#6b7280; font-size:8pt;">{head_i}</p>'
                          f'<h2 style="margin:4px 0 2px 0;">{esc(title)}</h2>'
                          f'<p style="color:#6b7280; margin:0 0 6px 0;">{esc(sub)}</p>'
-                         f'<p align="center"><img src="przypadek{i}.png" width="620"></p>'
+                         f'{imgs}'
                          f'{html_body(case.get("report") or "")}</div>')
         doc.setHtml("".join(parts))
+        doc._project = self.project_title()
         return doc
 
     def print_project(self):
@@ -10163,33 +11586,25 @@ class App:
             QMessageBox.information(self.pw or self.win, "Drukuj", "Projekt nie zawiera przypadków.")
             return
         try:
-            from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
+            from PySide6.QtPrintSupport import QPrinter
         except ImportError:
             QMessageBox.critical(self.pw or self.win, "Drukuj", "Brak modułu drukowania Qt (QtPrintSupport).")
             return
-        # Qt print preview (the Windows 11 print dialog shows no preview); the printer button in the preview
-        # opens the printer selection
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             doc = self.project_document()                 # once – 3D model images are computed only here
         finally:
             QApplication.restoreOverrideCursor()
-        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        printer.setDocName(self.project_title())
-        dlg = QPrintPreviewDialog(printer, self.pw or self.win)
-        dlg.setWindowTitle(f"Podgląd wydruku – {self.project_title()}")
-        dlg.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
+        dlg = PrintManager(self, self.pw or self.win, doc, self.project_title())
         scr = (self.pw or self.win).screen().availableGeometry()
-        dlg.resize(min(1000, scr.width() - 80), scr.height() - 80)
-        dlg.paintRequested.connect(lambda p: doc.print_(p))
-        # QPrintPreviewDialog does not take ownership of the QPrinter – printer and document must live as long as
-        # the window (previously the local variable disappeared on return and the preview crashed the whole program)
+        dlg.resize(min(1200, scr.width() - 80), scr.height() - 80)
+        # the manager owns its printer; the document must live as long as the window
         keep = self.__dict__.setdefault("_print_keep", {})
         k = id(dlg)
-        keep[k] = (printer, doc)
+        keep[k] = (dlg.printer, doc)
         dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         dlg.destroyed.connect(lambda *_a, k=k: keep.pop(k, None))    # printer released only after the window
-        self._preview = dlg                               # (tests: access to the preview window)
+        self._preview = dlg                               # (tests: access to the print manager)
         dlg.setModal(False)                               # does not block other windows
         dlg.show()
 
@@ -10209,7 +11624,15 @@ class App:
             for k, val in st.get("pola", {}).items():
                 if k in self.v:
                     self.v[k].set(str(val))
+            for n, val in self.OPT_DEFAULTS.items():      # options missing in older files – defaults
+                if n not in st.get("opcje", {}):
+                    getattr(self, n).set(val)
             for n, val in st.get("opcje", {}).items():
+                if n in self.OPT_DEFAULTS and val not in {"w_oro": OROGRAPHY, "w_cfr": CFR_TYPES,
+                                                         "w_struct": CSCD_STRUCT, "w_skin": SKIN_TYPES}[n]:
+                    val = self.OPT_DEFAULTS[n]
+                if isinstance(val, str):
+                    val = LEGACY_OPTS.get(val, val)
                 if n in self.STATE_VARS:
                     if n == "cpi_mode" and val not in CPI_MODES:
                         val = CPI_MODES[0]           # older files („własna wartość”) – the code method (7.2.9(6))
@@ -10241,7 +11664,7 @@ class App:
             **{"sx_" + k_: v_ for k_, v_ in EXC_SEC_DEFAULT.items()},
             w_mtype=MULTI_TYPES[0],
             wind_zone="1", terrain="II", theta="0°", variant="", cpi_mode=CPI_MODES[0],
-            cdir_sec=CDIR_ANY, dom_zone=DOM_ZONES[0], w_edge=EDGE_TYPES[0])})
+            cdir_sec=CDIR_ANY, dom_zone=DOM_ZONES[0], w_edge=EDGE_TYPES[0], **self.OPT_DEFAULTS)})
         self.dirty = False
         self.update_title()
         self._form_reset()
@@ -10254,27 +11677,36 @@ class App:
     def show_snow(self):
         s, g = self.snow, self.sgeo
         zn = self.snow_zone.get()
+        P3 = "PN-EN 1991-1-3"
         it = [("h", "Dane i współczynniki")]
         it.append(("v", f"sₖ = {f2(s['sk50'], 3)} kN/m²",
                    f"wartość charakterystyczna obciążenia śniegiem gruntu (strefa {zn}: "
-                   f"{SNOW_ZONES[zn][0]}, A = {f2(g.p['A'], 0)} m n.p.m.)"))
+                   f"{SNOW_ZONES[zn][0]}, A = {f2(g.p['A'], 0)} m n.p.m.)",
+                   f"{P3}, 4.1(1); Załącznik krajowy, Tabl. NB.1 (strefy śniegowe wg Rys. NB.1)"))
         if abs(s["fret"] - 1.0) > 1e-9:
             it.append(("v", f"sₙ = {f2(s['fret'], 4)}·sₖ = {f2(s['sk'], 3)} kN/m²",
-                       f"obciążenie śniegiem gruntu o średnim okresie powrotu n = {f2(s['nret'], 0)} lat (Zał. D, "
-                       f"wzór D.1; V = 0,8·exp(−0,0006·A) = {f2(snow_variation(g.p['A']), 3)}, NB1.13). Dalej sₙ "
-                       "zastępuje sₖ; wartość inna niż 50 lat – stosować za zgodą właściwych władz / według założeń "
-                       "projektu."))
+                       f"obciążenie śniegiem gruntu o średnim okresie powrotu n = {f2(s['nret'], 0)} lat "
+                       f"(V = 0,8·exp(−0,0006·A) = {f2(snow_variation(g.p['A']), 3)}). Dalej sₙ zastępuje sₖ; "
+                       "wartość inna niż 50 lat – stosować za zgodą właściwych władz / według założeń projektu.",
+                       f"{P3}, Załącznik D, wzór (D.1); Załącznik krajowy, NB1.13, wzór (NB.3)"))
         cur = next((c for c in s["cases"] if c["name"] == self.snow_case.get()), s["cases"][0])
         acc = cur["acc"]                         # report for the current case only
         if not acc:
-            it.append(("v", f"Cₑ = {f2(s['Ce'])}", f"współczynnik ekspozycji – teren {self.snow_ce.get().lower()}"))
+            it.append(("v", f"Cₑ = {f2(s['Ce'])}", f"współczynnik ekspozycji – teren {self.snow_ce.get().lower()}",
+                       f"{P3}, 5.2(7), Tabl. 5.1"))
+            if s["ct_note"] or self.ct_mode.get() == CT_MODES[1]:
+                ct_ref = f"{P3}, 5.2(8); Załącznik krajowy, wzór (NB.1)"
+            else:
+                ct_ref = f"{P3}, 5.2(8)"
             it.append(("v", f"Cₜ = {f2(s['Ct'], 3)}",
-                       "współczynnik termiczny" + (f" ({s['ct_note']})" if s["ct_note"] else "")))
+                       "współczynnik termiczny" + (f" ({s['ct_note']})" if s["ct_note"] else ""), ct_ref))
             it.append(("v", f"s = μ·Cₑ·Cₜ·sₖ = μ · {f2(s['base'], 3)} kN/m²",
-                       "obciążenie śniegiem dachu, sytuacja trwała i przejściowa; działa na rzut poziomy"))
+                       "obciążenie śniegiem dachu, sytuacja trwała i przejściowa; działa na rzut poziomy",
+                       f"{P3}, 5.2(3)P, wzór (5.1)"))
         else:
             it.append(("v", f"s = μ·sₖ = μ · {f2(s['sk'], 3)} kN/m²",
-                       "sytuacja wyjątkowa – zaspa wyjątkowa wg Załącznika B (5.2(3)P c), bez Cₑ i Cₜ)"))
+                       "sytuacja wyjątkowa – zaspa wyjątkowa wg Załącznika B, bez Cₑ i Cₜ",
+                       f"{P3}, 5.2(3)P, wzór (5.2); Załącznik B; Załącznik krajowy, NB1.3"))
         it.append(("h", "Współczynniki kształtu dachu"))
         for p_ in s["params"]:
             if isinstance(p_, tuple):
@@ -10282,76 +11714,58 @@ class App:
                     it.append(("v", p_[0], ""))
             elif not acc:
                 it.append(("v", p_, ""))
+        it.append(("r", f"{P3}, " + (SNOW_ACC_REF if acc else SNOW_SHAPE_REF.get(g.kind, ""))))
         o = s["overhang"]
         if o and not acc:
             names = {"all": "krawędzie dachu", "y0": "okap y = 0", "yB": "okap y = B"}
             for x in o["per"]:
                 it.append(("v", f"sₑ = {f2(x['se'], 3)} kN/m",
-                           f"nawis śnieżny, {names[x['edge']]} (d = {f2(x['d'], 3)} m, k = {f2(x['k'], 3)})"))
+                           f"nawis śnieżny, {names[x['edge']]} (d = {f2(x['d'], 3)} m, k = {f2(x['k'], 3)})",
+                           f"{P3}, 6.3, wzór (6.4); Załącznik krajowy, NB1.12 (A > 300 m n.p.m. i strefa 4)"))
+        for gd in (s.get("guards") or []) if not acc else []:
+            it.append(("v", f"Fₛ = s·b·sin α = {f2(gd['s'], 3)}·{f2(gd['b'])}·sin {f2(gd['alpha'], 1)}° = "
+                            f"{f2(gd['F'], 3)} kN/m",
+                       f"obciążenie barierki przeciwśnieżnej, {gd['label']}; μ = {f2(gd['mu'], 3)}, "
+                       "b – rzut od barierki do kalenicy",
+                       f"{P3}, 6.4, wzór (6.5); 5.3.3(4)"))
         it.append(("h", f"Obciążenie – przypadek ({cur['name']})"))
         best = max((c for c in s["cases"] if not c["acc"]), key=lambda c: c["smax"])
         it.append(("v", f"({cur['name']})  s = {f2(cur['smax'], 3)} kN/m²",
                    f"μ = {f2(cur['mumax'], 3)}"
                    + ("  – największe obciążenie w sytuacji trwałej" if cur is best else "")
-                   + (f"  – sytuacja wyjątkowa: {cur['desc']}" if acc else "")))
+                   + (f"  – sytuacja wyjątkowa: {cur['desc']}" if acc else ""),
+                   f"{P3}, 5.2(3)P, wzór ({'5.2' if acc else '5.1'}); " + ("Załącznik B" if acc else
+                                                                            SNOW_CASE_REF.get(g.kind, "5.3"))))
         for n_ in s["notes"]:
             if isinstance(n_, tuple):
-                if n_[1] == cur["name"] or (n_[1] == "acc" and acc):
+                if cur["name"] in n_[1].split(",") or (n_[1] == "acc" and acc):
                     it.append(("n", n_[0]))
             elif not acc:
                 it.append(("n", n_))
-        it.append(("h", "Oznaczenia"))
-        sym = [("μ", "współczynnik kształtu dachu"), ("α", "kąt nachylenia połaci dachu")]
-        k = g.kind
-        if k in ("flat", "mono", "duo", "multi"):
-            sym.append(("μ₁", "współczynnik kształtu dachu wg Tablicy 5.2 (zależny od kąta α)"))
-        if k == "multi":
-            sym += [("μ₂", "współczynnik kształtu dla zaspy w koszu"),
-                    ("ᾱ", "średni kąt nachylenia połaci przylegających do kosza")]
-        if k == "vault":
-            sym += [("μ₃", "współczynnik kształtu dachu walcowego"), ("h/b", "wyniosłość łuku / rozpiętość"),
-                    ("β", "kąt nachylenia stycznej do łuku"), ("lₛ", "część dachu o nachyleniu β ≤ 60°")]
-        if k == "abut":
-            sym += [("μ₂ = μₛ + μw", "współczynnik kształtu dla zaspy przy wyższej budowli"),
-                    ("μₛ", "udział śniegu zsuwającego się z dachu wyższego"),
-                    ("μw", "udział śniegu nawiewanego przez wiatr"),
-                    ("b₁, b₂", "szerokość budowli wyższej i dachu niższego"),
-                    ("h", "różnica wysokości dachów"), ("lₛ", "długość zaspy"),
-                    ("γ", "ciężar objętościowy śniegu (2 kN/m³)")]
-        if k == "obst":
-            sym += [("μ₂", "współczynnik kształtu dla zaspy przy przeszkodzie"), ("h", "wysokość przeszkody"),
-                    ("lₛ", "długość zaspy"), ("γ", "ciężar objętościowy śniegu (2 kN/m³)")]
-        if any(c["acc"] for c in s["cases"]):
-            sym += [("μ₃", "współczynnik kształtu zaspy wyjątkowej przy wyższej budowli (Tabl. B1)"),
-                    ("μ₁, μ₂", "zaspa wyjątkowa: przy kalenicy / przy okapie (B3) lub po obu stronach przeszkody (B4)"),
-                    ("b, b₁, b₂", "wymiary wg Rys. B2–B4 (b – większy z b₁, b₂)"),
-                    ("lₛ", "długość zaspy wyjątkowej")] if k in ("abut", "obst") else \
-                   [("μ₁, μ₂", "zaspa wyjątkowa przy attyce / po obu stronach przeszkody (B4)"),
-                    ("b₁, b₂", "odległości od okapu, kalenicy lub kosza; dla attyki b₂ – szerokość budynku"),
-                    ("lₛ", "długość zaspy wyjątkowej")]
-        if o:
-            sym += [("sₑ", "obciążenie nawisem śnieżnym na 1 m krawędzi okapu"),
-                    ("d", "grubość warstwy śniegu na dachu (s/γ, γ = 3 kN/m³)"),
-                    ("k", "współczynnik nieregularności kształtu nawisu")]
-        sym += [("Przyp.", "przypadek rozkładu: (i) – równomierny, (ii), (iii) – nierównomierny"
-                           + (", (wyj.n) – zaspa wyjątkowa, sytuacja wyjątkowa" if any(c["acc"] for c in s["cases"])
-                              else "")),
-                ("Miejsce", "część dachu, której dotyczy wartość"),
-                ("a → b", "wartość zmienia się liniowo od a do b")]
         tv = self.snow_tree
         tv.delete(*tv.get_children())
+        linear = False
         for c in [cur]:
             for lab, m0, m1 in c["rows"]:
                 cb = c["base"]
                 if abs(m0 - m1) < 1e-9:
                     mt, st = f2(m0, 3), f2(m0 * cb, 3)
                 else:
+                    linear = True
                     mt, st = f"{f2(m0, 2)} → {f2(m1, 2)}", f"{f2(m0 * cb, 2)} → {f2(m1 * cb, 2)}"
                 tv.insert("", "end", values=(f"({c['name']})", lab, mt, st))
-        k_ = next(i for i, x in enumerate(it) if x[0] == "h" and x[1] == "Oznaczenia")
-        it.insert(k_, ("t", tv))
-        for a_, b_ in sym:
-            it.append(("s", a_, b_))
+        it.append(("h", "Podsumowanie obciążeń"))
+        it.append(("t", tv))
+        it.append(("h", "Oznaczenia"))
+        pn = {"i": "(i) – obciążenie równomierne", "ii": "(ii) – obciążenie nierównomierne",
+              "iii": "(iii) – obciążenie nierównomierne (wiatr z przeciwnej strony)"}
+        if g.kind in ("abut", "obst"):
+            pn = {"i": "(i) – dach bez zaspy", "ii": "(ii) – dach z zaspą"}
+        pn_ = ("(wyj.n) – zaspa wyjątkowa, sytuacja wyjątkowa" if acc
+               else pn.get(cur["name"], f"({cur['name']})"))
+        entries = snow_legend(g.kind, acc, pn_, linear)
+        for x in legend_items(it, entries):
+            it.append(x)
         self.fill_text(self.snow_text, it)
 
         names = {"i": "równomierny", "ii": "nierównomierny", "iii": "nierównomierny (lustrzany)"}
@@ -10363,40 +11777,75 @@ class App:
         inf = w["info"]
         can = g.kind in ("can1", "can2")
         dens = f" · {f2(w['dens'], 3)}" if w["dens"] != 1 else ""
+        P4 = "PN-EN 1991-1-4"
         it = [("h", "Prędkość i ciśnienie wiatru")]
-        it.append(("v", f"vb,0 = {f2(w['vb0'])} m/s", "podstawowa wartość bazowej prędkości wiatru (Tabl. NA.1)"))
+        it.append(("v", f"vb,0 = {f2(w['vb0'])} m/s",
+                   f"podstawowa wartość bazowej prędkości wiatru (strefa {self.wind_zone.get()})",
+                   f"{P4}, 4.2(1)P; Załącznik krajowy, Tabl. NA.1 (strefy wiatrowe wg Rys. NA.1)"))
         sec = self.wp["cdir_sec"]
         it.append(("v", f"c_dir = {f2(w['cdir'], 2)}, c_season = {f2(w['cseason'], 2)}",
-                   "współczynnik kierunkowy (Tabl. NA.2, " + ("sektor " + sec.split()[-1] + ", strefa "
+                   "współczynnik kierunkowy (" + ("sektor " + sec.split()[-1] + ", strefa "
                    + self.wind_zone.get() if sec in CDIR_SECTORS else "bez rozróżniania kierunków")
-                   + ") i sezonowy (NA.4)"))
-        it.append(("v", f"vb = c_dir·c_season·vb,0 = {f2(w['vb'])} m/s", "bazowa prędkość wiatru"))
+                   + ") i sezonowy",
+                   f"{P4}, 4.2(2)P; Załącznik krajowy, Tabl. NA.2 (c_dir), NA.4 (c_season)"))
+        it.append(("v", f"vb = c_dir·c_season·vb,0 = {f2(w['vb'])} m/s", "bazowa prędkość wiatru",
+                   f"{P4}, 4.2(2)P, wzór (4.1)"))
         it.append(("v", f"qb,0 = {f2(w['qb0'], 3)} kN/m²",
-                   "podstawowa wartość bazowego ciśnienia prędkości (Tabl. NA.1, ρ = 1,25 kg/m³)"))
+                   "podstawowa wartość bazowego ciśnienia prędkości (ρ = 1,25 kg/m³)",
+                   f"{P4}, 4.5(1); Załącznik krajowy, Tabl. NA.1"))
         it.append(("v", f"qb = qb,0·(c_dir·c_season)²{dens} = {f2(w['qb'], 4)} kN/m²",
-                   "wartość bazowa ciśnienia prędkości" + (" (strefa 3: ×(20000−A)/(20000+A))" if dens else "")))
-        it.append(("v", f"ze = {f2(w['ze'])} m", "wysokość odniesienia"))
-        it.append(("v", f"cₑ(ze) = {f2(w['ce'], 4)}", f"współczynnik ekspozycji (kategoria terenu {self.terrain.get()})"))
-        it.append(("v", f"qp(ze) = {f2(w['qp'], 4)} kN/m²", "wartość szczytowa ciśnienia prędkości"))
+                   "wartość bazowa ciśnienia prędkości" + (" (strefa 3: ×(20000−A)/(20000+A))" if dens else ""),
+                   f"{P4}, 4.5(1), wzór (4.10)" + ("; Załącznik krajowy, Tabl. NA.1" if dens else "")))
+        it.append(("v", f"ze = {f2(w['ze'])} m", "wysokość odniesienia",
+                   f"{P4}, 7.2.2, Rys. 7.4 (ściany); 7.2.3–7.2.8 (dach)"))
+        oro = inf.get("oro")
+        if oro:
+            it.append(("v", f"Φ = H/Lu = {f2(oro['H'])}/{f2(oro['Lu'])} = {f2(oro['phi'], 3)}, "
+                            f"Le = {f2(oro['Le'])} m",
+                       f"orografia: {OROGRAPHY[oro['kind']]}; x = {f2(oro['x'])} m"
+                       + (f", Ld = {f2(oro['Ld'])} m" if oro["kind"] == 1 else ""),
+                       f"{P4}, 4.3.3, Załącznik A.3, Tabl. A.2 (Ap1:2010)"))
+            it.append(("v", f"s = {f2(oro['s'], 3)} → c₀(ze) = {f2(oro['c0'], 3)}",
+                       "współczynnik miejsca (A.4)–(A.13) i współczynnik orografii (A.1)–(A.3)"
+                       + ("; Φ < 0,05 – c₀ = 1" if oro["phi"] < 0.05 else ""),
+                       f"{P4}, 4.3.3(1), wzór (4.3); Załącznik A.3, wzory (A.1)–(A.13)"))
+            it.append(("v", f"cₑ(ze) = c₀²·cr² + c₀·(cₑ,NA − cr²) = {f2(w['ce'], 4)}",
+                       f"współczynnik ekspozycji z orografią (cr i cₑ,NA dla kategorii terenu {self.terrain.get()})",
+                       f"{P4}, 4.5(1), wzór (4.8); Załącznik krajowy, NA.8, Tabl. NA.3"))
+        else:
+            it.append(("v", f"cₑ(ze) = {f2(w['ce'], 4)}",
+                       f"współczynnik ekspozycji (kategoria terenu {self.terrain.get()}; c₀ = 1)",
+                       f"{P4}, 4.5(1); Załącznik krajowy, Tabl. NA.3"))
+        it.append(("v", f"qp(ze) = {f2(w['qp'], 4)} kN/m²", "wartość szczytowa ciśnienia prędkości",
+                   f"{P4}, 4.5(1), wzór (4.8)"))
         it.append(("h", f"Geometria pól (kierunek θ = {w['theta']}°)"))
-        it.append(("v", f"b = {f2(w['b'])} m", "wymiar budynku prostopadły do kierunku wiatru"))
-        it.append(("v", f"d = {f2(w['d'])} m", "wymiar budynku równoległy do kierunku wiatru"))
-        it.append(("v", f"h = {f2(g.h_top)} m", "wysokość budynku (najwyższy punkt dachu)"))
-        it.append(("v", f"e = min(b; 2h) = {f2(w['e'])} m", "wymiar wyznaczający szerokość pól"))
+        it.append(("v", f"b = {f2(w['b'])} m", "wymiar budynku prostopadły do kierunku wiatru",
+                   f"{P4}, 7.2.2, Rys. 7.5"))
+        it.append(("v", f"d = {f2(w['d'])} m", "wymiar budynku równoległy do kierunku wiatru",
+                   f"{P4}, 7.2.2, Rys. 7.5"))
+        it.append(("v", f"h = {f2(g.h_top)} m", "wysokość budynku (najwyższy punkt dachu)", f"{P4}, 7.2.2, Rys. 7.5"))
+        it.append(("v", f"e = min(b; 2h) = {f2(w['e'])} m", "wymiar wyznaczający szerokość pól",
+                   f"{P4}, 7.2.2, Rys. 7.5; 7.2.3–7.2.6, Rys. 7.6–7.9"))
         if not can and g.walls():
-            it.append(("v", f"h/d = {f2(w['hd'], 3)}", "smukłość budynku – do cpe ścian (Tabl. 7.1)"))
+            it.append(("v", f"h/d = {f2(w['hd'], 3)}", "smukłość budynku – do cpe ścian", f"{P4}, 7.2.2, Tabl. 7.1"))
         for key in ("vault", "dome"):
             if key in inf:
                 it.append(("v", f"f/d = {f2(inf[key][0], 3)}, h/d = {f2(inf[key][1], 3)}",
-                           "wyniosłość / rozpiętość oraz wysokość ścian / rozpiętość (Rys. 7.11, 7.12)"))
+                           "wyniosłość / rozpiętość oraz wysokość ścian / rozpiętość",
+                           f"{P4}, 7.2.8, " + ("Rys. 7.11" if key == "vault" else "Rys. 7.12")))
         if can:
-            it.append(("v", f"φ = {f2(self.wp['phi'], 2)}", "współczynnik blokowania przestrzeni pod wiatą"))
+            it.append(("v", f"φ = {f2(self.wp['phi'], 2)}", "współczynnik blokowania przestrzeni pod wiatą",
+                       f"{P4}, 7.3(1), Rys. 7.15"))
             it.append(("v", f"cf = {f2(inf['cf_max'], 2, True)} / {f2(inf['cf_min'], 2, True)}",
-                       "globalny współczynnik siły (maksimum / minimum)"))
-            it.append(("v", f"Fw = cf·qp·L·d = {f2(inf['Fw'], 1, True)} kN", "wypadkowa siła wiatru na wiatę"))
+                       "globalny współczynnik siły (maksimum / minimum)",
+                       f"{P4}, 7.3, Tabl. {'7.6' if g.kind == 'can1' else '7.7'}"))
+            it.append(("v", f"Fw = cₛcd·cf·qp·L·d = {f2(inf['Fw'], 1, True)} kN", "wypadkowa siła wiatru na wiatę",
+                       f"{P4}, 5.3(2), wzór (5.3)"))
         else:
+            ci_ = CPI_MODES.index(self.cpi_mode.get()) if self.cpi_mode.get() in CPI_MODES else 0
             it.append(("v", f"cpi = {', '.join(f2(c, 2, True) for c in w['cpis'])}",
-                       "współczynnik ciśnienia wewnętrznego"))
+                       "współczynnik ciśnienia wewnętrznego (" + CPI_MODES[ci_] + ")",
+                       f"{P4}, 7.2.9, " + WIND_CPI_REF[ci_]))
         notes = []
         if "cpi_note" in inf:
             notes.append(inf["cpi_note"])
@@ -10409,8 +11858,7 @@ class App:
         if "multi" in inf:
             notes.append(inf["multi"])
         if g.kind == "dome":
-            notes.append("Kopuła: cpe liniowo A → B → C wzdłuż łuku (Rys. 7.12); "
-                         "ściany walcowe (7.9) nie są liczone.")
+            notes.append("Kopuła: cpe liniowo A → B → C wzdłuż łuku (Rys. 7.12); ściany walcowe – 7.9.1 (pola α).")
         if g.kind == "vault":
             notes.append("Łuk: wartości z Rys. 7.11; tylko wiatr ⟂ do tworzącej.")
         if g.kind == "hip":
@@ -10419,6 +11867,7 @@ class App:
             notes.append("Sprawdzić też obciążenie max/min jednej połaci przy drugiej nieobciążonej (7.3(6)).")
         if g.roof_eff == "flat" and g.kind != "flat":
             notes.append("Kąt < 5° – dach liczony jak płaski (7.2.3).")
+        self._wind_extra(it, w, g, inf, can)
         env = self.env or {}
         t_ = lambda x: f"{f2(x[0], 3, True)} kN/m² (pole {x[1]}, θ = {x[2]}°)"
         it.append(("h", "Wartości skrajne – obwiednia kierunków i wariantów"))
@@ -10434,22 +11883,10 @@ class App:
             lo, hi = env["net"]
             it.append(("v", f"netto: max {f2(hi[0], 3, True)} / min {f2(lo[0], 3, True)} kN/m²",
                        "z uwzględnieniem ciśnienia wewnętrznego cpi"))
+        if env:
+            it.append(("r", f"{P4}, 5.2(1), wzory (5.1), (5.2); " + ("7.3" if can else "7.2.9 (netto)")))
         for n_ in notes:
             it.append(("n", n_))
-        it.append(("h", "Oznaczenia w tabeli"))
-        sym = [("Pole", "oznaczenie pola: ściany A–E (Rys. 7.5), dach F–N (Rys. 7.6–7.10), wiaty A–D"),
-               ("Pow.", "powierzchnia pola [m²]"),
-               ("ze", "wysokość odniesienia pola [m]")]
-        if can:
-            sym += [("cp,net", "współczynnik ciśnienia netto (góra i spód dachu wiaty)"),
-                    ("w", "obciążenie wiatrem = qp·cp,net; (+) ku dołowi, (−) ku górze")]
-        else:
-            sym += [("cpe", f"współczynnik ciśnienia zewnętrznego dla pola obciążonego A = "
-                            f"{self.v['Aload'].get()} m² (Rys. 7.2)"),
-                    ("we", "ciśnienie zewnętrzne = qp(ze)·cpe; (+) parcie, (−) ssanie"),
-                    ("netto", "we − wi, gdzie wi = qp·cpi – ciśnienie wewnętrzne; min i max z wartości cpi")]
-            if g.kind == "multi":
-                sym.append(("H·0.8, I·0.6", "pole kolejnej nawy z cpe zredukowanym współczynnikiem (Rys. 7.10)"))
         tv = self.wind_tree
         tv.delete(*tv.get_children())
         groups, order = {}, []
@@ -10477,13 +11914,114 @@ class App:
                 tv.insert("", "end", tags=("neg" if pt["we"] < 0 else "pos",), values=(
                     f"  {pt['name']} (punkt)", "—", f2(w["ze"], 2), f2(pt["cpe"], 2, True),
                     f2(pt["we"], 3, True), f2(pt["wn_min"], 3, True), f2(pt["wn_max"], 3, True)))
-        k_ = next((i for i, x in enumerate(it) if x[0] == "h" and x[1].startswith("Oznaczenia")), len(it))
-        it.insert(k_, ("h", "Podsumowanie obciążeń"))
-        it.insert(k_ + 1, ("t", tv))
-        for a_, b_ in sym:
-            it.append(("s", a_, b_))
+        it.append(("h", "Podsumowanie obciążeń"))
+        it.append(("t", tv))
+        it.append(("r", f"{P4}, " + WIND_CPE_REF.get(g.kind, "7.2")))
+        it.append(("h", "Oznaczenia"))
+        for x in legend_items(it, wind_legend(g.kind, can, self.v["Aload"].get())):
+            it.append(x)
         self.fill_text(self.wind_text, it)
 
+
+    def _wind_extra(self, it, w, g, inf, can):
+        """Wind report: cylindrical walls of a dome, structural factor, friction, parapet, multi-skin walls."""
+        cy = inf.get("cyl")
+        if cy:
+            it.append(("h", "Ściany walcowe kopuły (7.9.1)"))
+            it.append(("v", f"v(ze) = √(2·qp/ρ) = {f2(cy['v'], 2)} m/s, Re = b·v/ν = {cy['re']:.3g}".replace(".", ","),
+                       f"liczba Reynoldsa, ze = {f2(cy['ze'])} m, ν = 15·10⁻⁶ m²/s", "PN-EN 1991-1-4, 7.9.1, wzór (7.15)"))
+            it.append(("r", "PN-EN 1991-1-4, 7.9.1, wzór (7.16), Rys. 7.27, Tabl. 7.12"))
+            it.append(("n", "cpe = ψλα·cp0; cp0(α) z Rys. 7.27 i Tabl. 7.12 (α – kąt od kierunku wiatru, pola "
+                            "„α …°” w tabeli); ψλα = 1 – bez redukcji od swobodnego końca (po stronie bezpiecznej). "
+                            "Przebieg cp0 między punktami charakterystycznymi Tabl. 7.12: 0…αmin – krzywa kosinusowa, "
+                            "αmin…αA – liniowo, dalej cp0,h."))
+        cs = inf.get("cscd")
+        if cs:
+            it.append(("h", "Współczynnik konstrukcyjny cₛcd (6)"))
+            if cs["rule"] == "a":
+                it.append(("v", "cₛcd = 1,0", f"budynek o wysokości h = {f2(cs['h'])} m < 15 m",
+                           "PN-EN 1991-1-4, 6.2(1)a)"))
+            else:
+                it.append(("v", f"zs = {f2(cs['zs'])} m, vm(zs) = {f2(cs['vm'], 2)} m/s, Iv(zs) = {f2(cs['Iv'], 3)}",
+                           "wysokość odniesienia, średnia prędkość wiatru i intensywność turbulencji",
+                           "PN-EN 1991-1-4, 6.3.1, Rys. 6.1; 4.3.1, wzór (4.3); 4.4, wzór (4.7)"))
+                it.append(("v", f"L(zs) = {f2(cs['Lz'], 1)} m, n₁ = 46/h = {f2(cs['n1'], 3)} Hz, "
+                                f"δ = {f2(cs['delta'], 2)}",
+                           "skala turbulencji, częstotliwość drgań własnych, dekrement tłumienia "
+                           "(δa i δd pominięte – po stronie bezpiecznej)",
+                           "PN-EN 1991-1-4, Załącznik B, wzór (B.1); Załącznik F, wzór (F.2), Tabl. F.2"))
+                it.append(("v", f"B² = {f2(cs['B2'], 3)}, R² = {f2(cs['R2'], 3)}, kp = {f2(cs['kp'], 3)}",
+                           "część pozarezonansowa, rezonansowa, współczynnik wartości szczytowej",
+                           "PN-EN 1991-1-4, Załącznik B, wzory (B.3), (B.6), (B.4)"))
+                it.append(("v", f"cₛcd = (1 + 2kp·Iv·√(B² + R²))/(1 + 7Iv) = {f2(cs['value'], 3)}",
+                           "współczynnik konstrukcyjny, procedura 1",
+                           "PN-EN 1991-1-4, 6.3.1, wzór (6.1); Załącznik B; Załącznik krajowy, NA.10"))
+                if cs.get("c_rule"):
+                    it.append(("n", "Dla budynku ramowego ze ścianami konstrukcyjnymi (h < 100 m, h < 4d) można "
+                                    "przyjąć cₛcd = 1 (6.2(1)c)."))
+            it.append(("n", "cₛcd dotyczy sił wypadkowych (5.3); ciśnienia na powierzchnie we, wi (5.2) – bez cₛcd."))
+        fr_ = inf.get("friction")
+        if fr_:
+            it.append(("h", "Siły tarcia (7.5)"))
+            it.append(("v", f"cfr = {f2(fr_['cfr'], 2)}", "współczynnik tarcia", "PN-EN 1991-1-4, 7.5(1), Tabl. 7.10"))
+            it.append(("v", f"powierzchnie równoległe {f2(fr_['apar'], 1)} m², prostopadłe {f2(fr_['aperp'], 1)} m²",
+                       "pola powierzchni równoległych do wiatru i rzut powierzchni prostopadłych",
+                       "PN-EN 1991-1-4, 5.3(4)"))
+            if fr_["negl"]:
+                it.append(("n", "Powierzchnie równoległe ≤ 4 × prostopadłe – siły tarcia można pominąć (5.3(4))."))
+            else:
+                it.append(("v", f"Afr = {f2(fr_['afr'], 1)} m²",
+                           f"powierzchnia dalej niż min(2b; 4h) = {f2(fr_['slim'])} m od krawędzi nawietrznej",
+                           "PN-EN 1991-1-4, 7.5(3), Rys. 7.22"))
+                it.append(("v", f"Ffr = cfr·qp(ze)·Afr = {f2(fr_['F'], 2)} kN",
+                           f"siła tarcia, ze = h = {f2(fr_['ze'])} m, qp = {f2(fr_['qp'], 4)} kN/m²",
+                           "PN-EN 1991-1-4, 5.3(3), wzór (5.7)"))
+        pa = inf.get("parapet")
+        if pa:
+            it.append(("h", "Attyka (7.4.1)"))
+            it.append(("v", f"ze = h + hₚ = {f2(pa['ze'])} m, qp(ze) = {f2(pa['qp'], 4)} kN/m²",
+                       "wysokość odniesienia attyki na budynku", "PN-EN 1991-1-4, 7.4.1(2), Rys. 7.19"))
+            tb = TableData(("Attyka wzdłuż", "Pole", "od naroża [m]", "cp,net", "w [kN/m²]"), (0, 1))
+            for lab, ln, zs_ in pa["sides"]:
+                tb.insert("", "end", values=(f"{lab} = {f2(ln)} m", "", "", "", ""), tags=("sep",))
+                for nm, a_, b_, cp in zs_:
+                    tb.insert("", "end", values=("", nm, f"{f2(a_, 2)} … {f2(b_, 2)}", f2(cp, 2),
+                                                 f2(cp * pa["qp"], 3)), tags=("pos",))
+            it.append(("t", tb))
+            it.append(("r", "PN-EN 1991-1-4, 7.4.1, Tabl. 7.9, Rys. 7.19"))
+            it.append(("n", "Tabl. 7.9 dla φ = 1 (attyka pełna), z załamaniem w narożniku (attyka obiega naroża); "
+                            "pola od obu końców każdego boku; w działa w obu kierunkach (±). Attyka ażurowa "
+                            "(φ ≤ 0,8) – jak kratownica płaska (7.11), poza zakresem programu."))
+        sk = self.wp.get("skin", 0) if not can else 0
+        if sk:
+            it.append(("h", "Przegroda wielopowłokowa (7.2.10)"))
+            it.append(("r", "PN-EN 1991-1-4, 7.2.10(3), Uwaga 2, Rys. 7.14"))
+            it.append(("n", f"{SKIN_TYPES[sk]} – zasady z 7.2.10(3), Uwaga 2 (przestrzeń między powłokami zamknięta "
+                            "na krańcach, odstęp < 100 mm; przy otwartych krańcach – Rys. 7.14b – nie stosuje się)."))
+            tb = TableData(("Pole", "ze [m]", "powłoka zewn. [kN/m²]", "powłoka wewn. [kN/m²]"), (0,))
+            qi, cpis = w["qi"], w["cpis"] or [0.0]
+            rng = lambda vals: (f2(min(vals), 3, True) if max(vals) - min(vals) < 1e-9
+                                else f"{f2(min(vals), 3, True)} … {f2(max(vals), 3, True)}")
+            seen = set()
+            for z in w["zones"]:
+                if z.get("dome"):
+                    continue
+                key = (z["kind"], z["name"], round(z["ze"], 3), round(z["cpe"], 4))
+                if key in seen:
+                    continue
+                seen.add(key)
+                we = z["we"]
+                net = [we - qi * c for c in cpis]
+                if sk == 1:
+                    out_, in_ = [(2 / 3 if z["cpe"] > 0 else 1 / 3) * we], net
+                elif sk == 2:
+                    out_, in_ = net, None
+                elif sk == 3:
+                    out_, in_ = net, [qi * c / 3 for c in cpis]
+                else:
+                    out_, in_ = [we], net
+                tb.insert("", "end", values=(z["name"], f2(z["ze"], 2), rng(out_), rng(in_) if in_ else "—"))
+            it.append(("t", tb))
 
     @staticmethod
     def default_yaw(theta):
@@ -10591,7 +12129,7 @@ class App:
     def _zoom(self, f, at=None):
         """Zoom by f; at = (x, y) – the point under the cursor stays in place (None – the view centre)."""
         old = self.zoom
-        self.zoom = clamp(self.zoom * f, ZOOM_MIN, ZOOM_MAX)
+        self.zoom = clamp(self.zoom * f, getattr(self.cv, "_zmin", ZOOM_MIN), ZOOM_MAX)
         if at is not None and old > 0 and self.cv is not None:
             self.pan_x, self.pan_y = zoom_pan(self.pan_x, self.pan_y, self.zoom / old, at,
                                               self.cv.winfo_width(), self.cv.winfo_height())
@@ -10604,6 +12142,87 @@ class App:
         z = max(getattr(self, "zoom", 1.0) or 1.0, 1.0)
         q = round(math.log(z) / math.log(1.1))
         return q, 1.1 ** -q
+
+    def _dim_scale(self):
+        """Offset factor of dimensions / angle texts: `_load_scale` factor × compensation of the wider framing
+        with orography (`_view_k`, so the offsets keep the same size on the screen as without the terrain)."""
+        return self._load_scale()[1] * (getattr(self, "_view_k", 1.0) or 1.0)
+
+    def _oro_terrain(self, g):
+        """Orography on the 3D model (wind): terrain along the wind with the building on a flat shelf –
+        dict(quads, edges, pts, prof, ...) or None. The terrain is drawn under the building (not in faces)."""
+        w = getattr(self, "wind", None)
+        oro = ((w or {}).get("info") or {}).get("oro")
+        if not oro:
+            return None
+        fr = wind_frame(g, w["theta"])
+        d, b, to = fr["d"], fr["b"], fr["to_xy"]
+        B0 = max(g.L, g.B, getattr(g, "h_top", 0.0) or 0.0, 1e-3)
+        pr = oro_profile(oro, d, B0)
+        ext = max(0.8 * B0, 0.12 * (pr["hi"] - pr["lo"]))      # width of the terrain across the wind
+        t0, t1 = -ext, b + ext
+        sc_ = d / 2
+
+        def pt(q, t, z):
+            x, y = to(sc_ + q, t)
+            return (x, y, z)
+        quads, pts = [], []
+        for (qa, za), (qb, zb) in zip(pr["V"], pr["V"][1:]):
+            poly = [pt(qa, t0, za), pt(qb, t0, zb), pt(qb, t1, zb), pt(qa, t1, za)]
+            pts += poly
+            wall = abs(qa - qb) < 1e-9
+            flat = abs(za - zb) < 1e-9
+            quads.append(dict(poly=poly, fill="#b9c0a8" if wall else ("#e4e8dc" if flat else "#cdd4bd"),
+                              outline="#c5cbb9" if flat else "#9aa28a"))
+        edges = [[pt(q, t, z) for q, z in pr["V"]] for t in (t0, t1)]
+        return dict(quads=quads, edges=edges, pts=pts, prof=pr, pt=pt, t0=t0, t1=t1, fr=fr, d=d, b=b, B0=B0, ext=ext,
+                    oro=oro)
+
+    def _draw_terrain(self, cv, P, terr):
+        items = []
+        for q in terr["quads"]:
+            pr = [P(p) for p in q["poly"]]
+            items.append((sum(p[2] for p in pr) / 4, q, pr))
+        for _, q, pr in sorted(items, key=lambda x: -x[0]):
+            cv.create_polygon(*[c for p in pr for c in p[:2]], fill=q["fill"], outline=q["outline"])
+        for e in terr["edges"]:
+            pr = [P(p) for p in e]
+            cv.create_line(*[c for p in pr for c in p[:2]], fill="#7c8470", width=1.5)
+
+    def _oro_dims(self, cv, P, facing, terr):
+        """Dimensions of the orography: height H, slope length Lu (Ld), distance of the building from the crest x.
+        The texts show the true values (the drawing may be scaled). On the viewer's side, outside the terrain."""
+        pr, pt, fr = terr["prof"], terr["pt"], terr["fr"]
+        to = fr["to_xy"]
+        a0, a1 = to(0, 0), to(0, -1)
+        v = (a1[0] - a0[0], a1[1] - a0[1])
+        l = math.hypot(*v) or 1.0
+        near_lo = facing((v[0] / l, v[1] / l, 0))       # the side t = t0 faces the viewer → dimensions there
+        sgn = -1 if near_lo else 1
+        tedge = terr["t0"] if near_lo else terr["t1"]
+        N = 0.4 * terr["B0"] * self._load_scale()[1]    # offset module (the building size – the terrain is in real scale)
+        col = ORO_COL
+        t_at = lambda k: tedge + sgn * N * k
+        zf = pr["zf"]
+        zmin = min(z for _, z in pr["V"])
+        lev = lambda k: zmin - N * k                     # dimension lines hang below the terrain, one level each
+        up = (0, 0, 0.2 * N)
+        # x – from the building to the crest; Ld (hill) – from the crest; Lu – from the foot to the crest. The extension
+        # lines are vertical (from the terrain points down to the dimension line)
+        u0, u1 = sorted((0.0, pr["qc"]))
+        self._dchain(cv, P, lambda u: pt(u, tedge, 0.0) if abs(u) < 1e-9 else pt(u, tedge, pr["z_crest"]),
+                     lambda u: pt(u, tedge, lev(1)), [(u0, u1, f"=x = {f2(pr['x'])} m", "ox")], up, col)
+        segs = [(min(pr["foot"], pr["qc"]), max(pr["foot"], pr["qc"]), f"=Lu = {f2(pr['Lu'])} m", "oLu")]
+        if pr["hill"]:                                   # Lu and Ld – one line (the slopes meet at the crest)
+            segs.append((pr["qc"], pr["foot2"], f"=Ld = {f2(pr['Ld'])} m", "oLd"))
+        self._dchain(cv, P, lambda u: pt(u, tedge, zf(u)), lambda u: pt(u, tedge, lev(2)), segs, up, col)
+        # H – vertical, beside the crest (hill) / the end of the upper plateau (escarpment)
+        zl = pr["z_foot"]
+        sh = pr["qc"] if pr["hill"] else pr["hi"]
+        a, c = P(pt(pr["foot"], tedge, zl)), P(pt(sh, tedge, zl))
+        cv.create_line(a[0], a[1], c[0], c[1], fill=col, dash=(2, 2))
+        self._dchain(cv, P, lambda u: pt(sh, tedge, u), lambda u: pt(sh, t_at(1), u),
+                     [(zl, pr["z_crest"], f"=H = {f2(pr['H'])} m", "oH")], (0, 0, 0), col)
 
     def scene_wind(self):
         """Wind like snow: neutral building surfaces, on each zone a semi-transparent load layer
@@ -11012,6 +12631,19 @@ class App:
         piv = getattr(self, "piv", None)
         if piv:                                    # rotation point chosen by the user (point in the screen centre)
             ctr = tuple(float(c) for c in piv)
+        terr = self._oro_terrain(g) if mode == "wiatr" else None     # orography – terrain under the building
+        # the framing never depends on the terrain: the position and magnification of the model stay the same
+        # when the orography is switched on (the terrain is only drawn around the building, cropped by the view)
+        self._view_k = 1.0
+        zmin = ZOOM_MIN                            # with a terrain the zoom-out reaches the whole terrain
+        if terr:
+            tp = terr["pts"] + allp
+            full = max(max(p[i] for p in tp) - min(p[i] for p in tp) for i in range(3))
+            zmin = max(min(ZOOM_MIN, 2.3 * size / (1.4 * full)), 0.01)
+        try:
+            cv._zmin = zmin
+        except Exception:
+            pass
         sc = self.zoom * min(W, Hc) / (2.3 * size)
         cy, sy = math.cos(self.yaw), math.sin(self.yaw)
         cp, sp = math.cos(self.pitch), math.sin(self.pitch)
@@ -11040,18 +12672,21 @@ class App:
         m = (0.8 if mode == "wiatr" else 0.5) * size
         gr = [(x0 - m, y0 - m, 0), (x1 + m, y0 - m, 0), (x1 + m, y1 + m, 0), (x0 - m, y1 + m, 0)]
         cv._proj_ground = (x0 - m, x1 + m, y0 - m, y1 + m)
-        cv.create_polygon(*[c for p in gr for c in P(p)[:2]], fill="#eef0ec", outline="#d4d8d0")
-        step = 10 ** math.floor(math.log10(size / 2 if size > 2 else 1))
-        k = math.ceil((x0 - m) / step)
-        while k * step <= x1 + m:
-            a, b = P((k * step, y0 - m, 0)), P((k * step, y1 + m, 0))
-            cv.create_line(a[0], a[1], b[0], b[1], fill="#e2e5df")
-            k += 1
-        k = math.ceil((y0 - m) / step)
-        while k * step <= y1 + m:
-            a, b = P((x0 - m, k * step, 0)), P((x1 + m, k * step, 0))
-            cv.create_line(a[0], a[1], b[0], b[1], fill="#e2e5df")
-            k += 1
+        if terr:
+            self._draw_terrain(cv, P, terr)
+        else:
+            cv.create_polygon(*[c for p in gr for c in P(p)[:2]], fill="#eef0ec", outline="#d4d8d0")
+            step = 10 ** math.floor(math.log10(size / 2 if size > 2 else 1))
+            k = math.ceil((x0 - m) / step)
+            while k * step <= x1 + m:
+                a, b = P((k * step, y0 - m, 0)), P((k * step, y1 + m, 0))
+                cv.create_line(a[0], a[1], b[0], b[1], fill="#e2e5df")
+                k += 1
+            k = math.ceil((y0 - m) / step)
+            while k * step <= y1 + m:
+                a, b = P((x0 - m, k * step, 0)), P((x1 + m, k * step, 0))
+                cv.create_line(a[0], a[1], b[0], b[1], fill="#e2e5df")
+                k += 1
         fnt = (FONT, 9)
         self._placed = []                                # occupied label rectangles (labels, dimensions)
         self._defer_angles = None
@@ -11059,7 +12694,13 @@ class App:
             fr = wind_frame(g, self.wind["theta"])
             p1 = fr["to_xy"](-0.95 * m, fr["b"] / 2)
             p2 = fr["to_xy"](-0.55 * m, fr["b"] / 2)
-            a, b = P((p1[0], p1[1], 0.02)), P((p2[0], p2[1], 0.02))
+            if terr:                              # the arrow above the terrain (heights along the profile)
+                pr_ = terr["prof"]
+                zt = lambda sv: pr_["zf"](sv - fr["d"] / 2) if abs(sv - fr["d"] / 2) > pr_["padq"] else 0.0
+                z1_, z2_ = zt(-0.95 * m) + 0.02, zt(-0.55 * m) + 0.02
+            else:
+                z1_ = z2_ = 0.02
+            a, b = P((p1[0], p1[1], z1_)), P((p2[0], p2[1], z2_))
             cv.create_line(a[0], a[1], b[0], b[1], width=7, arrow="last", arrowshape=(18, 22, 8), fill="#b45309")
             # label beyond the arrow tail (on its extension), so the arrow does not cross it
             wtxt, wfnt = f"wiatr θ = {self.wind['theta']}°", (FONT, 10, "bold")
@@ -11153,6 +12794,8 @@ class App:
                 self.draw_snow_dims(cv, g, P, facing, size)
             if mode == "wiatr" and self.dims3d.get():
                 self.draw_dims(cv, g, P, facing, size)
+            if terr and self.odims3d.get():
+                self._oro_dims(cv, P, facing, terr)
             if self.bdims3d.get():
                 self.draw_bdims(cv, mode, g, P, facing, size)
         finally:
@@ -11176,6 +12819,8 @@ class App:
         if mode == "śnieg" and self.snow["overhang"]:
             self.draw_overhang(cv, g, P, facing, self.snow["overhang"], size)
         self.draw_legend(cv, mode, g, Hc, fnt)
+        if terr:
+            cv.create_text(14, 14, anchor="nw", font=(FONT, 9, "bold"), fill=MUTED, text="orografia w realnej skali")
         if not getattr(self, "_w_ok" if mode == "wiatr" else "_s_ok", True):
             cv.create_text(12, 10, anchor="nw", fill="#b91c1c", font=(FONT, 9, "bold"),
                            text="⚠ Błędne dane budynku – pokazano ostatni poprawny model")
@@ -11252,6 +12897,8 @@ class App:
                 items.append(("line", OVH_COL, "nawis śnieżny [kN/m] – dodatkowe obciążenie liniowe na krawędzi okapu"))
             if self.dims3d.get():
                 items.append(("line", SDIM_COL, "wymiary pól obciążenia"))
+        if mode == "wiatr" and self.odims3d.get() and (self.wind.get("info") or {}).get("oro"):
+            items.append(("line", ORO_COL, "wymiary orografii" if self._ctx == "img" else "wymiary orografii (kliknij, aby zmienić)"))
         if self.bdims3d.get():
             items.append(("line", BDIM_COL, "wymiary budynku" if self._ctx == "img"       # printout – no clicking
                           else "wymiary budynku (kliknij, aby zmienić)"))
@@ -11330,7 +12977,7 @@ class App:
         runs from the base point (through via(u), if given) to the dimension line.
         segs = [(u0, u1, text[, field key])]; dimension = u1 − u0. The text offset lab_off (model units) scales
         with the zoom like the load layers and the dimension offsets (the text stays at its line)."""
-        f_ = self._load_scale()[1]
+        f_ = self._dim_scale()
         lab_off = tuple(o * f_ for o in lab_off)
         for u in sorted({v for s_ in segs for v in s_[:2]}):
             pts = [P(path(u))] + ([P(via(u))] if via is not None and via(u) is not None else []) + [P(lpt(u))]
@@ -11348,7 +12995,7 @@ class App:
             a, b = P(lpt(u0)), P(lpt(u1))
             cv.create_line(a[0], a[1], b[0], b[1], fill=col, width=1.5)
             key = sg_[3] if len(sg_) > 3 else None
-            txt = f"{f2(u1 - u0)} m"
+            txt = nm[1:] if isinstance(nm, str) and nm.startswith("=") else f"{f2(u1 - u0)} m"   # "=text" – given
             lab_at = lambda t: P(tuple(x + o for x, o in zip(lpt(u0 + (u1 - u0) * t), lab_off)))
             lp = lab_at(lab_t)
             if self._box_busy(cv, lp[0], lp[1], txt):        # text spot taken – shift along the dimension line
@@ -11436,7 +13083,7 @@ class App:
         snow = mode == "śnieg"
         pf = "s_" if snow else "w_"
         z0_ = (0, 0, 0)
-        N = DIM_STEP * size * self._load_scale()[1]
+        N = DIM_STEP * size * self._dim_scale()
         used = getattr(self, "_dim_used", set())
         first = lambda side: 2 if side in used else 1           # first free level on the given side
         if g.kind == "dome":
@@ -11474,7 +13121,8 @@ class App:
                      z0_, col, lab_t=0.5 if yL == yf else 0.2)      # text away from the annex dimensions
         # ---- horizontal, on the ground, at the gable wall: widths
         if snow and g.upper:
-            overall = [(g.upper.oy, 0.0, "", "s_b1"), (0.0, g.B, "", "s_B")]
+            gp_ = getattr(g, "gap", 0.0)            # B3(2): the gap between the buildings dimensioned separately
+            overall = [(g.upper.oy, g.upper.oy + g.p["b1"], "", "s_b1")] +                 ([(-gp_, 0.0, "", "s_gd")] if gp_ > 0 else []) + [(0.0, g.B, "", "s_B")]
         else:
             overall = [(0.0, g.B, "", pf + "B")]
         part, pbase = None, None
@@ -11557,13 +13205,13 @@ class App:
                     if not snow and g.kind == "can2":
                         a = g.p["alpha"]                    # canopy: signed angle (−20…+30°)
                     xm = L / 2                                   # centre of the slope (at half length)
-                    self._angle_label(cv, P, (xm, my, rz(xm, my) + 0.01 * size * self._load_scale()[1]), f"{f2(a, 1)}°", akey)
+                    self._angle_label(cv, P, (xm, my, rz(xm, my) + 0.01 * size * self._dim_scale()), f"{f2(a, 1)}°", akey)
         elif isinstance(main, Hip):
             sh = main
-            self._angle_label(cv, P, (L / 2, yf + (-ny) * g.B / 4, rz(L / 2, yf + (-ny) * g.B / 4) + 0.03 * size * self._load_scale()[1]),
+            self._angle_label(cv, P, (L / 2, yf + (-ny) * g.B / 4, rz(L / 2, yf + (-ny) * g.B / 4) + 0.03 * size * self._dim_scale()),
                               f"{f2(g.p['alpha'], 1)}°", "w_alpha")
             self._angle_label(cv, P, (xs + (-nx) * sh.run / 2, g.B / 2, rz(xs + (-nx) * sh.run / 2, g.B / 2) +
-                                      0.03 * size * self._load_scale()[1]), f"{f2(g.p['a90'], 1)}°", "w_a90")
+                                      0.03 * size * self._dim_scale()), f"{f2(g.p['a90'], 1)}°", "w_a90")
         # ---- roof angle of the taller building (adjacent taller building)
         if snow and g.upper and g.p["aup"] >= 0.5 and facing((0, -1, 0)):   # angle of the taller building – from its side
             up = g.upper
@@ -11572,7 +13220,7 @@ class App:
             sg_ = (vis or sgs)[-1]                               # visible slope (preferably from the lower roof)
             my = (sg_[0] + sg_[2]) / 2
             xm = L / 2
-            self._angle_label(cv, P, (xm, my, up.rz(xm, my) + 0.01 * size * self._load_scale()[1]), f"{f2(g.p['aup'], 1)}°", "s_aup")
+            self._angle_label(cv, P, (xm, my, up.rz(xm, my) + 0.01 * size * self._dim_scale()), f"{f2(g.p['aup'], 1)}°", "s_aup")
         # ---- additional elements (at their own edges)
         if snow and g.upper and not facing((0, -1, 0)):          # step visible only from the lower roof side
             self._dchain(cv, P, lambda u: (xF, 0.0, u), lambda u: (xF + nF * N, 0.0, u),
@@ -11672,7 +13320,7 @@ class App:
         in the plane of the eaves; sloping gable – in the plane of the gable wall, vertical extension lines."""
         s = self.snow
         case = next((c for c in s["cases"] if c["name"] == self.snow_case.get()), s["cases"][0])
-        N_ = DIM_STEP * size * self._load_scale()[1]
+        N_ = DIM_STEP * size * self._dim_scale()
         if getattr(g, "upper", None) and facing((0, -1, 0)):     # lower roof behind the taller building – no dimensions
             return
         for ax, a0, a1, z, segs in case.get("xdim", []):     # extent of drifts on additional elements
@@ -11702,11 +13350,11 @@ class App:
         lo_, hi_ = min(sp[0] for sp in spans), max(sp[1] for sp in spans)
         zs = [pr.rz(xs, lo_ + (hi_ - lo_) * i / 40) for i in range(41)]
         if max(zs) - min(zs) < 1e-6:
-            z0, k = zs[0], DIM_STEP * size * self._load_scale()[1]
+            z0, k = zs[0], DIM_STEP * size * self._dim_scale()
             path = lambda u: (xs, u, z0)
             lpt = lambda u: (xs + nx * k, u, z0)
         else:
-            zl = getattr(self, "_snow_ztop", pr.h_top) + DIM_STEP * size * self._load_scale()[1]
+            zl = getattr(self, "_snow_ztop", pr.h_top) + DIM_STEP * size * self._dim_scale()
             path = lambda u: (xs, u, pr.rz(xs, u))
             lpt = lambda u: (xs, u, zl)
         self._dchain(cv, P, path, lpt, [sp[:3] for sp in spans], (0, 0, 0.025 * size), col)
@@ -11715,7 +13363,7 @@ class App:
             yf, ny = (0.0, -1) if facing((0, -1, 0)) else (g.B, 1)
             segs = [(0.0, e_, "lₛ ="), (e_, g.L - e_, ""), (g.L - e_, g.L, "lₛ =")] if g.L > 2 * e_ + 1e-9 else []
             if segs:
-                k = DIM_STEP * size * self._load_scale()[1]
+                k = DIM_STEP * size * self._dim_scale()
                 self._dchain(cv, P, lambda u: (u, yf, g.H), lambda u: (u, yf + ny * k, g.H), segs,
                              (0, 0, 0.025 * size), col)
 
@@ -11740,7 +13388,7 @@ class App:
             tside, out = b, (-o_t0[0], -o_t0[1])
         ups = xy_dir(-1, 0)
         col = DIM_COL
-        k1 = DIM_STEP * size * self._load_scale()[1]                      # offset module N
+        k1 = DIM_STEP * size * self._dim_scale()                      # offset module N
         lab = (0, 0, 0.025 * size)
         roofz = [z for z in w["zones"] if z["kind"] in ("roof", "canopy") and not z.get("dome")]
 
@@ -12059,6 +13707,8 @@ def main():
         app.open_path(files[0])
     app.pw.rebuild()
     app.pw.showMaximized()                           # always the main window first, maximised
+    if "--autotest" not in sys.argv and not os.environ.get("KAYENN_NO_UPDATE"):
+        QTimer.singleShot(3000, app.auto_update_check)
     if "--autotest" in sys.argv:                     # package check: start, report, screenshots, quit
         QTimer.singleShot(2500, lambda: _autotest(app, qapp))
     sys.exit(qapp.exec())

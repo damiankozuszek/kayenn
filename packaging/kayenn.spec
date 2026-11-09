@@ -63,7 +63,24 @@ elif sys.platform == "darwin":
 else:
     icon = None
 
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="KAYENN", console=False, icon=icon,
+vinfo = None
+if sys.platform == "win32":
+    # Version resource: Windows names the program in its system dialogs (e.g. printing: „<name> – drukowanie”)
+    # after FileDescription / ProductName – without it the title is taken from the file (python.exe: „Python”)
+    from PyInstaller.utils.win32.versioninfo import (VSVersionInfo, FixedFileInfo, StringFileInfo, StringTable,
+                                                     StringStruct, VarFileInfo, VarStruct)
+    _v = tuple((int(x) for x in (VERSION.split(".") + ["0", "0", "0"])[:3])) + (0,)
+    vinfo = VSVersionInfo(
+        ffi=FixedFileInfo(filevers=_v, prodvers=_v, mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0,
+                          date=(0, 0)),
+        kids=[StringFileInfo([StringTable("040904B0", [
+            StringStruct("CompanyName", "KAYENN"), StringStruct("FileDescription", "KAYENN"),
+            StringStruct("FileVersion", VERSION), StringStruct("InternalName", "KAYENN"),
+            StringStruct("OriginalFilename", "KAYENN.exe"), StringStruct("ProductName", "KAYENN"),
+            StringStruct("ProductVersion", VERSION)])]),
+            VarFileInfo([VarStruct("Translation", [1033, 1200])])])
+
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="KAYENN", console=False, icon=icon, version=vinfo,
           disable_windowed_traceback=False, upx=False)
 coll = COLLECT(exe, a.binaries, a.datas, name="KAYENN", upx=False)
 
