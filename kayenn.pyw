@@ -16,6 +16,8 @@ Requires Python 3 and PySide6:  py -m pip install PySide6
 (on the first start without PySide6 the program offers to install it).
 
 The program is an auxiliary tool – results must be verified against the design code.
+
+Copyright (c) 2026 Damian Kozuszek. MIT licence – see LICENSE; third-party components: THIRD_PARTY_NOTICES.md.
 """
 
 import copy
@@ -27,7 +29,7 @@ import re
 import sys
 import time
 
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.1.0"
 # program resources folder (fonts, icons, material database) – also inside the PyInstaller bundle (sys._MEIPASS)
 BASE_DIR = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
 FROZEN = bool(getattr(sys, "frozen", False))
@@ -568,6 +570,27 @@ def tjunction_fix(patches, eps=1e-6):
                 nM.append(ma + t * (mb - ma))
         out.append(dict(pt, poly=nP, mu=nM) if len(nP) != len(P) else pt)
     return out
+
+
+def clip_rect(poly, x0, x1, y0, y1):
+    """Polygon (3D points) clipped to the rectangle x0..x1, y0..y1 in plan (Sutherland–Hodgman)."""
+    def cut(pts, ax, lim, keep_ge):
+        out = []
+        for i, a in enumerate(pts):
+            b = pts[(i + 1) % len(pts)]
+            ina, inb = (a[ax] >= lim - 1e-9) == keep_ge, (b[ax] >= lim - 1e-9) == keep_ge
+            if ina != inb and abs(b[ax] - a[ax]) > 1e-12:
+                t = (lim - a[ax]) / (b[ax] - a[ax])
+                out.append(tuple(u + (v - u) * t for u, v in zip(a, b)))
+            if inb:
+                out.append(b)
+        return out
+    pts = [tuple(p) for p in poly]
+    for ax, lim, ge in ((0, x0, True), (0, x1, False), (1, y0, True), (1, y1, False)):
+        if not pts:
+            break
+        pts = cut(pts, ax, lim, ge)
+    return pts
 
 
 def parapet_faces(L, B, H, hp, t=0.25, col="#d6d3cd", top="#c9c3ba", out=WALL_OUT):
@@ -1713,325 +1736,6 @@ def uldk_search(query, timeout=30):
                     "różnić się od nazwy miejscowości – sprawdź ją w wypisie lub podaj pełny identyfikator działki.")
     except Exception as e:      # no network, timeout, service error
         return dict(ok=False, msg="Usługa wyszukiwania działek (ULDK, GUGiK) nie odpowiada: " + html.escape(str(e)))
-
-
-MAP_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-<script>
-// Windows with „animation effects” turned off reports prefers-reduced-motion – MapLibre then turns animations off
-// (the +/− buttons and the flight to a parcel jump). On the map we keep the animations – the query must be replaced
-// before MapLibre is loaded (it remembers the result on first use).
-(function () {
-  const mm = window.matchMedia ? window.matchMedia.bind(window) : null;
-  window.matchMedia = function (q) {
-    if (/prefers-reduced-motion/.test(q))
-      return {matches: false, media: q, onchange: null, addListener() {}, removeListener() {},
-              addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; }};
-    return mm(q);
-  };
-})();
-</script>
-<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-<style>
-html,body,#map{height:100%;margin:0;font-family:"Noto Sans","Segoe UI","Helvetica Neue",Arial,sans-serif;font-size:13px}
-.box{position:absolute;z-index:5;background:#fff;border:1px solid #c9ced6;border-radius:6px;
-     box-shadow:0 1px 4px rgba(0,0,0,.15);padding:8px 10px}
-#search{top:10px;left:10px;width:330px;padding:6px}
-#search input{padding:4px 6px;border:1px solid #b9c0ca;border-radius:4px;box-sizing:border-box;font:inherit}
-#search button{padding:4px 8px;font:inherit}
-[hidden]{display:none!important}
-#tabs{display:flex;gap:2px;margin:-2px 0 6px}
-#tabs button{flex:1;border:0;border-bottom:2px solid transparent;background:none;padding:3px 0 4px;cursor:pointer;color:#56606d}
-#tabs button.on{border-bottom-color:#1d6fd8;color:#111;font-weight:600}
-.srow{display:flex;gap:6px}
-.srow input{flex:1;min-width:0}
-#pform .srow+.srow{margin-top:5px}
-#res{max-height:calc(100vh - 260px);overflow-y:auto;overscroll-behavior:contain}
-#res div{line-height:1.35}
-#res small{color:#56606d}
-#res div{padding:3px 4px;cursor:pointer;border-top:1px solid #eee}
-#res div:hover{background:#eef3fb}
-#info{bottom:44px;left:10px;max-width:420px;line-height:1.45}
-.warn{color:#b45309}
-/* cursor: pointing hand (a click picks the location); closed hand only while the map is really being dragged */
-.maplibregl-canvas-container.maplibregl-interactive,
-.maplibregl-canvas-container.maplibregl-interactive:active{cursor:pointer}
-.maplibregl-canvas-container.maplibregl-interactive.dragging{cursor:grabbing}
-/* zone legend: segmented switch (one kind of zones at a time) + list of zones; the zone of the picked point highlighted */
-#legend{bottom:44px;right:10px;width:184px;padding:10px;border:0;border-radius:10px;
-  box-shadow:0 2px 10px rgba(15,23,42,.16),0 0 0 1px rgba(15,23,42,.06)}
-#legend .lt{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#64707d;margin:0 2px 7px}
-#legend .seg{display:flex;background:#eef1f5;border-radius:8px;padding:2px;gap:2px}
-#legend .seg button{flex:1;border:0;background:none;border-radius:6px;padding:4px 0;font:inherit;font-size:12px;
-  color:#4b5563;cursor:pointer}
-#legend .seg button:hover{color:#111}
-#legend .seg button.on{background:#fff;color:#111;font-weight:600;box-shadow:0 1px 2px rgba(15,23,42,.18)}
-#legend .seg button:focus-visible{outline:2px solid #1d6fd8;outline-offset:1px}
-#legend ul{list-style:none;margin:8px 0 0;padding:0}
-#legend li{display:flex;align-items:center;gap:8px;padding:3px 6px;border-radius:6px;color:#374151}
-#legend li i{width:14px;height:14px;border-radius:4px;flex:none;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}
-#legend li.cur{background:#eef3fb;color:#111;font-weight:600}
-#legend li.cur::after{content:"punkt";margin-left:auto;font-size:10.5px;font-weight:600;color:#1d6fd8}
-</style></head><body><div id="map"></div>
-<div id="search" class="box">
- <div id="tabs"><button id="tA" class="on">Adres</button><button id="tP">Działka</button></div>
- <div id="aform" class="srow"><input id="q" placeholder="Miejscowość lub adres…"><button id="go">Szukaj</button></div>
- <div id="pform" hidden>
-  <div class="srow"><input id="obr" placeholder="Obręb, np. Dąbrowa"><input id="nr" placeholder="Nr, np. 123/4" style="flex:0 0 96px"></div>
-  <div class="srow"><input id="gm" placeholder="Gmina (opcjonalnie)"><button id="pgo">Szukaj</button></div>
- </div>
- <div id="res"></div></div>
-<div id="info" class="box">Kliknij na mapie, aby wskazać lokalizację obiektu.</div>
-<div id="legend" class="box"></div>
-<script>
-// The program passes the zone boundaries after the page has loaded (initData) – they are not pasted into the HTML.
-// A page from setHtml has a data: address with the whole content; with ~700 KB of data every fetch() (map tile)
-// cost ~10 ms of the main thread and the map stuttered while panning and zooming.
-let DATA = null, Z = null, PL = null, mapReady = false;
-function initData(d) {
-  DATA = d; Z = d.zones; PL = d.poland;
-  addZones();
-  if (window.pick) show();
-}
-const SC = {1:'#e6d200', 2:'#2fb36a', 3:'#2f7fd6', 4:'#9b4fd6', 5:'#d63a3a'};
-const WC = {1:'#43a047', 2:'#2f7fd6', 3:'#e0702f'};
-const OSM = {tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], max: 19,
-  attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'};
-
-function pip(x, y, poly) { let ins = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [x1, y1] = poly[i], [x2, y2] = poly[j];
-    if ((y1 > y) !== (y2 > y) && x < (x2 - x1) * (y - y1) / (y2 - y1) + x1) ins = !ins; }
-  return ins; }
-// zone rings (even-odd rule) -> GeoJSON polygons (outline + holes)
-function zoneGeo(rings) {
-  const depth = rings.map((r, i) => rings.reduce((n, q, j) => n + (j !== i && pip(r[0][0], r[0][1], q) ? 1 : 0), 0));
-  const polys = [];
-  rings.forEach((r, i) => { if (depth[i] % 2 === 0) polys.push({i, rings: [r]}); });
-  rings.forEach((r, i) => { if (depth[i] % 2 === 1) {
-    const host = polys.filter(p => depth[p.i] === depth[i] - 1 && pip(r[0][0], r[0][1], rings[p.i]))[0];
-    if (host) host.rings.push(r); } });
-  const close = r => (r[0][0] === r[r.length - 1][0] && r[0][1] === r[r.length - 1][1]) ? r : r.concat([r[0]]);
-  return {type: 'MultiPolygon', coordinates: polys.map(p => p.rings.map(close))};
-}
-function zoneFC(kind, cols) {
-  return {type: 'FeatureCollection', features: Object.keys(Z[kind]).map(z =>
-    ({type: 'Feature', properties: {col: cols[z]}, geometry: zoneGeo(Z[kind][z])}))};
-}
-function bndFC(kind) {
-  const f = []; for (const z in DATA.bnd[kind]) for (const ln of DATA.bnd[kind][z])
-    f.push({type: 'Feature', properties: {}, geometry: {type: 'LineString', coordinates: ln}});
-  return {type: 'FeatureCollection', features: f};
-}
-
-let kind = '__KIND__';
-let zoneMode = kind;                       // 'snow' | 'wind' | 'none' – na mapie jeden rodzaj stref naraz
-const sources = {osm: {type: 'raster', tiles: OSM.tiles, tileSize: 256, maxzoom: OSM.max, attribution: OSM.attr}};
-const layers = [{id: 'osm', type: 'raster', source: 'osm'}];
-let map = null;
-// Smooth wheel zoom: in QtWebEngine a wheel notch gives a small deltaY (60) and MapLibre then zooms by ~0.09 level
-// with a short jerk. Here: a notch = half a level; the scale approaches the target exponentially in every frame (TAU),
-// further notches move the target – turning the wheel gives one continuous, decelerating motion. Touchpad – proportional.
-function smoothWheel(m) {
-  m.scrollZoom.disable();
-  const NOTCH = 0.5, TAU = 75;
-  let target = null, anchor = null, px = null, raf = 0, last = 0;
-  const stop = () => { if (raf) cancelAnimationFrame(raf); raf = 0; target = null; last = 0; };
-  function frame(t) {
-    const dt = last ? Math.min(t - last, 50) : 16; last = t;
-    const z = m.getZoom();
-    let nz = z + (target - z) * (1 - Math.exp(-dt / TAU));
-    if (Math.abs(target - nz) < 0.002) nz = target;
-    // new scale, then a shift so that the ground point under the cursor (anchor) stays under the cursor (px);
-    // jumpTo does not support the 'around' option – hence by hand
-    m.jumpTo({zoom: nz});
-    const a = m.project(anchor), c = m.project(m.getCenter());
-    m.jumpTo({center: m.unproject([c.x + a.x - px.x, c.y + a.y - px.y])});
-    if (nz !== target) raf = requestAnimationFrame(frame); else stop();
-  }
-  const box = m.getCanvasContainer();
-  box.addEventListener('wheel', e => {
-    e.preventDefault();
-    const d = e.deltaY * (e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1);
-    if (!d) return;
-    const step = Math.abs(d) >= 50 ? -Math.sign(d) * NOTCH * Math.max(1, Math.round(Math.abs(d) / 120))
-                                   : -d / 120 * NOTCH;
-    target = Math.max(m.getMinZoom(), Math.min(m.getMaxZoom(), (target ?? m.getZoom()) + step));
-    const r = m.getCanvas().getBoundingClientRect();
-    px = {x: e.clientX - r.left, y: e.clientY - r.top};
-    anchor = m.unproject([px.x, px.y]);
-    if (!raf) raf = requestAnimationFrame(frame);
-  }, {passive: false});
-  box.addEventListener('mousedown', stop);     // przeciąganie mapy przerywa dojazd skali
-}
-try {
-  map = new maplibregl.Map({container: 'map', center: [__LON__, __LAT__], zoom: __ZOOM__ - 0.5, maxZoom: 18.5,
-    style: {version: 8, sources: sources, layers: layers}, attributionControl: {compact: true},
-    dragRotate: false, pitchWithRotate: false, touchPitch: false});
-  map.touchZoomRotate.disableRotation();
-  smoothWheel(map);
-  map.on('dragstart', () => map.getCanvasContainer().classList.add('dragging'));
-  map.on('dragend', () => map.getCanvasContainer().classList.remove('dragging'));
-  map.addControl(new maplibregl.NavigationControl({showCompass: false}), 'top-right');
-  map.addControl(new maplibregl.ScaleControl({unit: 'metric'}), 'bottom-left');
-} catch (e) {
-  document.getElementById('info').innerHTML = '<span class="warn">Nie można wyświetlić mapy (brak obsługi WebGL w tym systemie).</span>';
-}
-function setZonesVis() {
-  for (const k of ['snow', 'wind']) for (const s of ['fill', 'line'])
-    if (map.getLayer(k + '-' + s)) map.setLayoutProperty(k + '-' + s, 'visibility', zoneMode === k ? 'visible' : 'none');
-  legend();
-}
-function addZones() {                     // gdy gotowe są i mapa, i dane stref; warstwy stref pod działką
-  if (!map || !mapReady || !DATA || map.getSource('snow')) return;
-  for (const [k, cols] of [['snow', SC], ['wind', WC]]) {
-    map.addSource(k, {type: 'geojson', data: zoneFC(k, cols)});
-    map.addSource(k + 'b', {type: 'geojson', data: bndFC(k)});
-    map.addLayer({id: k + '-fill', type: 'fill', source: k, paint: {'fill-color': ['get', 'col'], 'fill-opacity': 0.32, 'fill-antialias': false}}, 'parcel-fill');
-    map.addLayer({id: k + '-line', type: 'line', source: k + 'b', paint: {'line-color': '#333', 'line-width': 1.3, 'line-opacity': 0.75}}, 'parcel-fill');
-  }
-  setZonesVis();
-}
-if (map) map.on('load', () => {
-  map.addSource('parcel', {type: 'geojson', data: {type: 'FeatureCollection', features: []}});
-  map.addLayer({id: 'parcel-fill', type: 'fill', source: 'parcel', paint: {'fill-color': '#d63a3a', 'fill-opacity': 0.12}});
-  map.addLayer({id: 'parcel-line', type: 'line', source: 'parcel', paint: {'line-color': '#d63a3a', 'line-width': 2.5}});
-  mapReady = true;
-  addZones();
-});
-
-function legend() {
-  const modes = [['snow', 'Śnieg'], ['wind', 'Wiatr'], ['none', 'Ukryj']];
-  let h = '<div class="lt">Strefy obciążenia</div><div class="seg" role="radiogroup" aria-label="Strefy na mapie">';
-  for (const [m, nm] of modes)
-    h += `<button role="radio" aria-checked="${zoneMode === m}" data-m="${m}"${zoneMode === m ? ' class="on"' : ''}>${nm}</button>`;
-  h += '</div>';
-  if (zoneMode !== 'none') {
-    const cols = zoneMode === 'snow' ? SC : WC, p = window.pick;
-    const cur = p && DATA ? zoneAt(zoneMode, p.lon, p.lat) : null;
-    h += '<ul>';
-    for (const z in cols)
-      h += `<li${String(cur) === z ? ' class="cur"' : ''}><i style="background:${cols[z]}"></i>Strefa ${z}</li>`;
-    h += '</ul>';
-  }
-  const lg = document.getElementById('legend'); lg.innerHTML = h;
-  lg.querySelectorAll('.seg button').forEach(b => b.onclick = () => { zoneMode = b.dataset.m; setZonesVis(); });
-}
-legend();
-
-function km(lon, lat) { return [lon * 111.32 * Math.cos(52 * Math.PI / 180), lat * 110.57]; }
-function rdist(lon, lat, r) { const [px, py] = km(lon, lat); let b = 1e9;
-  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
-    const [ax, ay] = km(...r[j]), [bx, by] = km(...r[i]); const dx = bx - ax, dy = by - ay, L2 = dx*dx + dy*dy;
-    let t = L2 ? ((px - ax) * dx + (py - ay) * dy) / L2 : 0; t = Math.max(0, Math.min(1, t));
-    b = Math.min(b, Math.hypot(px - ax - t * dx, py - ay - t * dy)); }
-  return b; }
-function inPL(lon, lat) {
-  let n = 0; for (const r of PL) if (pip(lon, lat, r)) n++;
-  if (n % 2) return true;
-  return Math.min(...PL.map(r => rdist(lon, lat, r))) <= __TOL__; }
-function zoneAt(k, lon, lat) {
-  if (!DATA) return null;
-  if (!inPL(lon, lat)) return null;
-  for (const z in Z[k]) { let n = 0; for (const r of Z[k][z]) if (pip(lon, lat, r)) n++; if (n % 2) return z; }
-  let best = null, bd = 1e9;      // tuż za granicą państwa (w tolerancji) – strefa najbliższego obszaru
-  for (const z in Z[k]) { const d = Math.min(...Z[k][z].map(r => rdist(lon, lat, r))); if (d < bd) { bd = d; best = z; } }
-  return best; }
-
-let marker = null, seq = 0;
-window.pick = null;
-function show() {
-  const p = window.pick; if (!p) return;
-  const zs = zoneAt('snow', p.lon, p.lat), zw = zoneAt('wind', p.lon, p.lat);
-  let h = '<b>' + (p.name ? esc(p.name) + '<br>' : '') + p.lat.toFixed(5) + '° N, ' + p.lon.toFixed(5) + '° E</b><br>';
-  const nz = DATA ? '–' : '…';
-  h += 'Strefa śniegowa: <b>' + (zs || nz) + '</b> &nbsp; Strefa wiatrowa: <b>' + (zw || nz) + '</b><br>';
-  h += 'Wysokość n.p.m.: <b>' + (p.alt === null ? (p.altErr ? '<span class="warn">brak danych</span>' : '…') :
-       Math.round(p.alt) + ' m') + '</b>';
-  if (DATA && (!zs || !zw)) h += '<br><span class="warn">Punkt poza Polską – strefy trzeba wybrać ręcznie.</span>';
-  document.getElementById('info').innerHTML = h;
-  legend();
-}
-function setPick(lat, lon, name, alt) {
-  if (map) { if (marker) marker.setLngLat([lon, lat]); else marker = new maplibregl.Marker({color: '#d63a3a'}).setLngLat([lon, lat]).addTo(map); }
-  window.pick = {lat: lat, lon: lon, alt: (alt === undefined ? null : alt), name: name || '', altErr: false};
-  show();
-  if (alt !== undefined && alt !== null) return;
-  const my = ++seq;
-  fetch('https://api.open-meteo.com/v1/elevation?latitude=' + lat + '&longitude=' + lon)
-    .then(r => r.json()).then(j => { if (my === seq && window.pick) { window.pick.alt = j.elevation[0]; show(); } })
-    .catch(() => { if (my === seq && window.pick) { window.pick.altErr = true; show(); } });
-}
-if (map) map.on('click', e => setPick(e.lngLat.lat, e.lngLat.lng));
-function search() {
-  const q = document.getElementById('q').value.trim(); if (!q) return;
-  const res = document.getElementById('res'); res.innerHTML = '<div>Szukam…</div>';
-  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=6&accept-language=pl&countrycodes=pl&q=' +
-        encodeURIComponent(q)).then(r => r.json()).then(list => {
-    res.innerHTML = '';
-    if (!list.length) { res.innerHTML = '<div>Nie znaleziono.</div>'; return; }
-    for (const it of list) { const d = document.createElement('div'); d.textContent = it.display_name;
-      d.onclick = () => { const la = +it.lat, lo = +it.lon; if (map) map.jumpTo({center: [lo, la], zoom: 13});
-        setPick(la, lo, it.display_name.split(',').slice(0, 2).join(',')); res.innerHTML = ''; };
-      res.appendChild(d); }
-  }).catch(() => { res.innerHTML = '<div class="warn">Wyszukiwanie niedostępne.</div>'; });
-}
-document.getElementById('go').onclick = search;
-document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
-
-// --- cadastral parcels: the program runs the query (ULDK GUGiK service), the result comes back to parcelResult()
-const $ = id => document.getElementById(id);
-// the result list ends above the point information box (its height changes – recalculated on the fly)
-function fitRes() {
-  const r = $('res'), top = r.getBoundingClientRect().top;
-  const pad = $('search').getBoundingClientRect().bottom - r.getBoundingClientRect().bottom;   // dolny margines ramki
-  r.style.maxHeight = Math.max(90, $('info').getBoundingClientRect().top - 10 - pad - top) + 'px';
-}
-if (window.ResizeObserver) { const ro = new ResizeObserver(fitRes); ro.observe($('info')); ro.observe($('search')); }
-window.addEventListener('resize', fitRes);
-function tab(p) { $('tA').classList.toggle('on', !p); $('tP').classList.toggle('on', p);
-  $('aform').hidden = p; $('pform').hidden = !p; $('res').innerHTML = ''; (p ? $('obr') : $('q')).focus(); fitRes(); }
-fitRes();
-$('tA').onclick = () => tab(false); $('tP').onclick = () => tab(true);
-let pseq = 0, pgm = '';
-function psearch() {
-  const obr = $('obr').value.trim(), nr = $('nr').value.trim().replace(/\s+/g, '');
-  pgm = $('gm').value.trim().toLowerCase();
-  const full = /^\d{6}_\d\.\d{4}\./.test(nr) ? nr : (/^\d{6}_\d\.\d{4}\./.test(obr) ? obr : null);
-  if (!full && (!obr || !nr)) { $('res').innerHTML = '<div class="warn">Podaj nazwę obrębu i numer działki albo pełny identyfikator (np. 141201_1.0001.6509).</div>'; return; }
-  $('res').innerHTML = '<div>Szukam w ewidencji gruntów (GUGiK)…</div>';
-  document.title = 'uldk:' + JSON.stringify({seq: ++pseq, q: full || (obr + ' ' + nr)});
-}
-$('pgo').onclick = psearch;
-for (const id of ['obr', 'nr', 'gm']) $(id).addEventListener('keydown', e => { if (e.key === 'Enter') psearch(); });
-const esc = t => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const pname = it => 'dz. ' + it.parcel + ', obręb ' + it.region + (it.commune ? ', gm. ' + it.commune : '');
-const ha = m2 => (m2 / 10000).toLocaleString('pl-PL', {maximumFractionDigits: 4}) + ' ha';
-function selectParcel(it) {
-  if (map && map.getSource('parcel')) {
-    map.getSource('parcel').setData({type: 'Feature', properties: {}, geometry: {type: 'MultiPolygon', coordinates: it.polys}});
-    map.fitBounds([[it.bbox[0], it.bbox[1]], [it.bbox[2], it.bbox[3]]], {padding: 80, maxZoom: 17, duration: 600});
-  }
-  setPick(it.lat, it.lon, pname(it));
-  $('res').innerHTML = '<div><small>' + esc(it.id) + ' · pow. ' + ha(it.area) + '</small></div>';
-}
-function parcelResult(seq, r) {
-  if (seq !== pseq) return;
-  const res = $('res');
-  if (!r.ok) { res.innerHTML = '<div class="warn">' + r.msg + '</div>'; return; }
-  let L = r.items;
-  if (pgm) L = L.filter(it => (it.commune || '').toLowerCase().includes(pgm));
-  if (!L.length) { res.innerHTML = '<div class="warn">Nie znaleziono działki' + (pgm && r.items.length ? ' w gminie „' + $('gm').value.trim() + '” (wyników w innych gminach: ' + r.items.length + ')' : '') +
-    '. Nazwa obrębu w ewidencji może różnić się od nazwy miejscowości – sprawdź ją w wypisie lub podaj pełny identyfikator działki.</div>'; return; }
-  if (L.length === 1) { selectParcel(L[0]); return; }
-  res.innerHTML = '<div><small>Znaleziono ' + L.length + ' działek – wybierz właściwą:</small></div>';
-  for (const it of L) { const d = document.createElement('div');
-    d.innerHTML = '<b>' + esc(pname(it)) + '</b><br><small>pow. ' + esc(it.county) + ', woj. ' + esc(it.voivodeship) + ' · ' + ha(it.area) + '</small>';
-    d.onclick = () => selectParcel(it); res.appendChild(d); }
-}
-__INIT__
-</script></body></html>"""
 
 
 # Internal pressure (7.2.9): only the methods of the code. 0 – (6) Note 2 (μ cannot be estimated), 1 – (6) Fig. 7.13
@@ -3609,9 +3313,9 @@ def _no_qt():
 
 
 try:
-    from PySide6.QtCore import Qt, QTimer, QPoint, QPointF, QRectF, QObject, Signal, QEvent, QSize
+    from PySide6.QtCore import Qt, QTimer, QPoint, QPointF, QRectF, QObject, Signal, QEvent, QSize, QUrl
     from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QFontMetricsF, QIcon, QKeySequence, QPainter,
-                               QPalette, QPen, QPolygonF)
+                               QPalette, QPainterPath, QPen, QPixmap, QPolygonF)
     from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFrame,
                                    QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
                                    QMessageBox, QPushButton, QScrollArea, QSplitter, QTabWidget, QTextBrowser,
@@ -3940,6 +3644,13 @@ class Canvas3D(QWidget):
         if iid in self.items:
             self.items[iid]["tags"].add(tag)
 
+    def raise_tagged(self, tag):
+        """Move all items with the tag to the top, keeping their relative order."""
+        top = [i for i in self.order if tag in self.items[i]["tags"]]
+        if top:
+            ts = set(top)
+            self.order = [i for i in self.order if i not in ts] + top
+
     def hit(self, x, y, tag="editable"):
         """Topmost item with the given tag under point (x, y)."""
         for iid in reversed(self.order):
@@ -4183,43 +3894,535 @@ class MainWindow(QMainWindow):
         self.app.close_codes()
 
 
-class _Relay(QObject):
-    """Passes a query result from the worker thread to the GUI thread."""
-    done = Signal(int, str)
+# ===================================================================
+#  MAP – location picker. Native Qt (no web engine): OpenStreetMap raster tiles + the zone outlines painted by Qt
+# ===================================================================
+MAP_SNOW_COL = {"1": "#e6d200", "2": "#2fb36a", "3": "#2f7fd6", "4": "#9b4fd6", "5": "#d63a3a"}
+MAP_WIND_COL = {"1": "#43a047", "2": "#2f7fd6", "3": "#e0702f"}
+MAP_RED = "#d63a3a"
+
+
+def merc(lon, lat):
+    """Longitude / latitude → Web Mercator, normalised to 0…1 (x to the east, y to the south)."""
+    s = math.sin(math.radians(max(-85.05, min(85.05, lat))))
+    return (lon + 180.0) / 360.0, 0.5 - math.log((1 + s) / (1 - s)) / (4 * math.pi)
+
+
+def unmerc(x, y):
+    return x * 360.0 - 180.0, math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * y))))
+
+
+_MAP_PATHS = {}
+
+
+def map_paths():
+    """Zone areas (one path per zone, even-odd) and zone boundaries of ZONE_DATA as QPainterPaths in the normalised
+    Mercator coordinates – built once; at every repaint Qt only transforms them."""
+    if not _MAP_PATHS:
+        for kind in ("snow", "wind"):
+            fills = {}
+            for z, rings in ZONE_DATA["zones"][kind].items():
+                path = QPainterPath()
+                path.setFillRule(Qt.FillRule.OddEvenFill)
+                for r in rings:
+                    path.addPolygon(QPolygonF([QPointF(*merc(*pt)) for pt in r]))
+                    path.closeSubpath()
+                fills[z] = path
+            bnd = QPainterPath()
+            for lines in ZONE_DATA["bnd"][kind].values():
+                for ln in lines:
+                    pts = [QPointF(*merc(*pt)) for pt in ln]
+                    if len(pts) > 1:
+                        bnd.moveTo(pts[0])
+                        for pt in pts[1:]:
+                            bnd.lineTo(pt)
+            _MAP_PATHS[kind] = (fills, bnd)
+    return _MAP_PATHS
+
+
+class MapView(QWidget):
+    """The map: OSM raster tiles (disk cache), zone areas and boundaries, the parcel, the marker. Left button –
+    drag the map / click picks a point, the wheel zooms around the cursor with an exponential approach (smooth)."""
+    picked = Signal(float, float)                        # latitude, longitude of a click
+    TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+    MIN_Z, MAX_Z = 3.0, 18.5
+    NETWORK = True                                       # (tests: False – no requests)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from collections import OrderedDict
+        self.setMinimumSize(420, 320)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cx, self.cy = merc(19.4, 52.1)
+        self.zoom = 5.5
+        self.mode = "snow"                               # "snow" | "wind" | "none" – one kind of zones at a time
+        self.marker = None                               # (x, y) Mercator
+        self.parcel = None                               # QPainterPath (Mercator)
+        self.tiles = OrderedDict()
+        self.pending, self.failed = {}, {}
+        self._nam = None
+        self._press, self._dragged = None, False
+        self._target, self._anchor, self._px, self._last = None, None, None, 0.0
+        self._timer = QTimer(self)
+        self._timer.setInterval(16)
+        self._timer.timeout.connect(self._tick)
+        self.on_resize = None
+
+    # --- network (tiles, search, elevation share one manager with a disk cache)
+    def net(self):
+        if self._nam is None:
+            from PySide6.QtNetwork import QNetworkAccessManager, QNetworkDiskCache
+            self._nam = QNetworkAccessManager(self)
+            cache = QNetworkDiskCache(self)
+            cache.setCacheDirectory(os.path.join(user_data_dir(), "map_cache"))
+            cache.setMaximumCacheSize(300 * 1024 * 1024)
+            self._nam.setCache(cache)
+        return self._nam
+
+    def request(self, url, prefer_cache=False):
+        from PySide6.QtNetwork import QNetworkRequest
+        req = QNetworkRequest(QUrl(url))
+        req.setRawHeader(b"User-Agent", ("KAYENN/" + APP_VERSION).encode())
+        if prefer_cache:
+            req.setAttribute(QNetworkRequest.Attribute.CacheLoadControlAttribute,
+                             QNetworkRequest.CacheLoadControl.PreferCache)
+        return self.net().get(req)
+
+    # --- geometry
+    def scale(self):
+        return 256.0 * 2 ** self.zoom
+
+    def to_screen(self, mx, my):
+        S = self.scale()
+        return (mx - self.cx) * S + self.width() / 2.0, (my - self.cy) * S + self.height() / 2.0
+
+    def to_merc(self, sx, sy):
+        S = self.scale()
+        return self.cx + (sx - self.width() / 2.0) / S, self.cy + (sy - self.height() / 2.0) / S
+
+    def _clamp(self):
+        self.zoom = max(self.MIN_Z, min(self.MAX_Z, self.zoom))
+        self.cx = max(0.0, min(1.0, self.cx))
+        self.cy = max(0.0, min(1.0, self.cy))
+
+    def jump_to(self, lon, lat, zoom=None):
+        self.cx, self.cy = merc(lon, lat)
+        if zoom is not None:
+            self.zoom = zoom
+        self._clamp()
+        self.update()
+
+    def fit_bounds(self, bbox, pad=80, max_zoom=17.0):
+        """bbox = [lon0, lat0, lon1, lat1]."""
+        x0, y0 = merc(bbox[0], bbox[3])
+        x1, y1 = merc(bbox[2], bbox[1])
+        span = max(x1 - x0, y1 - y0, 1e-9)
+        avail = max(60.0, min(self.width(), self.height()) - 2 * pad)
+        self.zoom = max(self.MIN_Z, min(max_zoom, math.log2(avail / (256.0 * span))))
+        self.cx, self.cy = (x0 + x1) / 2, (y0 + y1) / 2
+        self._clamp()
+        self.update()
+
+    def zoom_by(self, d):
+        """The + / − buttons: animated, around the centre of the view."""
+        self._target = max(self.MIN_Z, min(self.MAX_Z, (self._target if self._target is not None else self.zoom) + d))
+        self._px = (self.width() / 2.0, self.height() / 2.0)
+        self._anchor = self.to_merc(*self._px)
+        self._start()
+
+    def set_marker(self, lon, lat):
+        self.marker = merc(lon, lat)
+        self.update()
+
+    def set_parcel(self, polys):
+        """polys – [[ring, hole, …], …] of [lon, lat] points; None – no parcel."""
+        if not polys:
+            self.parcel = None
+        else:
+            path = QPainterPath()
+            path.setFillRule(Qt.FillRule.OddEvenFill)
+            for poly in polys:
+                for ring in poly:
+                    path.addPolygon(QPolygonF([QPointF(*merc(*pt)) for pt in ring]))
+                    path.closeSubpath()
+            self.parcel = path
+        self.update()
+
+    # --- smooth zoom: the scale approaches the target exponentially, the point under the cursor stays under it
+    def _start(self):
+        self._last = 0.0
+        if not self._timer.isActive():
+            self._timer.start()
+
+    def _tick(self):
+        now = time.monotonic()
+        dt = min((now - self._last) * 1000.0, 50.0) if self._last else 16.0
+        self._last = now
+        z = self.zoom
+        nz = z + (self._target - z) * (1 - math.exp(-dt / 75.0))
+        if abs(self._target - nz) < 0.002:
+            nz = self._target
+        self.zoom = nz
+        S = self.scale()
+        self.cx = self._anchor[0] - (self._px[0] - self.width() / 2.0) / S
+        self.cy = self._anchor[1] - (self._px[1] - self.height() / 2.0) / S
+        self._clamp()
+        self.update()
+        if nz == self._target:
+            self._timer.stop()
+            self._target = None
+
+    # --- mouse
+    def wheelEvent(self, e):
+        d = e.angleDelta().y()
+        if not d:
+            return
+        step = d / 120.0 * 0.5                           # a notch = half a level
+        self._target = max(self.MIN_Z, min(self.MAX_Z, (self._target if self._target is not None else self.zoom) + step))
+        pos = e.position()
+        self._px = (pos.x(), pos.y())
+        self._anchor = self.to_merc(*self._px)
+        self._start()
+        e.accept()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._press, self._dragged = e.position(), False
+            self._timer.stop()                           # dragging interrupts the approach of the scale
+            self._target = None
+
+    def mouseMoveEvent(self, e):
+        if self._press is None:
+            return
+        p = e.position()
+        if not self._dragged and (p - self._press).manhattanLength() < 4:
+            return
+        if not self._dragged:
+            self._dragged = True
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        S = self.scale()
+        self.cx -= (p.x() - self._press.x()) / S
+        self.cy -= (p.y() - self._press.y()) / S
+        self._press = p
+        self._clamp()
+        self.update()
+
+    def mouseReleaseEvent(self, e):
+        if e.button() != Qt.MouseButton.LeftButton or self._press is None:
+            return
+        was_drag, pos = self._dragged, e.position()
+        self._press, self._dragged = None, False
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        if not was_drag:
+            lon, lat = unmerc(*self.to_merc(pos.x(), pos.y()))
+            self.picked.emit(lat, lon)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if self.on_resize is not None:
+            self.on_resize()
+
+    # --- tiles
+    def _request_tiles(self, need):
+        need.sort()
+        visible = {k for _, k in need}
+        for key, rep in list(self.pending.items()):     # tiles that scrolled out of the view are not needed any more
+            if key not in visible:
+                rep.abort()
+        now = time.monotonic()
+        for _, key in need[:30]:
+            if key in self.pending or now - self.failed.get(key, -99.0) < 20.0:
+                continue
+            z, x, y = key
+            rep = self.request(self.TILE_URL.format(z=z, x=x, y=y), prefer_cache=True)
+            self.pending[key] = rep
+            rep.finished.connect(lambda key=key, rep=rep: self._tile_done(key, rep))
+
+    def _tile_done(self, key, rep):
+        from PySide6.QtNetwork import QNetworkReply
+        if self.pending.get(key) is rep:
+            del self.pending[key]
+        err = rep.error()
+        if err == QNetworkReply.NetworkError.NoError:
+            pm = QPixmap()
+            if pm.loadFromData(rep.readAll().data()):
+                self.tiles[key] = pm
+                while len(self.tiles) > 500:
+                    self.tiles.popitem(last=False)
+                self.failed.pop(key, None)
+                self.update()
+        elif err != QNetworkReply.NetworkError.OperationCanceledError:
+            self.failed[key] = time.monotonic()
+            self.update()
+        rep.deleteLater()
+
+    def _fallback(self, p, key, target):
+        """The tile is not there yet – a part of a tile of a lower zoom, enlarged."""
+        z, x, y = key
+        for d in range(1, 4):
+            if z - d < 0:
+                break
+            pm = self.tiles.get((z - d, x >> d, y >> d))
+            if pm is not None:
+                sz = pm.width() / float(1 << d)
+                p.drawPixmap(target, pm, QRectF((x - ((x >> d) << d)) * sz, (y - ((y >> d) << d)) * sz, sz, sz))
+                return True
+        return False
+
+    # --- painting
+    def paintEvent(self, ev):
+        p = QPainter(self)
+        w, h = self.width(), self.height()
+        p.fillRect(0, 0, w, h, QColor("#e4e8ee"))
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        S = self.scale()
+        tz = int(max(0, min(19, math.floor(self.zoom + 0.4))))
+        n, ts = 2 ** tz, 256.0 * 2 ** (self.zoom - tz)
+        left, top = self.to_merc(0, 0)
+        right, bottom = self.to_merc(w, h)
+        need = []
+        for ty in range(max(0, math.floor(top * n)), min(n - 1, math.floor(bottom * n)) + 1):
+            for tx in range(math.floor(left * n), math.floor(right * n) + 1):
+                key = (tz, tx % n, ty)
+                target = QRectF((tx / n - left) * S, (ty / n - top) * S, ts + 0.6, ts + 0.6)
+                pm = self.tiles.get(key)
+                if pm is not None:
+                    p.drawPixmap(target, pm, QRectF(pm.rect()))
+                else:
+                    self._fallback(p, key, target)
+                    if self.NETWORK:
+                        need.append((math.hypot(tx / n + 0.5 / n - self.cx, ty / n + 0.5 / n - self.cy), key))
+        if need:
+            self._request_tiles(need)
+        # zones, boundaries, parcel – in Mercator coordinates, Qt transforms them
+        p.save()
+        p.translate(w / 2.0 - self.cx * S, h / 2.0 - self.cy * S)
+        p.scale(S, S)
+        if self.mode in ("snow", "wind"):
+            fills, bnd = map_paths()[self.mode]
+            cols = MAP_SNOW_COL if self.mode == "snow" else MAP_WIND_COL
+            p.setPen(Qt.PenStyle.NoPen)
+            for z, path in fills.items():
+                c = QColor(cols.get(z, "#888888"))
+                c.setAlpha(82)
+                p.setBrush(c)
+                p.drawPath(path)
+            pen = QPen(QColor(51, 51, 51, 190), 1.3)
+            pen.setCosmetic(True)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawPath(bnd)
+        if self.parcel is not None:
+            fc = QColor(MAP_RED)
+            fc.setAlpha(34)
+            pen = QPen(QColor(MAP_RED), 2.5)
+            pen.setCosmetic(True)
+            p.setPen(pen)
+            p.setBrush(fc)
+            p.drawPath(self.parcel)
+        p.restore()
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        if self.marker is not None:                      # the pin
+            x, y = self.to_screen(*self.marker)
+            pin = QPainterPath()
+            pin.moveTo(x, y)
+            pin.cubicTo(x - 3, y - 9, x - 9, y - 13, x - 9, y - 19)
+            pin.arcTo(x - 9, y - 28, 18, 18, 180, -180)
+            pin.cubicTo(x + 9, y - 13, x + 3, y - 9, x, y)
+            p.setPen(QPen(QColor("#ffffff"), 1.5))
+            p.setBrush(QColor(MAP_RED))
+            p.drawPath(pin)
+            p.setBrush(QColor("#ffffff"))
+            p.drawEllipse(QPointF(x, y - 19), 3.2, 3.2)
+        self._paint_scale(p)
+        p.setFont(ui_font(FONT, 7))
+        txt = "© OpenStreetMap"
+        fm = QFontMetrics(p.font())
+        tw = fm.horizontalAdvance(txt) + 8
+        p.fillRect(QRectF(w - tw - 4, h - 18, tw, 14), QColor(255, 255, 255, 190))
+        p.setPen(QColor("#4b5563"))
+        p.drawText(QRectF(w - tw - 4, h - 18, tw, 14), Qt.AlignmentFlag.AlignCenter, txt)
+        if self.NETWORK and not self.tiles and self.failed:
+            p.setFont(ui_font(FONT, 10))
+            p.setPen(QColor("#6b7280"))
+            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter,
+                       "Nie można pobrać mapy – brak połączenia z serwerem kafelków OpenStreetMap.")
+        p.end()
+
+    def _paint_scale(self, p):
+        """Scale bar (metric) in the bottom left corner."""
+        lat = unmerc(self.cx, self.cy)[1]
+        mpp = 156543.03392 * math.cos(math.radians(lat)) / 2 ** self.zoom       # metres per pixel
+        want = 110 * mpp
+        base = 10 ** math.floor(math.log10(want))
+        for m_ in (1, 2, 5, 10):
+            if m_ * base >= want * 0.6:
+                length = m_ * base
+                break
+        px = length / mpp
+        x, y = 12.0, self.height() - 12.0
+        p.setPen(QPen(QColor("#374151"), 1.6))
+        p.drawLine(QPointF(x, y), QPointF(x + px, y))
+        p.drawLine(QPointF(x, y - 4), QPointF(x, y))
+        p.drawLine(QPointF(x + px, y - 4), QPointF(x + px, y))
+        label = f"{length / 1000:g} km" if length >= 1000 else f"{length:g} m"
+        p.setFont(ui_font(FONT, 8))
+        p.drawText(QPointF(x + 2, y - 6), label)
 
 
 class MapDialog(QDialog):
-    """Location picker on a map (MapLibre: road map, terrain, satellite imagery) with the zones overlaid."""
+    """Location picker on a map with the zones overlaid (snow / wind – one kind at a time), address search
+    (Nominatim), cadastral parcel search (ULDK, GUGiK) and the altitude of the point (Open-Meteo)."""
+
+    class _Relay(QObject):
+        parcels = Signal(int, object)
 
     def __init__(self, parent, kind, loc):
-        from PySide6.QtWebEngineWidgets import QWebEngineView
-        from PySide6.QtCore import QUrl
         super().__init__(parent)
+        from PySide6.QtWidgets import QButtonGroup, QListWidget, QToolButton
         self.setWindowTitle("Lokalizacja obiektu – strefy obciążenia śniegiem i wiatrem")
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         self.resize(1100, 780)
         self.result_loc = None
+        self.pick = None
+        self._seq = self._pseq = 0
+        self._pgm = ""
+        self._items = []                                 # results of the lists (address / parcel)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
-        self.view = QWebEngineView()
-        prof = self.view.page().profile()
-        prof.setHttpUserAgent(prof.httpUserAgent() + " KAYENN/1.0")
-        lat, lon, zoom = (52.1, 19.4, 6) if not loc else (loc["lat"], loc["lon"], 12)
-        init = ""
-        if loc:
-            alt = "null" if loc.get("alt") is None else repr(float(loc["alt"]))
-            init = f"setPick({loc['lat']!r}, {loc['lon']!r}, {json.dumps(loc.get('name', ''))}, {alt});"
-        html = (MAP_HTML.replace("__LAT__", repr(lat)).replace("__LON__", repr(lon)).replace("__ZOOM__", str(zoom))
-                .replace("__KIND__", kind).replace("__TOL__", repr(ZONE_BORDER_TOL_KM)).replace("__INIT__", init))
-        self._relay = _Relay()
-        self._relay.done.connect(self._parcel_done)
-        self.view.page().titleChanged.connect(self._on_title)     # the map requests a parcel lookup through the page title
-        # zone boundaries sent separately after the page loads – a large page in setHtml slows down every tile request
-        zones_js = "initData(" + json.dumps(ZONE_DATA, separators=(",", ":")) + ");"
-        self.view.loadFinished.connect(lambda ok: ok and self.view.page().runJavaScript(zones_js))
-        self.view.setHtml(html, QUrl("https://kayenn.local/"))
-        lay.addWidget(self.view, 1)
+        self.map = MapView(self)
+        self.map.mode = kind if kind in ("snow", "wind") else "snow"
+        self.map.on_resize = self.place_overlays
+        self.map.picked.connect(lambda la, lo: self.set_pick(la, lo))
+        lay.addWidget(self.map, 1)
+        self.setStyleSheet(
+            "QFrame#mapbox { background: #ffffff; border: 1px solid #c9ced6; border-radius: 6px; }"
+            "QPushButton#mapseg { border: 0; border-radius: 6px; padding: 4px 8px; background: transparent; color: #4b5563; }"
+            "QPushButton#mapseg:checked { background: #ffffff; color: #111111; font-weight: bold; }"
+            "QPushButton#maptab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; "
+            "padding: 3px 0 4px; color: #56606d; }"
+            "QPushButton#maptab:checked { border-bottom: 2px solid #1d6fd8; color: #111111; font-weight: bold; }"
+            "QFrame#mapseggroup { background: #eef1f5; border: 0; border-radius: 8px; }")
+        self._relay = MapDialog._Relay()
+        self._relay.parcels.connect(self._parcel_done)
+
+        # --- search box (top left)
+        self.sbox = QFrame(self.map)
+        self.sbox.setObjectName("mapbox")
+        sl = QVBoxLayout(self.sbox)
+        sl.setContentsMargins(8, 6, 8, 8)
+        sl.setSpacing(4)
+        tabs = QHBoxLayout()
+        self.tab_a, self.tab_p = QPushButton("Adres"), QPushButton("Działka")
+        for b in (self.tab_a, self.tab_p):
+            b.setObjectName("maptab")
+            b.setCheckable(True)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            tabs.addWidget(b)
+        self.tab_a.setChecked(True)
+        self.tab_a.clicked.connect(lambda checked=False: self._tab(False))
+        self.tab_p.clicked.connect(lambda checked=False: self._tab(True))
+        sl.addLayout(tabs)
+        self.aform = QWidget()
+        al = QHBoxLayout(self.aform)
+        al.setContentsMargins(0, 0, 0, 0)
+        self.q = QLineEdit()
+        self.q.setPlaceholderText("Miejscowość lub adres…")
+        self.q.returnPressed.connect(self._search_address)
+        b = QPushButton("Szukaj")
+        b.clicked.connect(lambda checked=False: self._search_address())
+        al.addWidget(self.q, 1)
+        al.addWidget(b)
+        sl.addWidget(self.aform)
+        self.pform = QWidget()
+        pl = QVBoxLayout(self.pform)
+        pl.setContentsMargins(0, 0, 0, 0)
+        pl.setSpacing(4)
+        r1 = QHBoxLayout()
+        self.obr, self.nr, self.gm = QLineEdit(), QLineEdit(), QLineEdit()
+        self.obr.setPlaceholderText("Obręb, np. Dąbrowa")
+        self.nr.setPlaceholderText("Nr, np. 123/4")
+        self.nr.setFixedWidth(96)
+        self.gm.setPlaceholderText("Gmina (opcjonalnie)")
+        r1.addWidget(self.obr, 1)
+        r1.addWidget(self.nr)
+        r2 = QHBoxLayout()
+        b2 = QPushButton("Szukaj")
+        b2.clicked.connect(lambda checked=False: self._search_parcel())
+        r2.addWidget(self.gm, 1)
+        r2.addWidget(b2)
+        pl.addLayout(r1)
+        pl.addLayout(r2)
+        for e in (self.obr, self.nr, self.gm):
+            e.returnPressed.connect(self._search_parcel)
+        self.pform.setVisible(False)
+        sl.addWidget(self.pform)
+        self.res = QListWidget()
+        self.res.setVisible(False)
+        self.res.setWordWrap(True)
+        self.res.setMaximumHeight(230)
+        self.res.itemClicked.connect(self._result_clicked)
+        sl.addWidget(self.res)
+        self.sbox.setFixedWidth(340)
+
+        # --- information about the point (bottom left)
+        self.ibox = QFrame(self.map)
+        self.ibox.setObjectName("mapbox")
+        il = QVBoxLayout(self.ibox)
+        il.setContentsMargins(10, 8, 10, 8)
+        self.info = QLabel("Kliknij na mapie, aby wskazać lokalizację obiektu.")
+        self.info.setTextFormat(Qt.TextFormat.RichText)
+        self.info.setWordWrap(True)
+        il.addWidget(self.info)
+        self.ibox.setFixedWidth(400)
+
+        # --- legend (bottom right): Śnieg | Wiatr | Ukryj, the zones of the chosen kind, the zone of the point
+        self.lbox = QFrame(self.map)
+        self.lbox.setObjectName("mapbox")
+        ll = QVBoxLayout(self.lbox)
+        ll.setContentsMargins(10, 10, 10, 10)
+        ll.setSpacing(6)
+        t = QLabel("STREFY OBCIĄŻENIA")
+        t.setStyleSheet("color: #64707d; font-size: 8pt; font-weight: bold;")
+        ll.addWidget(t)
+        seg = QFrame()
+        seg.setObjectName("mapseggroup")
+        sg = QHBoxLayout(seg)
+        sg.setContentsMargins(2, 2, 2, 2)
+        sg.setSpacing(2)
+        self.seg = QButtonGroup(self)
+        self.seg_btns = {}
+        for mode, name in (("snow", "Śnieg"), ("wind", "Wiatr"), ("none", "Ukryj")):
+            b = QPushButton(name)
+            b.setObjectName("mapseg")
+            b.setCheckable(True)
+            b.setChecked(mode == self.map.mode)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda checked=False, mode=mode: self.set_mode(mode))
+            self.seg.addButton(b)
+            self.seg_btns[mode] = b
+            sg.addWidget(b)
+        ll.addWidget(seg)
+        self.zones_lb = QLabel("")
+        self.zones_lb.setTextFormat(Qt.TextFormat.RichText)
+        ll.addWidget(self.zones_lb)
+        self.lbox.setFixedWidth(190)
+
+        # --- zoom buttons (top right)
+        self.zbox = QFrame(self.map)
+        self.zbox.setObjectName("mapbox")
+        zl = QVBoxLayout(self.zbox)
+        zl.setContentsMargins(2, 2, 2, 2)
+        zl.setSpacing(0)
+        for txt, d in (("+", 1.0), ("−", -1.0)):
+            b = QToolButton()
+            b.setText(txt)
+            b.setAutoRaise(True)
+            b.setFixedSize(30, 30)
+            b.clicked.connect(lambda checked=False, d=d: self.map.zoom_by(d))
+            zl.addWidget(b)
+
         hb = QHBoxLayout()
         note = QLabel("Granice stref odczytane z map załączników krajowych jako gładkie krzywe (dokładność ok. 3–5 km). "
                       "Przy granicy stref sprawdź lokalizację z normą.")
@@ -4235,34 +4438,229 @@ class MapDialog(QDialog):
         hb.addWidget(cancel)
         lay.addLayout(hb)
 
-    def _on_title(self, title):
-        if not title.startswith("uldk:"):
-            return
-        try:
-            req = json.loads(title[5:])
-            seq, query = int(req["seq"]), str(req["q"])[:200]
-        except (ValueError, KeyError, TypeError):
-            return
-        import threading
-        threading.Thread(target=lambda: self._relay.done.emit(seq, json.dumps(uldk_search(query))),
-                         daemon=True).start()
+        if loc:
+            self.map.jump_to(loc["lon"], loc["lat"], 11.5)
+            self.set_pick(loc["lat"], loc["lon"], loc.get("name", ""), loc.get("alt"))
+        self._legend()
+        self.place_overlays()
 
-    def _parcel_done(self, seq, res):
-        self.view.page().runJavaScript(f"parcelResult({seq}, {res});")
+    # --- layout of the boxes over the map
+    def place_overlays(self):
+        w, h = self.map.width(), self.map.height()
+        for box in (self.sbox, self.ibox, self.lbox, self.zbox):
+            box.adjustSize()
+        hw = self.ibox.layout().heightForWidth(self.ibox.width())      # wrapped text: only as tall as it needs
+        if hw > 0:
+            self.ibox.setFixedHeight(hw)
+        self.sbox.move(10, 10)
+        self.zbox.move(w - self.zbox.width() - 10, 10)
+        self.ibox.move(10, max(10, h - 44 - self.ibox.height()))
+        self.lbox.move(w - self.lbox.width() - 10, max(50, h - 44 - self.lbox.height()))
+        self.res.setMaximumHeight(max(90, min(230, h - 44 - self.ibox.height() - 150)))
+        self.sbox.raise_()
+        self.ibox.raise_()
+        self.lbox.raise_()
+        self.zbox.raise_()
 
-    def _confirm(self):
-        def got(res):
+    # --- zones
+    def set_mode(self, mode):
+        self.map.mode = mode
+        for m_, b in self.seg_btns.items():
+            b.setChecked(m_ == mode)
+        self.map.update()
+        self._legend()
+
+    def _legend(self):
+        mode = self.map.mode
+        if mode == "none":
+            self.zones_lb.setText("")
+            self.zones_lb.setVisible(False)
+        else:
+            cols = MAP_SNOW_COL if mode == "snow" else MAP_WIND_COL
+            cur = None
+            if self.pick:
+                cur = zone_lookup(mode, self.pick["lon"], self.pick["lat"])["zone"]
+            rows = []
+            for z, col in cols.items():
+                here = cur is not None and str(cur) == z
+                rows.append(f'<tr><td><span style="color:{col}; font-size:12pt;">■</span></td>'
+                            f'<td style="padding-left:6px;">{"<b>" if here else ""}Strefa {z}{"</b>" if here else ""}</td>'
+                            f'<td style="padding-left:8px; color:#1d6fd8;">{"<b>punkt</b>" if here else ""}</td></tr>')
+            self.zones_lb.setText('<table cellspacing="1">' + "".join(rows) + "</table>")
+            self.zones_lb.setVisible(True)
+        self.lbox.adjustSize()
+        self.place_overlays()
+
+    # --- the picked point
+    def set_pick(self, lat, lon, name="", alt=None):
+        self.map.set_marker(lon, lat)
+        self.pick = dict(lat=lat, lon=lon, alt=alt, name=name or "", altErr=False)
+        self._show_info()
+        if alt is not None or not MapView.NETWORK:
+            return
+        self._seq += 1
+        my = self._seq
+        rep = self.map.request(f"https://api.open-meteo.com/v1/elevation?latitude={lat}&longitude={lon}")
+        rep.finished.connect(lambda: self._elevation_done(my, rep))
+
+    def _elevation_done(self, my, rep):
+        from PySide6.QtNetwork import QNetworkReply
+        if my == self._seq and self.pick:
             try:
-                p = json.loads(res) if res else None
-            except (TypeError, ValueError):
-                p = None
-            if not p:
-                QMessageBox.information(self, "Lokalizacja", "Najpierw wskaż punkt na mapie.")
-                return
-            self.result_loc = dict(lat=float(p["lat"]), lon=float(p["lon"]),
-                                   alt=None if p.get("alt") is None else float(p["alt"]), name=p.get("name") or "")
-            self.accept()
-        self.view.page().runJavaScript("JSON.stringify(window.pick)", 0, got)
+                if rep.error() != QNetworkReply.NetworkError.NoError:
+                    raise ValueError
+                self.pick["alt"] = float(json.loads(bytes(rep.readAll()).decode("utf-8"))["elevation"][0])
+            except (ValueError, KeyError, IndexError, TypeError):
+                self.pick["altErr"] = True
+            self._show_info()
+        rep.deleteLater()
+
+    def _show_info(self):
+        p = self.pick
+        if not p:
+            return
+        esc = html.escape
+        zs = zone_lookup("snow", p["lon"], p["lat"])["zone"]
+        zw = zone_lookup("wind", p["lon"], p["lat"])["zone"]
+        h = "<b>" + (esc(p["name"]) + "<br>" if p["name"] else "") + f"{p['lat']:.5f}° N, {p['lon']:.5f}° E</b><br>"
+        h += f"Strefa śniegowa: <b>{zs or '–'}</b> &nbsp; Strefa wiatrowa: <b>{zw or '–'}</b><br>"
+        if p["alt"] is None:
+            alt = '<span style="color:#b45309;">brak danych</span>' if p["altErr"] else "…"
+        else:
+            alt = f"{round(p['alt'])} m"
+        h += f"Wysokość n.p.m.: <b>{alt}</b>"
+        if not zs or not zw:
+            h += '<br><span style="color:#b45309;">Punkt poza Polską – strefy trzeba wybrać ręcznie.</span>'
+        self.info.setText(h)
+        self._legend()
+
+    # --- searching
+    def _tab(self, parcel):
+        self.tab_a.setChecked(not parcel)
+        self.tab_p.setChecked(parcel)
+        self.aform.setVisible(not parcel)
+        self.pform.setVisible(parcel)
+        self._set_results([], "")
+        (self.obr if parcel else self.q).setFocus()
+        self.place_overlays()
+
+    def _set_results(self, rows, message, warn=False):
+        """rows – [(text, payload)]; message – a line instead of the list."""
+        self.res.clear()
+        self._items = [pl for _, pl in rows]
+        for text, _ in rows:
+            self.res.addItem(text)
+        if message:
+            self.res.addItem(message)
+            it = self.res.item(0)
+            it.setFlags(Qt.ItemFlag.NoItemFlags)
+            if warn:
+                it.setForeground(QColor("#b45309"))
+        self.res.setVisible(bool(rows) or bool(message))
+        self.sbox.adjustSize()
+        self.place_overlays()
+
+    def _result_clicked(self, item):
+        i = self.res.row(item)
+        if 0 <= i < len(self._items):
+            self._items[i]()
+
+    def _search_address(self):
+        q = self.q.text().strip()
+        if not q or not MapView.NETWORK:
+            return
+        from urllib.parse import quote
+        self._set_results([], "Szukam…")
+        rep = self.map.request("https://nominatim.openstreetmap.org/search?format=json&limit=6&accept-language=pl"
+                               "&countrycodes=pl&q=" + quote(q))
+        rep.finished.connect(lambda: self._address_done(rep))
+
+    def _address_done(self, rep):
+        from PySide6.QtNetwork import QNetworkReply
+        try:
+            if rep.error() != QNetworkReply.NetworkError.NoError:
+                raise ValueError
+            found = json.loads(bytes(rep.readAll()).decode("utf-8"))
+        except (ValueError, TypeError):
+            self._set_results([], "Wyszukiwanie niedostępne.", warn=True)
+            rep.deleteLater()
+            return
+        rep.deleteLater()
+        if not found:
+            self._set_results([], "Nie znaleziono.")
+            return
+        rows = []
+        for it in found:
+            la, lo = float(it["lat"]), float(it["lon"])
+            name = ",".join(it["display_name"].split(",")[:2])
+            rows.append((it["display_name"], lambda la=la, lo=lo, name=name: self._go_address(la, lo, name)))
+        self._set_results(rows, "")
+
+    def _go_address(self, la, lo, name):
+        self.map.jump_to(lo, la, 13)
+        self.set_pick(la, lo, name)
+        self._set_results([], "")
+
+    def _search_parcel(self):
+        obr, nr = self.obr.text().strip(), self.nr.text().strip().replace(" ", "")
+        self._pgm = self.gm.text().strip().lower()
+        pat = r"^\d{6}_\d\.\d{4}\."
+        full = nr if re.match(pat, nr) else (obr if re.match(pat, obr) else None)
+        if not full and (not obr or not nr):
+            self._set_results([], "Podaj nazwę obrębu i numer działki albo pełny identyfikator (np. 141201_1.0001.6509).",
+                              warn=True)
+            return
+        self._set_results([], "Szukam w ewidencji gruntów (GUGiK)…")
+        self._pseq += 1
+        seq, query = self._pseq, full or (obr + " " + nr)
+        import threading
+        threading.Thread(target=lambda: self._relay.parcels.emit(seq, uldk_search(query)), daemon=True).start()
+
+    def _parcel_done(self, seq, r):
+        if seq != self._pseq:
+            return
+        if not r.get("ok"):
+            self._set_results([], re.sub(r"<[^>]+>", "", html.unescape(r.get("msg", ""))), warn=True)
+            return
+        items = r["items"]
+        if self._pgm:
+            items = [it for it in items if self._pgm in (it.get("commune") or "").lower()]
+        if not items:
+            extra = (f" w gminie „{self.gm.text().strip()}” (wyników w innych gminach: {len(r['items'])})"
+                     if self._pgm and r["items"] else "")
+            self._set_results([], "Nie znaleziono działki" + extra + ". Nazwa obrębu w ewidencji może różnić się od "
+                              "nazwy miejscowości – sprawdź ją w wypisie lub podaj pełny identyfikator działki.", warn=True)
+            return
+        if len(items) == 1:
+            self.select_parcel(items[0])
+            return
+        rows = [(f"{self._pname(it)}\npow. {it.get('county', '')}, woj. {it.get('voivodeship', '')} · "
+                 f"{self._ha(it['area'])}", lambda it=it: self.select_parcel(it)) for it in items]
+        self._set_results(rows, "")
+
+    @staticmethod
+    def _pname(it):
+        return f"dz. {it['parcel']}, obręb {it['region']}" + (f", gm. {it['commune']}" if it.get("commune") else "")
+
+    @staticmethod
+    def _ha(m2):
+        return f"{m2 / 10000:.4f}".rstrip("0").rstrip(".").replace(".", ",") + " ha"
+
+    def select_parcel(self, it):
+        self.map.set_parcel(it["polys"])
+        self.map.fit_bounds(it["bbox"], 80, 17)
+        self.set_pick(it["lat"], it["lon"], self._pname(it))
+        self._set_results([], f"{it['id']} · pow. {self._ha(it['area'])}")
+
+    # --- result
+    def _confirm(self):
+        p = self.pick
+        if not p:
+            QMessageBox.information(self, "Lokalizacja", "Najpierw wskaż punkt na mapie.")
+            return
+        self.result_loc = dict(lat=float(p["lat"]), lon=float(p["lon"]),
+                               alt=None if p.get("alt") is None else float(p["alt"]), name=p.get("name") or "")
+        self.accept()
 
 
 class Win3D(QWidget):
@@ -4511,7 +4909,9 @@ class CaseCard(QFrame):
         self.btn_exp.setIconSize(QSize(14, 14))
         self.btn_exp.setToolTip("Rozwiń / zwiń")
         self._set_exp_icon(False)
-        self.btn_exp.clicked.connect(lambda checked=False: self.toggle())
+        self.btn_exp.clicked.connect(lambda checked=False: (
+            self.app.echo(("COLLAPSE " if self.body is not None else "EXPAND ") + case_no(self.app, self.case)),
+            self.toggle()))
         hd.addWidget(self.btn_exp)
         self.num = QLabel("")                        # number by position (1., 2.1, …)
         self.num.setObjectName("caseNum")
@@ -4624,6 +5024,7 @@ class CaseCard(QFrame):
         self.name_edit.setVisible(False)
         self.name.setVisible(True)
         if t and t != self.case["name"]:
+            self.app.echo(f"RENAME {case_no(self.app, self.case)} {cq(t)}")
             self.case["name"] = t
             self.name.setText(t)
             self.app.project_changed()
@@ -5039,14 +5440,15 @@ class CaseList(QWidget):
         super().mousePressEvent(ev)
 
     def paintEvent(self, ev):
-        """Empty project: watermark – KAYENN wordmark in the bottom right corner."""
+        """Empty project: watermark – the KAYENN wordmark in the bottom right corner of the list (the console is an
+        overlay and does not move it; where the window is small the console text goes over it)."""
         if not self.watermark or getattr(self.pw, "cards", None):
             return
         r = wordmark_renderer()
         if r is None:
             return
         vb = r.viewBoxF()
-        w = min(300.0, self.width() * 0.45)
+        w = min(300.0, self.width() * 0.3)
         h = w * vb.height() / vb.width()
         m, th = 24, 0
         dpr = self.devicePixelRatioF()
@@ -5066,6 +5468,7 @@ class CaseList(QWidget):
         p.setOpacity(0.14)
         p.drawImage(QPointF(self.width() - w - m, self.height() - h - th - m), self._wm_img)
         p.end()
+
 
 
 # ===================================================================
@@ -5897,6 +6300,7 @@ class LabRow(QFrame):
         self.name = QLineEdit(item.get("nazwa", ""))
         self.name.setToolTip("Nazwa pozycji (widoczna w raporcie i na wydruku)")
         self.name.textChanged.connect(self._name)
+        self.name.editingFinished.connect(lambda: self.flush_echo())
         top.addWidget(self.name, 1)
         b = QPushButton("Duplikuj")
         b.setToolTip("Kopia pozycji tuż pod nią")
@@ -5911,6 +6315,7 @@ class LabRow(QFrame):
         self.val.setFixedWidth(100)
         self.val.setAlignment(AL_R)
         self.val.textChanged.connect(self._val)
+        self.val.editingFinished.connect(lambda: self.flush_echo())
         g.addWidget(self.val, 1, 1)
         self.btn_db = None
         if item.get("z_bazy"):
@@ -5974,6 +6379,7 @@ class LabRow(QFrame):
         self.mult.setPlaceholderText("1")
         self.mult.setToolTip("Opcjonalny mnożnik pozycji, np. 12 – dwanaście belek na palecie")
         self.mult.textChanged.connect(self._mult)
+        self.mult.editingFinished.connect(lambda: self.flush_echo())
         ml.addWidget(self.mult)
         ml.addWidget(QLabel("(opcjonalnie, np. liczba sztuk)"))
         g.addLayout(dl, 2, 0, 1, 6)
@@ -6008,12 +6414,40 @@ class LabRow(QFrame):
             self.win.list.end_drag()
 
     # --- changes
+    def _echo(self, field, getter, now=False):
+        """A change typed by the user – at once for a choice, for typed text after a short pause in typing the console gets „LABFIELD n field value”."""
+        app = self.win.app
+        if app.host.cmd is None or app.host.cmd.depth:
+            return
+        t = self.__dict__.get("_etimers", {}).get(field)
+        if t is None:
+            t = self.__dict__.setdefault("_etimers", {})[field] = QTimer(self)
+            t.setSingleShot(True)
+            t.setInterval(300)
+            t.timeout.connect(lambda t=t, field=field: self.win.rows and self in self.win.rows and app.echo(
+                f"LABFIELD {self.win.rows.index(self) + 1} {field} {cq(t._g() or '-')}"))
+        t._g = getter
+        if now:
+            t.stop()
+            t.timeout.emit()
+        else:
+            t.start()
+
+    def flush_echo(self):
+        """Field left / Enter: what was typed goes to the console at once."""
+        for t in self.__dict__.get("_etimers", {}).values():
+            if t.isActive():
+                t.stop()
+                t.timeout.emit()
+
     def _name(self, t):
         self.item["nazwa"] = t
+        self._echo("NAME", self.name.text)
         self.win.changed()
 
     def _val(self, t):
         self.item["wartosc"] = t
+        self._echo("VALUE", self.val.text)
         if self.item.get("przedzial"):
             self.item["przedzial"] = ""                # value changed by hand – no range information
             self.info.setText(" · ".join(x for x in (self.item.get("kategoria", ""), self.item.get("zrodlo", "")) if x))
@@ -6021,10 +6455,12 @@ class LabRow(QFrame):
 
     def _mult(self, t):
         self.item["mnoznik"] = t.strip()
+        self._echo("MULTIPLIER", self.mult.text)
         self.win.changed()
 
     def _unit(self, i):
         self.item["jedn"] = LAB_UNITS[self.unit.itemData(i)]
+        self._echo("UNIT", lambda: self.item["jedn"], now=True)
         self._show_dims()
         self.win.changed()
 
@@ -6032,6 +6468,8 @@ class LabRow(QFrame):
         box, ch, e = self.dims[k]
         e.setEnabled(ch.isChecked())
         self.item.setdefault("wym", {})[k] = [ch.isChecked(), e.text().strip()]
+        self._echo({"t": "THICKNESS", "b": "WIDTH", "d": "LENGTH"}[k],
+                   lambda ch=ch, e=e: e.text().strip() if ch.isChecked() else "-")
         self.win.changed()
 
     def _show_dims(self):
@@ -6052,6 +6490,8 @@ class LabRow(QFrame):
         return d
 
     def _added(self, mat):
+        self.win.app.echo(f"LABTODB {self.win.rows.index(self) + 1} {cq(mat['cat'])} {cq(mat['src'])}"
+                          if self in self.win.rows else "LABTODB")
         if self.win._db is not None:
             if self.win._db.dirty():                     # unsaved changes there – the item is added to them too
                 self.win._db.add_loaded(mat)
@@ -6196,11 +6636,13 @@ class LabWindow(QWidget):
 
     def add_manual(self):
         n = len(self.items) + 1
+        self.app.echo(f"LABADD {cq(f'Obciążenie {n}')}")
         row = self._append(dict(nazwa=f"Obciążenie {n}", wartosc="", jedn="kN/m²", z_bazy=False, wym={}))
         row.val.setFocus()
         return row
 
     def add_material(self, mat):
+        self.app.echo(f"LABDB {cq(mat['name'])}")
         lo, hi = mat_range(mat["value"]) or (0.0, 0.0)
         rng = mat["value"] if abs(hi - lo) > 1e-12 else ""
         val = (f"{hi:g}" if rng else str(mat["value"]).strip()).replace(".", ",")
@@ -6209,12 +6651,14 @@ class LabWindow(QWidget):
 
     def duplicate_row(self, row):
         i = self.rows.index(row)
+        self.app.echo(f"LABDUP {i + 1}")
         it = json.loads(json.dumps(self.items[i]))
         it["nazwa"] = f"{it.get('nazwa', '')} - kopia"
         return self._insert(it, i + 1)
 
     def remove_row(self, row):
         i = self.rows.index(row)
+        self.app.echo(f"LABDEL {i + 1}")
         self.rows.pop(i)
         self.items.pop(i)
         self.list.lay.removeWidget(row)
@@ -6309,6 +6753,7 @@ class LabWindow(QWidget):
         self.close_panel()
 
     def on_main(self):
+        self.app.echo("ENDEDIT" if self.edit_mode else "ADDLAB")
         if self.edit_mode:
             self.close_panel()
             return
@@ -6422,17 +6867,308 @@ class History:
         return self.saved is not None and self.saved == self.pos
 
 
-UNDO_KEYS = ("Ctrl+Z",)
-REDO_KEYS = ("Ctrl+Y", "Ctrl+Shift+Z")
+# ================================================== commands and keyboard shortcuts ===
+# Every function of the program has a command (typed in the console: Widok → Konsola; a command can also be run by
+# a key combination). The shortcuts live in an editable text file: one line
+# „skrót, *POLECENIE [argumenty]” – an alias typed in the console or a key combination (Ctrl+P). The file holds
+# only what is currently in use; Opcje → Edytuj skróty klawiaturowe opens it in the default text editor.
+class CmdError(Exception):
+    """A command that cannot be executed – the message goes to the console."""
+
+
+class Command:
+    def __init__(self, name, fn, usage, doc, keys, group, params):
+        self.name, self.fn, self.usage, self.doc, self.keys, self.group = name, fn, usage, doc, keys, group
+        self.params = params                             # prompts when the command is typed without arguments
+
+
+COMMANDS = {}                                            # NAME -> Command (registration order = order in POMOC)
+
+
+def command(name, usage="", doc="", keys=(), group="", params=()):
+    """Registers a console command: fn(app, args) -> text / list of lines / None; CmdError – message.
+    Names are English and have no spaces (they stay the same in every language of the interface); a command
+    typed without arguments asks for them one by one (a line with arguments runs at once): params = ((prompt, required,
+    kind[, condition]), …), kind „one” – the whole answer is one argument, „rest” – the words of the answer;
+    an empty answer cancels the command (required) or ends the questions (optional). keys – default key
+    combinations (the first run of the shortcut file lists them)."""
+    def deco(fn):
+        COMMANDS[name] = Command(name, fn, usage, doc, tuple(keys), group, tuple(params))
+        return fn
+    return deco
+
+
+def cq(text):
+    """A word of a command line: in double quotes when it has spaces (or is empty)."""
+    t = str(text)
+    return f'"{t}"' if (not t or re.search(r"\s", t)) else t
+
+
+# command names of the first version (Polish) → the current ones; the shortcut file of that version still works
+LEGACY_COMMANDS = dict(
+    SKROTYDOMYSLNE="SHORTCUTSRESET", SKROTYWCZYTAJ="SHORTCUTSRELOAD", SKROTYLISTA="SHORTCUTSLIST",
+    ZAKONCZEDYCJE="ENDEDIT", WLASNEZAPISZDOBAZY="LABTODB", WLASNEDUPLIKUJ="LABDUP", WLASNEDODAJ="LABADD",
+    WLASNEUSUN="LABDEL", WLASNEPOLE="LABFIELD", WLASNEBAZA="LABDB", WLASNELISTA="LABLIST", DODAJWLASNE="ADDLAB",
+    BAZASZUKAJ="DBSEARCH", ZAPISZJAKO="SAVEAS", USUNGRUPE="DELETEGROUP", ROZGRUPUJ="UNGROUP", OPROGRAMIE="ABOUT",
+    AKTUALIZACJE="UPDATES", LOKALIZACJA="LOCATION", ZMIENNAZWE="RENAME", PRZYPADKI="CASES", PRZENIES="MOVE",
+    ZAKLADKA="TAB", ZALOZENIA="ASSUMPTIONS", DUPLIKUJ="DUPLICATE", PODGRUPA="SUBGROUP", PRZYWROC="RESTORELOC",
+    SKROTY="SHORTCUTS", KONSOLA="CONSOLE", NORMOWE="CODES", GRUPUJ="GROUP", ZAZNACZ="SELECT", WYNIKI="RESULTS",
+    DRUKUJ="PRINT", EDYTOR="EDITOR", EDYTUJ="EDIT", OPCJE="OPTIONS", OTWORZ="OPEN", ZAKONCZ="EXIT", ZAPISZ="SAVE",
+    COFNIJ="UNDO", ROZWIN="EXPAND", CZYSC="CLEAR", POMOC="HELP", PONOW="REDO", NOWY="NEW", NAZWA="PROJECTNAME",
+    INFO="PROJECTINFO", USUN="DELETE", DODAJ="ADD", ZWIN="COLLAPSE", POLE="FIELD", WLASNE="LAB")
+
+
+def cmd_name(s):
+    """Command name as typed: without diacritics, upper case („Zapisz” = „ZAPISZ”)."""
+    return _fold(s).upper()
+
+
+def cmd_tokens(line):
+    """Words of a command line; text in double quotes is one word (the backslashes of paths stay as they are)."""
+    return [a if (a or not b) else b for a, b in re.findall(r'"([^"]*)"|(\S+)', line)]
+
+
+SHORTCUTS_HEAD = """; KAYENN – skróty klawiaturowe (plik do edycji).
+;
+; Każdy wiersz ma postać:    skrót, *POLECENIE [argumenty]
+;   - skrót wpisywany w konsoli (Widok → Konsola), np.:        P, *PRINT
+;   - kombinacja klawiszy (zawiera „+” albo to F1…F12), np.:   Ctrl+P, *PRINT
+;     Kombinację z argumentem można też przypisać:             Ctrl+Shift+K, *CONSOLE
+;   - kilka skrótów do jednego polecenia – kilka wierszy.
+; Wiersze zaczynające się od „;” lub „#” są komentarzem. Listę poleceń pokaże HELP w konsoli.
+; Zmiany działają od razu po zapisaniu pliku. Opcje → Przywróć domyślne skróty klawiaturowe
+; wraca do stanu z instalacji.
+;
+; --- skróty wpisywane w konsoli (na razie nie zdefiniowano żadnych) ---
+;
+; --- kombinacje klawiszy ---
+"""
+
+
+def shortcuts_file():
+    return os.path.join(user_data_dir(), "shortcuts.txt")
+
+
+def shortcuts_default_text():
+    lines = [f"{k}, *{c.name}" for c in COMMANDS.values() for k in c.keys]
+    return SHORTCUTS_HEAD + "\n".join(lines) + "\n"
+
+
+def _is_key_text(s):
+    return "+" in s or bool(re.fullmatch(r"F\d{1,2}", s, re.I))
+
+
+def _seq_text(s):
+    return QKeySequence(s, QKeySequence.SequenceFormat.PortableText).toString(QKeySequence.SequenceFormat.PortableText)
+
+
+class Shortcuts:
+    """The shortcut file: aliases typed in the console and key combinations → commands. Menu items register
+    with bind(action, COMMAND) – the combinations of the file are put on them; other combinations run the
+    command from anywhere in the program. The file is watched – a saved change takes effect at once."""
+
+    def __init__(self):
+        self.aliases = {}                                # ALIAS -> command line
+        self.keys = {}                                   # key combination (portable text) -> command line
+        self.errors = []
+        self._bound = []                                 # [(QAction, COMMAND, callback)]
+        self._generic = []                               # actions of the combinations without a menu item
+        self._host = None
+        self._watch = None
+
+    # --- file
+    def ensure_file(self):
+        path = shortcuts_file()
+        if not os.path.exists(path):
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(shortcuts_default_text())
+            except OSError:
+                pass
+        return path
+
+    def parse(self, text):
+        self.aliases, self.keys, self.errors = {}, {}, []
+        for no, raw in enumerate(text.splitlines(), 1):
+            s = raw.strip()
+            if not s or s[0] in ";#":
+                continue
+            m = re.match(r"^(.*?)\s*,\s*\*\s*(\S+)\s*(.*)$", s)
+            if not m:
+                self.errors.append(f"wiersz {no}: oczekiwano postaci „skrót, *POLECENIE”")
+                continue
+            left, name, rest = m.group(1).strip(), cmd_name(m.group(2)), m.group(3).strip()
+            name = LEGACY_COMMANDS.get(name, name)
+            if name not in COMMANDS:
+                self.errors.append(f"wiersz {no}: nieznane polecenie „{m.group(2)}”")
+                continue
+            line = (name + " " + rest).strip()
+            if _is_key_text(left):
+                seq = _seq_text(left)
+                if not seq:
+                    self.errors.append(f"wiersz {no}: nie rozpoznano kombinacji klawiszy „{left}”")
+                    continue
+                self.keys[seq] = line
+            elif re.fullmatch(r"\w+", left):
+                self.aliases[cmd_name(left)] = line
+            else:
+                self.errors.append(f"wiersz {no}: skrót „{left}” – tylko litery i cyfry (bez spacji)")
+
+    def reload(self):
+        path = self.ensure_file()
+        try:
+            with open(path, encoding="utf-8-sig") as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError) as e:
+            self.errors = [f"nie można odczytać pliku skrótów: {e}"]
+            return False
+        self.parse(text)
+        self.refresh()
+        if self._host is not None and self._host.cmd is not None:
+            for e in self.errors:
+                self._host.cmd.say("Skróty klawiaturowe, " + e, "err")
+        return not self.errors
+
+    def edit(self):
+        """Opcje → Edytuj skróty klawiaturowe: the file in the default text editor."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        path = self.ensure_file()
+        if QDesktopServices.openUrl(QUrl.fromLocalFile(path)):
+            return path
+        try:                                             # no association with .txt – a plain editor
+            import subprocess
+            if sys.platform == "win32":
+                subprocess.Popen(["notepad.exe", path])
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", "-t", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+            return path
+        except OSError:
+            return None
+
+    def restore_default(self):
+        """Przywróć domyślne skróty klawiaturowe: the file takes the installed content (the old one – shortcuts.bak)."""
+        path = shortcuts_file()
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if os.path.exists(path):
+                with open(path, encoding="utf-8-sig") as f:
+                    old = f.read()
+                if old != shortcuts_default_text():
+                    with open(os.path.splitext(path)[0] + ".bak", "w", encoding="utf-8") as f:
+                        f.write(old)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(shortcuts_default_text())
+        except OSError:
+            return False
+        self.reload()
+        return True
+
+    # --- applying
+    def seqs(self, name):
+        """Key combinations of the command (as set in the file; only those without arguments)."""
+        return [QKeySequence(k, QKeySequence.SequenceFormat.PortableText) for k, line in self.keys.items()
+                if line.upper() == name]
+
+    def bind(self, action, name, changed=None, echo=True, scope="window"):
+        """The menu item / action runs the command NAME itself; the combinations of the file go onto it.
+        Using it is written in the console (the command that was run)."""
+        action._scope = scope             # "app" – works in every window, "window" – in its own, None – no shortcut
+        self._bound.append((action, name, changed))
+        self._apply(action, name, changed)
+        if echo:
+            action.triggered.connect(lambda checked=False, n=name: self._echo(n))
+
+    def _echo(self, line):
+        if self._host is not None and self._host.cmd is not None:
+            self._host.cmd.echo(line)
+
+    def _apply(self, action, name, changed):
+        try:
+            sc = getattr(action, "_scope", "window")
+            if sc is None:
+                return
+            action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut if sc == "app"
+                                      else Qt.ShortcutContext.WindowShortcut)
+            action.setShortcuts(self.seqs(name))
+            if changed is not None:
+                changed(action)
+        except RuntimeError:                             # the window is gone
+            pass
+
+    def _alive(self):
+        out = []
+        for act, name, ch in self._bound:
+            try:
+                act.objectName()
+                out.append((act, name, ch))
+            except RuntimeError:
+                pass
+        self._bound = out
+        return out
+
+    def refresh(self):
+        bound = self._alive()
+        for act, name, ch in bound:
+            self._apply(act, name, ch)
+        for a in self._generic:
+            try:
+                a.setEnabled(False)
+                a.deleteLater()
+            except RuntimeError:
+                pass
+        self._generic = []
+        host = self._host
+        pw = getattr(host, "pw", None) if host is not None else None
+        if pw is None:
+            return
+        names = {n for _, n, _ in bound}
+        from PySide6.QtGui import QAction
+        for seq, line in self.keys.items():
+            if line.upper() in names:                    # a menu item carries it
+                continue
+            a = QAction(pw)
+            a.setShortcut(QKeySequence(seq, QKeySequence.SequenceFormat.PortableText))
+            a.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
+            a.triggered.connect(lambda checked=False, line=line: host.cmd.run(line))
+            pw.addAction(a)
+            self._generic.append(a)
+
+    def start(self, host):
+        """At the start of the program (after the main window exists): reads the file and starts watching it."""
+        from PySide6.QtCore import QFileSystemWatcher
+        self._host = host
+        self.reload()
+        if self._watch is not None:
+            self._watch.deleteLater()
+        self._watch = QFileSystemWatcher([shortcuts_file()] if os.path.exists(shortcuts_file()) else [])
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.setInterval(250)
+
+        def later():
+            path = self.ensure_file()
+            if path not in self._watch.files():          # editors that save by replacing the file
+                self._watch.addPath(path)
+            self.reload()
+        timer.timeout.connect(later)
+        self._watch._timer = timer
+        self._watch.fileChanged.connect(lambda p: timer.start())
+
+
+SHORTCUTS = Shortcuts()
 
 
 def edit_menu(mb, hist, undo, redo):
-    """Edycja menu: Cofnij (Ctrl+Z), Ponów (Ctrl+Y / Ctrl+Shift+Z) – for the history hist."""
+    """Edycja menu: Cofnij, Ponów (skróty z pliku skrótów: domyślnie Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z)."""
     m = mb.addMenu("Edycja")
     au = m.addAction("Cofnij")
-    au.setShortcuts([QKeySequence(k) for k in UNDO_KEYS])
+    SHORTCUTS.bind(au, "UNDO")
     ar = m.addAction("Ponów")
-    ar.setShortcuts([QKeySequence(k) for k in REDO_KEYS])
+    SHORTCUTS.bind(ar, "REDO")
     au.triggered.connect(lambda checked=False: undo())
     ar.triggered.connect(lambda checked=False: redo())
 
@@ -6449,12 +7185,15 @@ def undo_buttons(w, hist, undo, redo):
     """Cofnij / Ponów buttons with the shortcuts (windows without a menu bar)."""
     from PySide6.QtGui import QAction
     out = []
-    for txt, keys, fn in (("Cofnij", UNDO_KEYS, undo), ("Ponów", REDO_KEYS, redo)):
+    for txt, name, fn in (("Cofnij", "UNDO", undo), ("Ponów", "REDO", redo)):
         b = QPushButton(txt)
-        b.setToolTip(f"{txt} ({', '.join(keys)})")
         b.clicked.connect(lambda checked=False, fn=fn: fn())
         act = QAction(txt, w)
-        act.setShortcuts([QKeySequence(k) for k in keys])
+
+        def tip(a, b=b, txt=txt):
+            ks = ", ".join(k.toString(QKeySequence.SequenceFormat.NativeText) for k in a.shortcuts())
+            b.setToolTip(f"{txt} ({ks})" if ks else txt)
+        SHORTCUTS.bind(act, name, tip)
         act.triggered.connect(lambda checked=False, fn=fn: fn())
         w.addAction(act)
         out.append(b)
@@ -6474,11 +7213,12 @@ class _UndoKeys(QObject):
     def eventFilter(self, obj, e):
         if e.type() == QEvent.Type.ShortcutOverride and isinstance(obj, QLineEdit):
             seq = QKeySequence(e.keyCombination())
-            if any(seq.matches(QKeySequence(k)) == QKeySequence.SequenceMatch.ExactMatch for k in UNDO_KEYS):
+            exact = QKeySequence.SequenceMatch.ExactMatch
+            if any(seq.matches(k) == exact for k in SHORTCUTS.seqs("UNDO")):
                 if not obj.isUndoAvailable():
                     e.ignore()
                     return True
-            elif any(seq.matches(QKeySequence(k)) == QKeySequence.SequenceMatch.ExactMatch for k in REDO_KEYS):
+            elif any(seq.matches(k) == exact for k in SHORTCUTS.seqs("REDO")):
                 if not obj.isRedoAvailable():
                     e.ignore()
                     return True
@@ -8119,11 +8859,13 @@ class ProjectWindow(QWidget):
         mb = QMenuBar(self)
         app.file_menu(mb, project=True)
         self.edit_menu = edit_menu(mb, app.proj_hist, app.undo_project, app.redo_project)
+        app.view_menu(mb)
+        self.act_codes, self.act_lab = app.loads_menu(mb)
         app.about_menu(mb)
         lay.setMenuBar(mb)
         self.menu_bar = mb
-        self.empty = QLabel("Projekt nie zawiera przypadków. Kliknij „Obciążenia normowe” albo „Obciążenia własne” "
-                            "i dodaj przypadek przyciskiem „Dodaj do projektu”.")
+        self.empty = QLabel("Projekt nie zawiera przypadków. Wybierz z menu „Obciążenia” obciążenia normowe albo "
+                            "własne i dodaj przypadek przyciskiem „Dodaj do projektu”.")
         self.empty.setObjectName("muted")
         lay.addWidget(self.empty)
         self.list_bar = QWidget()                    # Rozwiń wszystko / Zwiń wszystko
@@ -8153,18 +8895,7 @@ class ProjectWindow(QWidget):
         self._hold = None
         sc.verticalScrollBar().rangeChanged.connect(self._apply_hold)
         lay.addWidget(sc, 1)
-        hb = QHBoxLayout()
-        b1 = QPushButton("Obciążenia normowe")
-        b1.setObjectName("big")
-        self.btn_codes = b1
-        b1.clicked.connect(lambda checked=False: self.app.toggle_codes())
-        b2 = QPushButton("Obciążenia własne")
-        b2.setObjectName("big")
-        self.btn_lab = b2
-        b2.clicked.connect(lambda checked=False: self.app.toggle_lab())
-        hb.addWidget(b1, 1)
-        hb.addWidget(b2, 1)
-        lay.addLayout(hb)
+        self.ticker = CommandTicker(app.cmd, self)   # the console: an overlay in the bottom left corner
         self.cards = []
         self.rows = []                               # visible rows of the list: cards and group headers
         self.heads = []
@@ -8301,6 +9032,7 @@ class ProjectWindow(QWidget):
         if self.sel:
             self.sel = set()
             self._apply_sel()
+            self.app.echo("SELECT NONE")
 
     def card_clicked(self, card, mods):
         cid = card.case["id"]
@@ -8317,18 +9049,22 @@ class ProjectWindow(QWidget):
             self.sel = {cid}
             self._anchor = cid
         self._apply_sel()
+        self.app.echo("SELECT " + " ".join(case_no(self.app, c) for c in self.app.project["cases"]
+                                           if c["id"] in self.sel) if self.sel else "SELECT NONE")
 
     def menu_ids(self, case):
         """Cases the right-click menu of a card acts on: the selection when the card belongs to it, else the card."""
         return set(self.sel) if case["id"] in self.sel and len(self.sel) > 1 else {case["id"]}
 
-    def group_cases(self, ids):
+    def group_cases(self, ids, edit=True):
         """Utwórz grupę: a new group „Grupa przypadków” at the place of the first of the cases (in list order);
-        the cases move into it (the rest of the list stays ungrouped); the name is edited at once."""
+        the cases move into it (the rest of the list stays ungrouped); the name is edited at once (edit=False –
+        the console: no inline editing)."""
         tree = self.app.project["tree"]
         nodes = [n for n, _, _, _ in ptree_walk(tree) if "case" in n and n["case"] in ids]
         if not nodes:
             return None
+        self.app.echo("GROUP " + " ".join(node_no(self.app, n) for n in nodes))
         lst = self._list_of(nodes[0])
         moved = {id(n) for n in nodes}
         pos = sum(1 for n in lst[:lst.index(nodes[0])] if id(n) not in moved)
@@ -8339,7 +9075,8 @@ class ProjectWindow(QWidget):
         self.sel = set()
         self.keep_view(self.relayout)
         self.app.project_changed()
-        self.rename_new(g)
+        if edit:
+            self.rename_new(g)
         return g
 
     def delete_selected(self):
@@ -8350,6 +9087,7 @@ class ProjectWindow(QWidget):
         if QMessageBox.question(self, "Usuń zaznaczone", f"Usunąć zaznaczone przypadki ({len(cases)}) z projektu?",
                                 B.Yes | B.No, B.No) != B.Yes:
             return
+        self.app.echo("DELETE " + " ".join(case_no(self.app, c) for c in cases))
         self.sel = set()
         self.remove_cases(cases)
 
@@ -8388,6 +9126,15 @@ class ProjectWindow(QWidget):
         tree = self.app.project["tree"]
         x = xr["node"]
         lvl, act, n = opt
+        xn = node_no(self.app, x)
+        if act == "wrap":
+            self.app.echo(f"GROUP {xn}")
+        elif act == "first":
+            self.app.echo(f"MOVE {xn} START")
+        elif act in ("into", "end"):
+            self.app.echo(f"MOVE {xn} INTO {node_no(self.app, n)}")
+        else:
+            self.app.echo(f"MOVE {xn} AFTER {node_no(self.app, n)}")
         many = act == "wrap" and "case" in x and x["case"] in self.sel and len(self.sel) > 1
         newg = None
         if many:                                     # all the selected cases into one new group
@@ -8446,6 +9193,7 @@ class ProjectWindow(QWidget):
 
     def toggle_group(self, node):
         node["open"] = not node.get("open", True)
+        self.app.echo(("EXPAND " if node["open"] else "COLLAPSE ") + node_no(self.app, node))
         self.keep_view(self.relayout)
 
     def group_menu(self, hd, gpos):
@@ -8459,6 +9207,7 @@ class ProjectWindow(QWidget):
         m.exec(gpos)
 
     def rename_group(self, node, name, focus=False):
+        self.app.echo(f"RENAME {node_no(self.app, node)} {cq(name)}")
         node["name"] = name
         node["auto"] = False                         # named by the user – stays even when emptied
         self.keep_view(self.relayout)
@@ -8477,33 +9226,37 @@ class ProjectWindow(QWidget):
         if hd is not None:
             QTimer.singleShot(0, hd.start_rename)
 
-    def new_subgroup(self, node):
+    def new_subgroup(self, node, edit=True):
+        self.app.echo(f"SUBGROUP {node_no(self.app, node)}")
         g = ptree_new_group(self.app.project["tree"], auto=False)
         node["items"].append(g)
         node["open"] = True
         self.keep_view(self.relayout)
         self.app.project_changed()
         hd = next((h for h in self.heads if h.node is g), None)
-        if hd is not None:
+        if hd is not None and edit:
             QTimer.singleShot(0, lambda: (self.scroll.ensureWidgetVisible(hd, 50, 80), hd.start_rename()))
         return g
 
     def ungroup(self, node):
         """Rozgrupuj: the contents of the group take its place."""
+        self.app.echo(f"UNGROUP {node_no(self.app, node)}")
         lst = self._list_of(node)
         i = lst.index(node)
         lst[i:i + 1] = node["items"]
         self.keep_view(self.relayout)
         self.app.project_changed()
 
-    def delete_group(self, node):
-        """Usuń grupę z przypadkami (question; cases being edited – the editing ends without saving)."""
+    def delete_group(self, node, ask=True):
+        """Usuń grupę z przypadkami (question; cases being edited – the editing ends without saving).
+        ask=False – the console (the command is undone with COFNIJ)."""
         ids = {n["case"] for n, _, _, _ in ptree_walk(node["items"]) if "case" in n}
-        if ids:
+        if ids and ask:
             B = QMessageBox.StandardButton
             if QMessageBox.question(self, "Usuń grupę", f"Usunąć grupę „{node['name']}” razem z przypadkami "
                                     f"({len(ids)})?", B.Yes | B.No, B.No) != B.Yes:
                 return False
+        self.app.echo(f"DELETEGROUP {node_no(self.app, node)}")
         for case in [c for c in self.app.edited_cases() if c.get("id") in ids]:
             ed, lw = self.app.editor, getattr(self.app, "lab_ed", None)
             for panel in (ed, lw):
@@ -8522,6 +9275,8 @@ class ProjectWindow(QWidget):
 
     def set_all_open(self, opened):
         """Rozwiń wszystko – all groups and cards expanded; Zwiń wszystko – cards collapsed (groups stay)."""
+        self.app.echo(("EXPAND" if opened else "COLLAPSE") + " ALL")
+
         def fn():
             if opened:
                 for g, _, _, _ in ptree_walk(self.app.project["tree"]):
@@ -8536,12 +9291,12 @@ class ProjectWindow(QWidget):
             fn()
 
     def update_buttons(self):
-        """Button labels depending on the code loads window and the edited case."""
+        """Check marks of the Obciążenia menu (open windows) and the labels of the cards (edited case)."""
         app = self.app
         self.list_bar.setVisible(bool(self.cards))
-        self.btn_codes.setText("Zamknij obciążenia normowe" if app.win.isVisible() else "Obciążenia normowe")
+        self.act_codes.setChecked(app.win.isVisible())
         lw = getattr(app, "lab", None)
-        self.btn_lab.setText("Zamknij obciążenia własne" if lw is not None and lw.isVisible() else "Obciążenia własne")
+        self.act_lab.setChecked(lw is not None and lw.isVisible())
         eds = app.edited_cases()
         for c in self.cards:
             c.btn_edit.setText("Zakończ edycję" if any(c.case is e for e in eds) else "Edytuj")
@@ -8552,6 +9307,7 @@ class ProjectWindow(QWidget):
     def edit_case(self, case):
         """Edytuj – the case in the code loads window; second click (Zakończ edycję) – end of editing.
         The list stays in place. An own-loads case – in the own-loads panel."""
+        self.app.echo("ENDEDIT" if any(case is e for e in self.app.edited_cases()) else f"EDIT {case_no(self.app, case)}")
         if case["extra"].get("mode") == "własne":
             lw = getattr(self.app, "lab_ed", None)
             if lw is not None and lw.editing is case:
@@ -8568,6 +9324,7 @@ class ProjectWindow(QWidget):
     def duplicate_case(self, case):
         """Duplikuj – copy of the case right below it, name with the suffix „ - kopia”."""
         from datetime import datetime
+        self.app.echo(f"DUPLICATE {case_no(self.app, case)}")
         proj = self.app.project
         n = proj["next"]
         proj["next"] = n + 1
@@ -8583,6 +9340,7 @@ class ProjectWindow(QWidget):
         if QMessageBox.question(self, "Usuń przypadek", f"Usunąć „{case['name']}” z projektu?",
                                 B.Yes | B.No, B.No) != B.Yes:
             return
+        self.app.echo(f"DELETE {case_no(self.app, case)}")
         self.remove_cases([case])
 
     def remove_cases(self, cases):
@@ -8602,6 +9360,15 @@ class ProjectWindow(QWidget):
                 lw.end_edit(save=False)
         self.keep_view(self.relayout)
         self.app.project_changed()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.ticker.place()
+
+    def keyPressEvent(self, e):
+        """Typing in the main window (no text field has the focus) goes to the command line."""
+        if not forward_typing(self.ticker.inp, e):
+            super().keyPressEvent(e)
 
     def changeEvent(self, e):
         """Minimising the program: Windows hides the windows owned by the main window, and after restoring Qt shows
@@ -9122,6 +9889,1816 @@ class ProjectInfoDialog(QDialog):
 # ===================================================================
 #  APLIKACJA
 # ===================================================================
+# ===================================================================== console and commands ===
+CON_COL = dict(cmd="#3b6ea5", opt="#a0722d", val="#2e7d6b", str="#7a5c99", mute="#8a94a1", text="#374151",
+               err="#b45454", prompt="#4b5563")
+_CON_TOK = re.compile(r'(?P<str>"[^"]*")|(?P<br>\[[^\]]*\])|(?P<pa>\([^)]*\))|(?P<opt>\b[A-Z][A-Z0-9]{1,}\b)'
+                      r'|(?P<val>(?<![\w.])-?\d+(?:[.,]\d+)?(?!\w))')
+
+
+def cmd_html(kind, text):
+    """One line of the console in colours (soft ones): the command name, options and keywords, values, quoted
+    text, comments in brackets. kind: cmd (a command), ans (an answer), prompt (a question), out, err, note."""
+    esc = html.escape
+    base = {"err": CON_COL["err"], "note": CON_COL["mute"], "prompt": CON_COL["prompt"],
+            "ans": CON_COL["val"]}.get(kind, CON_COL["text"])
+
+    def span(t, col, bold=False):
+        return f'<span style="color:{col};{"font-weight:bold;" if bold else ""}">{esc(t)}</span>' if t else ""
+
+    def paint(t):
+        out, pos = [], 0
+        for m in _CON_TOK.finditer(t):
+            out.append(span(t[pos:m.start()], base))
+            col = {"str": CON_COL["str"], "br": CON_COL["opt"], "pa": CON_COL["mute"], "opt": CON_COL["opt"],
+                   "val": CON_COL["val"]}[m.lastgroup]
+            out.append(span(m.group(), col))
+            pos = m.end()
+        return "".join(out) + span(t[pos:], base)
+    if kind == "cmd":
+        name, _, rest = text.partition(" ")
+        return span(name, CON_COL["cmd"], True) + (span(" ", base) + paint(rest) if rest else "")
+    if kind == "ans":
+        return span("  ", base) + paint(text)
+    return paint(text)
+
+
+def forward_typing(inp, e):
+    """Typing anywhere in a window with the command line goes to the line (unless a text field has the focus –
+    it takes the key itself and the event does not get here). True – the key was taken."""
+    t = e.text()
+    mods = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.MetaModifier
+    if t and t.isprintable() and not (e.modifiers() & mods):
+        inp.reveal()
+        inp.line.setFocus()
+        QApplication.sendEvent(inp.line, e)
+        e.accept()
+        return True
+    return False
+
+
+class ConsoleLine(QLineEdit):
+    """Command line: Up / Down – the list of suggestions while it is shown, else the history of typed commands;
+    Tab – takes the highlighted command; Esc – closes the list, then clears the line."""
+
+    def __init__(self, proc, owner):
+        super().__init__()
+        self.proc, self.owner, self._pos, self._draft = proc, owner, None, ""
+        self.setPlaceholderText(owner.idle)
+
+    def event(self, e):
+        if e.type() == QEvent.Type.KeyPress and e.key() == Qt.Key.Key_Tab:
+            self.complete()
+            return True
+        return super().event(e)
+
+    def complete(self):
+        con = self.owner
+        if con.sugg_visible():                                        # Tab takes the highlighted command
+            n = con.sugg_name()
+            if n:
+                self.setText(n + " ")
+                con.hide_sugg()
+
+    def keyPressEvent(self, e):
+        k, h, con = e.key(), self.proc.history, self.owner
+        if k in (Qt.Key.Key_Up, Qt.Key.Key_Down) and con.sugg_visible():
+            con.move_sugg(-1 if k == Qt.Key.Key_Up else 1)            # a command from the list
+            return
+        if k in (Qt.Key.Key_Up, Qt.Key.Key_Down):                      # the commands used last
+            if not h:
+                return
+            if self._pos is None:
+                if k == Qt.Key.Key_Down:
+                    return
+                self._draft, self._pos = self.text(), len(h)
+            self._pos = max(0, self._pos + (-1 if k == Qt.Key.Key_Up else 1))
+            if self._pos >= len(h):
+                self._pos = None
+                self.setText(self._draft)
+            else:
+                self.setText(h[self._pos])
+            return
+        if k == Qt.Key.Key_Escape and con.sugg_visible():
+            con.hide_sugg()                                           # the first Esc only closes the list
+            return
+        if k == Qt.Key.Key_Escape:
+            self.clear()
+            self._pos = None
+            self.proc.cancel()
+            return
+        super().keyPressEvent(e)
+
+
+class _SuggLabel(QLabel):
+    def __init__(self, text, index, pick):
+        super().__init__(text)
+        self._i, self._pick = index, pick
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._pick(self._i)
+
+
+class SuggestBox(QWidget):
+    """The list of suggested commands: one small framed label per command, in the style of the entries of the
+    console (`CommandTicker.BOX`); the highlighted one has a tinted frame. At most `ROWS` are shown, the window of
+    rows follows the highlight."""
+    ROWS = 8
+    # opaque (unlike the entries): the list goes over the entries and their text must not show through it
+    NORMAL = ("background: #f8fafd; border: 1px solid #c3cad6; border-radius: 3px; padding: 0px 5px;")
+    SEL = ("background: #cde0f8; border: 1px solid #6c93c8; border-radius: 3px; padding: 0px 5px;")
+
+    def __init__(self, parent, on_pick):
+        super().__init__(parent)
+        self.on_pick = on_pick
+        self._names, self._labels, self._cur, self._first = [], [], -1, 0
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+        self.setVisible(False)
+
+    def set_names(self, names):
+        lay = self.layout()
+        for lb in self._labels:
+            lay.removeWidget(lb)
+            lb.hide()
+            lb.deleteLater()
+        self._names, self._labels = list(names), []
+        for i, n in enumerate(self._names):
+            lb = _SuggLabel(n, i, self.on_pick)
+            lay.addWidget(lb)
+            self._labels.append(lb)
+        self._cur, self._first = -1, 0
+        self.set_current(0 if names else -1)
+
+    def names(self):
+        return list(self._names)
+
+    def count(self):
+        return len(self._names)
+
+    def current_row(self):
+        return self._cur
+
+    def current_name(self):
+        return self._names[self._cur] if 0 <= self._cur < len(self._names) else None
+
+    def set_current(self, i):
+        self._cur = i
+        if i >= 0:
+            if i < self._first:
+                self._first = i
+            elif i >= self._first + self.ROWS:
+                self._first = i - self.ROWS + 1
+        for j, lb in enumerate(self._labels):
+            lb.setVisible(self._first <= j < self._first + self.ROWS)
+            lb.setStyleSheet("QLabel { " + (self.SEL if j == i else self.NORMAL) + " }")
+        self.layout().activate()
+        self.setFixedHeight(self.layout().sizeHint().height())
+
+
+class CommandInput(QWidget):
+    """The command line with the list of suggestions: the first letters of a command list the commands
+    starting with them (narrowing as more is typed), ↑ ↓ choose, Enter runs. Used by the console window and by
+    the strip at the bottom of the main window (flat – only text)."""
+    SUGG_WIDTH = 0                                       # the same in both consoles: the longest command + margins
+
+    def __init__(self, proc, flat=False):
+        super().__init__()
+        from PySide6.QtWidgets import QListWidget
+        self.proc = proc
+        self.idle = "" if flat else "Wpisz polecenie (HELP – lista poleceń)"     # the strip has no hint of its own
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+        self.sugg = SuggestBox(self, self.pick_row)      # commands starting with what is typed – an overlay of the
+        if not CommandInput.SUGG_WIDTH:                  # window (parent changed when shown), it covers what is below
+            fm = self.sugg.fontMetrics()
+            CommandInput.SUGG_WIDTH = max(fm.horizontalAdvance(n) for n in COMMANDS) + 36
+        self.sugg.setFixedWidth(self.SUGG_WIDTH)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        if not flat:
+            lb = QLabel("Polecenie:")
+            lb.setObjectName("cardTitle")
+            row.addWidget(lb)
+        self.line = ConsoleLine(proc, self)
+        self.line.returnPressed.connect(self.submit)
+        self.line.textEdited.connect(self.update_sugg)
+        if flat:
+            self.line.setStyleSheet("QLineEdit { " + CommandTicker.BOX + " }")
+        row.addWidget(self.line, 1)
+        lay.addLayout(row)
+        self.setFocusProxy(self.line)
+        proc.inputs.append(self)
+
+    def reveal(self):
+        """Makes the line visible (the strip of the main window hides it while nothing is typed)."""
+
+    def sugg_visible(self):
+        return self.sugg.isVisible()
+
+    def sugg_name(self):
+        return self.sugg.current_name()
+
+    def hide_sugg(self):
+        self.sugg.setVisible(False)
+
+    def update_sugg(self, text):
+        if self.proc.pending is not None or not text.strip() or " " in text.strip():
+            self.hide_sugg()
+            return
+        f = cmd_name(text)
+        rows = [n for n in list(COMMANDS) + list(SHORTCUTS.aliases) if n.startswith(f)]
+        rows.sort(key=lambda n: (n != f, n))                       # the exact name first
+        if not rows:
+            self.hide_sugg()
+            return
+        self.sugg.set_names(rows)
+        top = self.window()                                 # above the line, over what is below (nothing moves)
+        if self.sugg.parent() is not top:
+            self.sugg.setParent(top)
+            self.sugg.setFixedWidth(self.SUGG_WIDTH)
+        pt = self.line.mapTo(top, self.line.rect().topLeft())
+        height = self.sugg.height()
+        self.sugg.move(max(0, min(pt.x(), top.width() - self.SUGG_WIDTH)), max(0, pt.y() - height - 2))
+        self.sugg.setVisible(True)
+        self.sugg.raise_()
+
+    def move_sugg(self, d):
+        n = self.sugg.count()
+        self.sugg.set_current((self.sugg.current_row() + d) % n)
+
+    def pick_row(self, i):
+        """A click on a suggestion runs it (like Enter)."""
+        self.line.setText(self.sugg.names()[i])
+        self.sugg.set_current(i)
+        self.submit()
+        self.line.setFocus()
+
+    def submit(self):
+        text = self.line.text().strip()
+        if self.sugg_visible() and self.proc.pending is None and self.sugg_name():
+            text = self.sugg_name()                      # Enter runs the highlighted command
+        self.hide_sugg()
+        self.line.clear()
+        self.line._pos = None
+        self.proc.submit(text)                           # an answer to a question / a command (empty – the last one)
+
+
+class CommandKeys(QObject):
+    """Typing goes to the command line from every window of the program (the code loads, own loads, the 3D model,
+    dialogs…) – unless a text field, a drop-down list (or a menu) has the focus or a modal question is open. The
+    line of the console window is used when the user has that window open, otherwise the line of the main window
+    (the console window never opens by itself). ↑ always brings back the commands used last (↓ goes back), so
+    the arrows no longer scroll windows. While something is typed (or a question waits) Backspace, Enter, Esc and
+    Tab go to the line too."""
+
+    def __init__(self, proc):
+        super().__init__()
+        self.proc = proc
+
+    @staticmethod
+    def is_text_input(w):
+        from PySide6.QtWidgets import QAbstractSpinBox, QPlainTextEdit, QTextEdit
+        from PySide6.QtWidgets import QAbstractItemView
+        if isinstance(w, QComboBox):                       # a drop-down list keeps its keys – except in the 3D
+            return w.isEditable() or not isinstance(w.window(), Win3D)       # window, where the keyboard is not needed
+        if isinstance(w, (QLineEdit, QAbstractSpinBox, QAbstractItemView)):
+            return True
+        if isinstance(w, (QTextEdit, QPlainTextEdit)):
+            return not w.isReadOnly()
+        return False
+
+    def target(self):
+        proc = self.proc
+        if proc.console_visible():
+            return proc.console.inp
+        return proc.app.pw.ticker.inp
+
+    def eventFilter(self, obj, e):
+        if e.type() != QEvent.Type.KeyPress or not isinstance(obj, QWidget) or self.is_text_input(obj):
+            return False
+        if QApplication.activeModalWidget() is not None or obj.window().windowType() == Qt.WindowType.Popup:
+            return False
+        mods = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.MetaModifier
+        if e.modifiers() & mods:
+            return False
+        proc = self.proc
+        inp = self.target()
+        capturing = bool(inp.line.text()) or proc.pending is not None or inp.sugg_visible()
+        k, t = e.key(), e.text()
+        K = Qt.Key
+        printable = bool(t) and t.isprintable() and (t != " " or capturing)
+        editing = (capturing and k in (K.Key_Backspace, K.Key_Delete, K.Key_Return, K.Key_Enter, K.Key_Escape,
+                                       K.Key_Tab)) or k in (K.Key_Up, K.Key_Down)
+        if not (printable or editing):
+            return False
+        inp.reveal()
+        if obj.window() is inp.window():
+            inp.line.setFocus()
+        QApplication.sendEvent(inp.line, e)
+        e.accept()
+        return True
+
+
+class LogView(QTextBrowser):
+    """The history of the console: typing while it has the focus goes to the command line."""
+
+    def __init__(self, inp):
+        super().__init__()
+        self.inp = inp
+        self.setOpenLinks(False)
+
+    def keyPressEvent(self, e):
+        if not forward_typing(self.inp, e):
+            super().keyPressEvent(e)
+
+
+class ConsoleWindow(QWidget):
+    """Widok → Konsola: the history of commands and their results above the command line. Owned by the main
+    window; X only hides it. Typing in the window always goes to the command line."""
+
+    def __init__(self, proc):
+        super().__init__(proc.app.pw, Qt.WindowType.Window)
+        self.proc = proc
+        self.setObjectName("page")
+        self.setWindowTitle("Konsola")
+        self.resize(820, 380)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(6)
+        self.inp = CommandInput(proc)
+        self.out = LogView(self.inp)
+        lay.addWidget(self.out, 1)
+        lay.addWidget(self.inp)
+        from PySide6.QtGui import QAction              # what the main window can do with the keys, the console can too
+        for name, fn in (("UNDO", proc.app.undo_project), ("REDO", proc.app.redo_project)):
+            act = QAction(self)
+            SHORTCUTS.bind(act, name)
+            act.triggered.connect(lambda checked=False, fn=fn: fn())
+            self.addAction(act)
+        for kind, text in proc.log:
+            self.add(kind, text)
+
+    # the parts of the command line (tests, ConsoleLine)
+    line = property(lambda s: s.inp.line)
+    sugg = property(lambda s: s.inp.sugg)
+
+    def sugg_visible(self):
+        return self.inp.sugg_visible()
+
+    def sugg_name(self):
+        return self.inp.sugg_name()
+
+    def hide_sugg(self):
+        self.inp.hide_sugg()
+
+    def move_sugg(self, d):
+        self.inp.move_sugg(d)
+
+    def add(self, kind, text):
+        self.out.append(f'<div style="white-space:pre-wrap;">{cmd_html(kind, text)}</div>')
+        sb = self.out.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def clear(self):
+        self.out.clear()
+
+    def keyPressEvent(self, e):
+        if not forward_typing(self.inp, e):
+            super().keyPressEvent(e)
+
+    def event(self, e):
+        if e.type() == QEvent.Type.WindowActivate:
+            self.inp.line.setFocus()
+        return super().event(e)
+
+    def closeEvent(self, e):
+        if getattr(self.proc.app, "_quitting", False):
+            e.accept()
+            return
+        e.ignore()
+        self.hide()
+        self.proc.sync_view()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self.proc.sync_view()
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self.proc.sync_view()
+
+
+class CommandTicker(QWidget):
+    """The console in the main window: an overlay in the bottom left corner (it takes no room from the list of
+    cases – when both are tall the entries go over the list). Every entry is a small widget with a barely visible,
+    very transparent frame; it disappears after `ttl` seconds with a fade, each with its own timer. The command
+    line is visible only while something is typed or a question waits; when all the entries are gone the whole
+    strip is invisible. Typing in the main window (when no text field has the focus) goes to this line."""
+    DEFAULT_LINES = 10
+    MAX_LINES = 40
+    DEFAULT_TTL = 10                                     # seconds an entry stays visible
+    MAX_TTL = 3600
+    FADE = 1.5                                           # the last seconds of an entry: it fades out
+    BOX = ("background: rgba(248, 250, 253, 215); border: 1px solid rgba(150, 160, 178, 80); border-radius: 3px; "
+           "padding: 0px 5px;")
+
+    def __init__(self, proc, host):
+        super().__init__(host)
+        self.proc, self.host = proc, host
+        self.items = []                                  # [dict(t0, kind, text, label)] – each entry has its own time
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+        n = settings_get("console_lines", self.DEFAULT_LINES)
+        self.lines = n if isinstance(n, int) and 1 <= n <= self.MAX_LINES else self.DEFAULT_LINES
+        n = settings_get("console_ttl", self.DEFAULT_TTL)
+        self.ttl = n if isinstance(n, (int, float)) and 0 <= n <= self.MAX_TTL else self.DEFAULT_TTL
+        self.inp = CommandInput(proc, flat=True)
+        self.inp.reveal = self.show_input
+        self.inp.setFixedWidth(460)
+        self.inp.setVisible(False)
+        lay.addWidget(self.inp, 0, Qt.AlignmentFlag.AlignLeft)
+        self.inp.line.textChanged.connect(lambda t: self.refresh())
+        self._timer = QTimer(self)
+        self._timer.setInterval(100)
+        self._timer.timeout.connect(self.refresh)
+        proc.tickers.append(self)
+        self.setVisible(False)
+
+    def plain(self):
+        return "\n".join(it["text"] for it in self.items)
+
+    def add(self, kind, text):
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
+        lb = QLabel()
+        lb.setTextFormat(Qt.TextFormat.RichText)
+        lb.setStyleSheet("QLabel { background: transparent; border: none; padding: 0px 5px; }")
+        lb.setText(f'<span style="white-space:pre;">{cmd_html(kind, text)}</span>')
+        lb.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        fx = QGraphicsOpacityEffect(lb)
+        lb.setGraphicsEffect(fx)
+        lay = self.layout()
+        lay.insertWidget(lay.count() - 1, lb, 0, Qt.AlignmentFlag.AlignLeft)    # above the command line
+        self.items.append(dict(t0=time.monotonic(), kind=kind, text=text, label=lb, fx=fx))
+        self.refresh()
+        if self.isVisible() and kind == "cmd":
+            self.repaint()                                # the echo of an action is on the screen before a slow
+                                                          # handler (opening a window, drawing 3D) finishes
+
+    def _drop(self, it):
+        self.items.remove(it)
+        self.layout().removeWidget(it["label"])
+        it["label"].hide()
+        it["label"].deleteLater()
+
+    def clear(self):
+        for it in list(self.items):
+            self._drop(it)
+        self.refresh()
+
+    def set_lines(self, n):
+        self.lines = n
+        self.refresh()
+
+    def set_ttl(self, sec):
+        self.ttl = sec
+        self.refresh()
+
+    def input_wanted(self):
+        return bool(self.inp.line.text()) or self.proc.pending is not None or self.inp.sugg_visible()
+
+    def show_input(self):
+        self.inp.setVisible(True)
+        self.refresh()
+
+    def refresh(self):
+        """Entries older than ttl are gone (the last FADE seconds an entry fades; ttl = 0 – they stay), the oldest
+        beyond `lines` too; the strip is invisible when it has nothing to show."""
+        now = time.monotonic()
+        for it in list(self.items):
+            age = now - it["t0"]
+            if self.ttl and age >= self.ttl:
+                self._drop(it)
+            else:
+                it["fx"].setOpacity(min(1.0, max(0.0, (self.ttl - age) / min(self.FADE, self.ttl))) if self.ttl else 1.0)
+        while len(self.items) > self.lines:
+            self._drop(self.items[0])
+        want = self.input_wanted()
+        if self.inp.isVisibleTo(self) != want:
+            self.inp.setVisible(want)
+        self.setVisible(bool(self.items) or want)
+        self.place()
+        if self.ttl and self.items:
+            if not self._timer.isActive():
+                self._timer.start()
+        else:
+            self._timer.stop()
+
+    def place(self):
+        """Bottom left corner of the main window, over the list of cases."""
+        host = self.host
+        w = max(100, host.width() - 20)
+        self.layout().activate()
+        h = self.layout().sizeHint().height()
+        self.setGeometry(10, host.height() - h - 10, w, h)
+        self.raise_()
+        if self.inp.sugg.isVisible():                    # the list of suggestions stays above the entries
+            self.inp.sugg.raise_()
+
+
+class CommandProcessor:
+    """The command line of the program: runs the commands of COMMANDS (typed in the console, run by a key
+    combination or an alias of the shortcut file). Keeps the log shown in the console window and in the strip at
+    the bottom of the main window."""
+
+    def __init__(self, app):
+        self.app = app                                   # main object (host)
+        self.log = []                                    # [(kind, text)] kind: cmd, out, err, note, prompt, ans
+        self.console = None
+        self.tickers = []                                # the strips of the main window
+        self.inputs = []                                 # all command lines (console window, strip)
+        self.view_action = None
+        h = settings_get("console_history", [])
+        self.history = [x for x in h if isinstance(x, str)][-200:] if isinstance(h, list) else []
+        self.last = self.history[-1] if self.history else ""
+        self.found = []                                  # results of the last DBSEARCH
+        self.pending = None                              # a command waiting for its arguments (questions)
+        self.depth = 0                                   # > 0 while a command runs (GUI echo is silent then)
+
+    def say(self, text, kind="out"):
+        for ln in str(text).split("\n"):
+            self.log.append((kind, ln))
+            if self.console is not None:
+                self.console.add(kind, ln)
+            for t in self.tickers:
+                t.add(kind, ln)
+        del self.log[:-2000]
+
+    def clear(self):
+        """CLEAR: the history of both consoles (the window and the strip of the main window)."""
+        self.log.clear()
+        if self.console is not None:
+            self.console.clear()
+        for t in self.tickers:
+            t.clear()
+
+    def console_visible(self):
+        return self.console is not None and self.console.isVisible()
+
+    def display_visible(self):
+        """Is the log visible anywhere (the console window or the strip of the main window)?"""
+        return self.console_visible() or any(t.isVisible() for t in self.tickers)
+
+    def set_strip_lines(self, n):
+        """Number of lines of the console history in the main window (CONSOLE LINES n); kept in the settings."""
+        settings_set("console_lines", n)
+        for t in self.tickers:
+            t.set_lines(n)
+
+    def set_strip_ttl(self, sec):
+        """Seconds an entry of the main window's console stays visible (CONSOLE TIME s); 0 – it stays."""
+        settings_set("console_ttl", sec)
+        for t in self.tickers:
+            t.set_ttl(sec)
+
+    def sync_view(self):
+        if self.view_action is not None:
+            self.view_action.setChecked(self.console_visible())
+
+    def show_console(self, on=None, activate=True):
+        """Widok → Konsola. on=None – toggles; activate=False – shown without taking the focus."""
+        if on is None:
+            on = not self.console_visible()
+        if on:
+            if self.console is None:
+                self.console = ConsoleWindow(self)
+                pw = self.app.pw
+                g, scr = pw.frameGeometry(), pw.screen().availableGeometry()
+                self.console.move(max(g.x() + 60, scr.x()), max(min(g.bottom(), scr.bottom()) - 420, scr.y()))
+            self.console.show()
+            self.console.raise_()
+            if activate:
+                self.console.activateWindow()
+                self.console.line.setFocus()
+        elif self.console is not None:
+            self.console.hide()
+        self.sync_view()
+        return on
+
+    def remember(self, line):
+        """The history of used commands (↑): typed ones and those done in the windows."""
+        if not self.history or self.history[-1] != line:
+            self.history.append(line)
+            del self.history[:-200]
+            settings_set("console_history", self.history)
+        self.last = line
+
+    def echo(self, line):
+        """What the user did in the window (menu, button, field) – written as the command that does the same and
+        remembered in the history of used commands."""
+        if not self.depth and self.pending is None:
+            self.say(line, "cmd")
+            self.remember(line)
+
+    def resolve(self, line):
+        """Line → (COMMAND, arguments): the alias of the shortcut file is expanded first."""
+        toks = cmd_tokens(line)
+        name = cmd_name(toks[0])
+        if name == "?":
+            name = "HELP"
+        if name in SHORTCUTS.aliases:
+            toks = cmd_tokens(SHORTCUTS.aliases[name]) + toks[1:]
+            name = cmd_name(toks[0])
+        if name not in COMMANDS:
+            import difflib
+            near = difflib.get_close_matches(name, list(COMMANDS), 3, 0.6)
+            raise CmdError(f"Nieznane polecenie „{toks[0]}”." + (f" Czy chodziło o: {', '.join(near)}?" if near
+                                                                else " HELP wypisze listę poleceń."))
+        return name, toks[1:]
+
+    def submit(self, text):
+        """The command line: an answer to the current question, else a command (an empty line repeats the last
+        one)."""
+        if self.pending is not None:
+            return self._answer(text.strip())
+        return self.run(text.strip() or self.last)
+
+    def cancel(self):
+        if self.pending is not None:
+            self.pending = None
+            self._prompt_done()
+            self.say("Anulowano.", "note")
+
+    def _placeholder(self, text):
+        for i in self.inputs:
+            try:
+                i.line.setPlaceholderText(text)
+            except RuntimeError:                         # the window is gone
+                pass
+
+    def _prompt_done(self):
+        for i in self.inputs:
+            try:
+                i.line.setPlaceholderText(i.idle)
+            except RuntimeError:
+                pass
+
+    def run(self, line, echo=True):
+        """Starts a command line (a command typed without arguments asks for them one by one). The result goes
+        to the console log. True – no error."""
+        line = (line or "").strip()
+        if not line:
+            return True
+        self.pending = None
+        if echo:
+            self.say(line, "cmd")
+            self.remember(line)
+        try:
+            name, args = self.resolve(line)
+        except CmdError as e:
+            return self._fail(str(e))
+        cmd = COMMANDS[name]
+        if args and cmd_name(args[0]) == "HELP":         # „COMMAND HELP” – the instruction of the command
+            self.say("\n".join(command_help(cmd)))
+            return True
+        if not args and cmd.params:
+            self.pending = dict(cmd=cmd, args=[], i=0)
+            return self._ask()
+        return self._execute(cmd, args)
+
+    def _ask(self):
+        p = self.pending
+        cmd, i = p["cmd"], p["i"]
+        while i < len(cmd.params) and i > 0 and len(cmd.params[i]) > 3 and not cmd.params[i][3](p["args"]):
+            i += 1
+        p["i"] = i
+        if i >= len(cmd.params):
+            self.pending = None
+            self._prompt_done()
+            return self._execute(cmd, p["args"])
+        prompt = cmd.params[i][0]
+        self.say(prompt, "prompt")
+        self._placeholder(prompt)
+        return True
+
+    def _answer(self, text):
+        p = self.pending
+        cmd, i = p["cmd"], p["i"]
+        prompt, required, kind = cmd.params[i][:3]
+        self.say(text, "ans")
+        if not text:
+            self.pending = None
+            self._prompt_done()
+            if required:
+                self.say("Anulowano.", "note")
+                return True
+            return self._execute(cmd, p["args"])
+        if kind == "rest":
+            p["args"].extend(cmd_tokens(text))
+        else:
+            p["args"].append(text)
+        p["i"] = i + 1
+        return self._ask()
+
+    def _fail(self, msg):
+        self.say(msg, "err")
+        if not self.display_visible():                   # run by a key combination – the error must be seen
+            QMessageBox.warning(self.app.pw, "KAYENN", msg)
+        return False
+
+    def _execute(self, cmd, args):
+        self.depth += 1
+        try:
+            res = cmd.fn(self.app, args)
+        except CmdError as e:
+            msg = str(e)
+        except Exception as e:                           # a command must not take the program down
+            import traceback
+            msg = f"Błąd polecenia: {e}"
+            self.say(traceback.format_exc(), "note")
+        else:
+            if res:
+                self.say("\n".join(res) if isinstance(res, (list, tuple)) else res)
+            return True
+        finally:
+            self.depth -= 1
+        return self._fail(msg)
+
+
+class OptionsDialog(QDialog):
+    """Plik → Opcje…: keyboard shortcuts (the file of shortcuts is edited in the default text editor)."""
+
+    def __init__(self, app, parent):
+        super().__init__(parent)
+        self.app = app
+        self.setWindowTitle("Opcje")
+        self.resize(560, 300)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(8)
+        t = QLabel("Skróty klawiaturowe")
+        t.setObjectName("cardTitle")
+        lay.addWidget(t)
+        info = QLabel("Skróty – kombinacje klawiszy (np. Ctrl+P) i skróty wpisywane w konsoli (np. P) – są zapisane "
+                      "w pliku tekstowym. Każdy wiersz ma postać „skrót, *POLECENIE”. "
+                      "Zmiany działają od razu po zapisaniu pliku.")
+        info.setWordWrap(True)
+        lay.addWidget(info)
+        self.path = QLabel(shortcuts_file())
+        self.path.setObjectName("muted")
+        self.path.setWordWrap(True)
+        self.path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        lay.addWidget(self.path)
+        self.b_edit = QPushButton("Edytuj skróty klawiaturowe")
+        self.b_edit.clicked.connect(lambda checked=False: self.edit())
+        self.b_restore = QPushButton("Przywróć domyślne skróty klawiaturowe")
+        self.b_restore.clicked.connect(lambda checked=False: self.restore())
+        for b in (self.b_edit, self.b_restore):
+            lay.addWidget(b)
+        self.msg = QLabel("")
+        self.msg.setObjectName("muted")
+        self.msg.setWordWrap(True)
+        lay.addWidget(self.msg)
+        lay.addStretch(1)
+        hb = QHBoxLayout()
+        hb.addStretch(1)
+        b = QPushButton("Zamknij")
+        b.clicked.connect(lambda checked=False: self.close())
+        hb.addWidget(b)
+        lay.addLayout(hb)
+
+    def edit(self):
+        p = SHORTCUTS.edit()
+        self.msg.setText("Plik otwarty w edytorze tekstu. Zmiany działają po jego zapisaniu." if p else
+                         "Nie udało się otworzyć pliku w edytorze tekstu: " + shortcuts_file())
+
+    def restore(self):
+        B = QMessageBox.StandardButton
+        if QMessageBox.question(self, "Opcje", "Przywrócić domyślne skróty klawiaturowe?\nObecny plik zostanie "
+                                "zastąpiony (kopia: shortcuts.bak).", B.Yes | B.No, B.No) != B.Yes:
+            return
+        self.msg.setText("Przywrócono domyślne skróty klawiaturowe." if SHORTCUTS.restore_default() else
+                         "Nie udało się zapisać pliku skrótów.")
+
+
+# ---------------------------------------------------------------- helpers of the commands ---
+def _pick(text, options, what):
+    """The option named by the text: exactly, else by the beginning or a part (when unambiguous), without
+    diacritics and case."""
+    f = _fold(text)
+    exact = [o for o in options if _fold(o) == f]
+    if exact:
+        return exact[0]
+    for test in (lambda o: _fold(o).startswith(f), lambda o: f in _fold(o)):
+        m = [o for o in options if test(o)]
+        if len(m) == 1:
+            return m[0]
+        if len(m) > 1:
+            raise CmdError(f"„{text}” pasuje do kilku wartości ({what}): " + "; ".join(m[:8]))
+    raise CmdError(f"Niepoprawna wartość „{text}” ({what}). Dozwolone: " + "; ".join(options))
+
+
+def _flag(text):
+    f = _fold(text)
+    if f in ("1", "wl", "tak", "t", "on", "true", "prawda", "y", "yes"):
+        return True
+    if f in ("0", "wyl", "nie", "n", "off", "false", "falsz", "no"):
+        return False
+    raise CmdError(f"Oczekiwano ON / OFF (tak / nie), podano „{text}”.")
+
+
+def _need(args, n, usage):
+    if len(args) < n:
+        raise CmdError("Użycie: " + usage)
+
+
+def _tree_nodes(app):
+    """Case list: {"2.1": node, …} by the numbers shown in the list (the trailing dot is dropped)."""
+    ptree_sync(app.project)
+    nums = ptree_numbers(app.project["tree"])
+    return {nums[id(n)].rstrip("."): n for n, _, _, _ in ptree_walk(app.project["tree"])}
+
+
+def _node_ref(app, tok):
+    """Case or group by its number („3”, „2.1”) or by its name (the whole or a unique part)."""
+    by_num = _tree_nodes(app)
+    key = tok.strip().rstrip(".")
+    if key in by_num:
+        return by_num[key]
+    cases = {c["id"]: c for c in app.project["cases"]}
+    f = _fold(tok)
+    hits = [n for n in by_num.values()
+            if _fold(n["name"] if "group" in n else cases[n["case"]]["name"]) == f]
+    if not hits:
+        hits = [n for n in by_num.values()
+                if f in _fold(n["name"] if "group" in n else cases[n["case"]]["name"])]
+    if len(hits) == 1:
+        return hits[0]
+    raise CmdError(f"„{tok}” pasuje do kilku pozycji listy – podaj numer (CASES)." if hits else
+                   f"Na liście nie ma pozycji „{tok}” (CASES wypisze listę).")
+
+
+def _case_ref(app, tok):
+    n = _node_ref(app, tok)
+    if "group" in n:
+        raise CmdError(f"„{tok}” to grupa – to polecenie dotyczy przypadku.")
+    return next(c for c in app.project["cases"] if c["id"] == n["case"])
+
+
+def _group_ref(app, tok):
+    n = _node_ref(app, tok)
+    if "case" in n:
+        raise CmdError(f"„{tok}” to przypadek – to polecenie dotyczy grupy.")
+    return n
+
+
+def case_no(app, case):
+    """Number of the case in the list (as PRZYPADKI / CASES shows it) – for the echo of the GUI in the console."""
+    return next((k for k, n in _tree_nodes(app).items() if n.get("case") == case["id"]), "?")
+
+
+def node_no(app, node):
+    return next((k for k, n in _tree_nodes(app).items() if n is node), "?")
+
+
+def _form(app):
+    """The code-loads form the console works on: the editing panel while a case is edited, else the adding one."""
+    ed = app.editor
+    return ed if (ed is not None and ed.editing is not None) else app
+
+
+def _lab(app):
+    le = getattr(app, "lab_ed", None)
+    return le if (le is not None and le.editing is not None) else app._lab_win()
+
+
+def _plain(html_text):
+    from PySide6.QtGui import QTextDocument
+    d = QTextDocument()
+    d.setHtml(html_text or "")
+    return d.toPlainText().strip()
+
+
+def _loc_text(app, loc):
+    au = app._auto_values(loc)
+    return (f"Lokalizacja: {loc['lat']:.5f}, {loc['lon']:.5f}" + (f", {loc['alt']:.0f} m n.p.m." if loc.get("alt")
+                                                                  is not None else "")
+            + f"; strefa śniegowa {au['snow_zone'] or '–'}, strefa wiatrowa {au['wind_zone'] or '–'}"
+            + (f", A = {au['A']} m" if au["A"] is not None else ""))
+
+
+class FormField:
+    """A field of the code-loads form visible on the current tab (FIELD): name, label, value, how to set it."""
+
+    def __init__(self, name, label, get, put, options=None, unit=""):
+        self.name, self.label, self.get, self.put, self.options, self.unit = name, label, get, put, options, unit
+
+
+def use_spec(f):
+    """Fields of the imposed-loads tab: (name, label, widget, "combo" | "entry")."""
+    spec = [("group", "Typ powierzchni", f.use_group, "combo"), ("category", "Kategoria", f.use_cat, "combo"),
+            ("like", "Użytkowanie jak", f.use_like, "combo"), ("qk", "qₖ [kN/m²]", f.use_q, "entry"),
+            ("Qk", "Qₖ [kN]", f.use_Q, "entry"), ("partitions", "Przestawne ścianki działowe", f.use_part, "combo"),
+            ("reduction", "Redukcja qₖ", f.use_red, "combo"),
+            ("A", "Powierzchnia obciążona A [m²]", f.use_A, "entry"), ("n", "Liczba kondygnacji n", f.use_n, "entry"),
+            ("tyres", "Opony", f.use_tyre, "combo"), ("barrier_class", "Klasa barier", f.use_bcl, "combo"),
+            ("barrier_site", "Położenie bariery", f.use_bsit, "combo")]
+    return spec + [(f"barrier_{k}", f"Bariera – {k}", ws[1], "entry") for k, ws in f.use_bw.items()]
+
+
+def form_fields(f):
+    """Fields of the current tab of the code-loads form f (App): numbers, choices and switches."""
+    tab, root, out = f.nb.currentIndex(), f.win, []
+    if tab == TAB_USE:
+        def combo(name, label, cb):
+            def put(v, cb=cb):
+                items = [cb.itemText(i) for i in range(cb.count())]
+                cb.setCurrentIndex(items.index(_pick(v, items, label)))
+            return FormField(name, label, cb.currentText, put, [cb.itemText(i) for i in range(cb.count())])
+
+        def entry(name, label, e):
+            return FormField(name, label, e.text, lambda v, e=e: e.setText(v.strip()))
+        for name, label, w, kind in use_spec(f):
+            if w.isVisibleTo(root):
+                out.append((combo if kind == "combo" else entry)(name, label, w))
+        return out
+    names = {id(getattr(f, n)): n for n in App.STATE_VARS + ("w_diff", "snow_case")}
+    seen = set()
+
+    def num(key, label, unit):
+        def put(v, key=key):
+            if parse_num(v) is None:
+                raise CmdError(f"„{v}” nie jest liczbą.")
+            f.v[key].set(v.strip())
+        return FormField(key, label, lambda key=key: f.v[key].get(), put, unit=unit)
+    for key, es in f.entries.items():
+        if key not in seen and any(e.isVisibleTo(root) for e in es):
+            seen.add(key)
+            fd = FIELD_DEFS.get(key)
+            lab = getattr(getattr(es[0], "_label", None), "_base", None) or (fd[1] if fd else key)
+            out.append(num(key, lab, fd[2] if fd else ""))
+    for lb, e, un in f.s_slots + f.w_slots:
+        if e._key and e._key not in seen and e.isVisibleTo(root):
+            seen.add(e._key)
+            out.append(num(e._key, lb.text(), un.text()))
+    for cb in root.findChildren(QComboBox):
+        var = getattr(cb, "_var", None)
+        if var is not None and id(var) in names and cb.isVisibleTo(root) and names[id(var)] not in seen:
+            nm = names[id(var)]
+            seen.add(nm)
+            lab = getattr(getattr(cb, "_label", None), "_base", nm)
+            out.append(FormField(nm, lab, var.get,
+                                 lambda v, var=var, cb=cb, lab=lab: var.set(_pick(v, list(cb._items), lab)),
+                                 list(cb._items)))
+    for ch in root.findChildren(QCheckBox):
+        var = getattr(ch, "_var", None)
+        if var is not None and id(var) in names and ch.isVisibleTo(root) and names[id(var)] not in seen:
+            nm = names[id(var)]
+            seen.add(nm)
+            out.append(FormField(nm, ch.text() or nm, lambda var=var: "ON" if var.get() else "OFF",
+                                 lambda v, var=var: var.set(_flag(v)), ["ON", "OFF"]))
+    return out
+
+
+def _find_field(fields, tok):
+    f = _fold(tok)
+    for test in (lambda x: _fold(x.name) == f, lambda x: _fold(x.label) == f,
+                 lambda x: _fold(x.name).startswith(f) or _fold(x.label).startswith(f),
+                 lambda x: f in _fold(x.label)):
+        m = [x for x in fields if test(x)]
+        if len(m) == 1:
+            return m[0]
+        if len(m) > 1:
+            raise CmdError(f"„{tok}” pasuje do kilku pól: " + ", ".join(x.name for x in m))
+    raise CmdError(f"Na tej zakładce nie ma pola „{tok}” (FIELD wypisze pola).")
+
+
+TAB_NAMES = {"USE": TAB_USE, "SNOW": TAB_SNOW, "WIND": TAB_WIND}
+
+
+# ------------------------------------------------------------------ console and options ---
+def command_help(c):
+    """The instruction of a command (shown by „COMMAND HELP”): usage, description, the questions it asks, shortcuts."""
+    keys = [k for k, line in SHORTCUTS.keys.items() if cmd_name(line.split()[0]) == c.name]
+    out = [f"{c.name} {c.usage}".rstrip(), "  " + c.doc]
+    if c.params:
+        out.append("  Bez argumentów pyta o: " + "; ".join(q[0].rstrip(":") for q in c.params))
+    if keys:
+        out.append("  Skróty: " + ", ".join(keys))
+    return out
+
+
+@command("HELP", "[polecenie]", "Lista poleceń albo opis jednego polecenia.", group="Konsola i opcje")
+def _c_help(app, a):
+    if a:
+        name = cmd_name(a[0])
+        if name in SHORTCUTS.aliases:
+            name = cmd_name(cmd_tokens(SHORTCUTS.aliases[name])[0])
+        c = COMMANDS.get(name)
+        if c is None:
+            raise CmdError(f"Nieznane polecenie „{a[0]}”.")
+        return command_help(c)
+    out, grp = [], None
+    for c in COMMANDS.values():
+        if c.group != grp:
+            grp = c.group
+            out.append(f"\n{grp}:")
+        out.append(f"  {c.name:<20}{c.doc}")
+    return out + ["\n<polecenie> HELP (albo HELP <polecenie>) pokazuje instrukcję polecenia. Tab uzupełnia nazwę, "
+                  "↑ przywołuje ostatnie polecenia, pusty Enter powtarza ostatnie polecenie."]
+
+
+@command("CONSOLE", "[ON|OFF | LINES n | TIME s]", "Pokazuje / ukrywa okno konsoli (Widok → Konsola); LINES n – "
+         "liczba wierszy historii w głównym oknie (domyślnie 10); TIME s – po ilu sekundach wpis znika (domyślnie 10, "
+         "0 – nie znika).", group="Konsola i opcje")
+def _c_console(app, a):
+    if a and cmd_name(a[0]) == "TIME":
+        mx = CommandTicker.MAX_TTL
+        if len(a) < 2:
+            return f"Wpisy w głównym oknie znikają po {app.pw.ticker.ttl:g} s (TIME 0–{mx}; 0 – nie znikają)."
+        n = parse_num(a[1])
+        if n is None or not 0 <= n <= mx:
+            raise CmdError(f"Czas w sekundach: liczba 0–{mx} (0 – wpisy nie znikają).")
+        app.cmd.set_strip_ttl(n)
+        return f"Wpisy w głównym oknie znikają po {n:g} s." if n else "Wpisy w głównym oknie nie znikają."
+    if a and cmd_name(a[0]) == "LINES":
+        mx = CommandTicker.MAX_LINES
+        if len(a) < 2:
+            return f"Wierszy historii w głównym oknie: {app.pw.ticker.lines} (LINES 1–{mx})."
+        n = parse_num(a[1])
+        if n is None or n != int(n) or not 1 <= n <= mx:
+            raise CmdError(f"Liczba wierszy: liczba całkowita 1–{mx}.")
+        app.cmd.set_strip_lines(int(n))
+        return f"Wierszy historii w głównym oknie: {int(n)}."
+    app.cmd.show_console(_flag(a[0]) if a else None)
+
+
+@command("CLEAR", "", "Czyści historię w obu konsolach (oknie konsoli i w głównym oknie).", group="Konsola i opcje")
+def _c_clear(app, a):
+    app.cmd.clear()
+
+
+@command("OPTIONS", "", "Okno Opcje (skróty klawiaturowe); przy otwartym oknie – zamyka je.", group="Konsola i opcje")
+def _c_options(app, a):
+    return "Okno „Opcje” otwarte." if app.options(toggle=True) is not None else "Okno „Opcje” zamknięte."
+
+
+@command("SHORTCUTS", "", "Otwiera plik skrótów klawiaturowych w edytorze tekstu.", group="Konsola i opcje")
+def _c_keys_edit(app, a):
+    p = SHORTCUTS.edit()
+    if not p:
+        raise CmdError("Nie udało się otworzyć edytora tekstu. Plik: " + shortcuts_file())
+    return f"Plik skrótów: {p}"
+
+
+@command("SHORTCUTSRESET", "[YES]", "Przywraca domyślne skróty klawiaturowe (poprzedni plik – shortcuts.bak).",
+         group="Konsola i opcje")
+def _c_keys_default(app, a):
+    if not a or cmd_name(a[0]) != "YES":
+        raise CmdError("To zastąpi plik skrótów domyślnym. Potwierdź: SHORTCUTSRESET YES")
+    if not SHORTCUTS.restore_default():
+        raise CmdError("Nie udało się zapisać pliku skrótów.")
+    return "Przywrócono domyślne skróty klawiaturowe."
+
+
+@command("SHORTCUTSRELOAD", "", "Wczytuje plik skrótów ponownie (to dzieje się też po każdym zapisaniu pliku).",
+         group="Konsola i opcje")
+def _c_keys_reload(app, a):
+    ok = SHORTCUTS.reload()
+    return (f"Wczytano skróty: {len(SHORTCUTS.keys)} kombinacji klawiszy, {len(SHORTCUTS.aliases)} skrótów konsoli."
+            if ok else None)
+
+
+@command("SHORTCUTSLIST", "", "Wypisuje obowiązujące skróty klawiaturowe i skróty konsoli.", group="Konsola i opcje")
+def _c_keys_list(app, a):
+    out = [f"Plik: {shortcuts_file()}"]
+    out += [f"  {k:<18}→ {line}" for k, line in sorted(SHORTCUTS.keys.items(), key=lambda x: x[1])]
+    out += [f"  {k:<18}→ {line}  (konsola)" for k, line in sorted(SHORTCUTS.aliases.items())]
+    return out if len(out) > 1 else out + ["  (brak zdefiniowanych skrótów)"]
+
+
+@command("ABOUT", "", "Okno „O programie”.", group="Konsola i opcje")
+def _c_about(app, a):
+    return "Okno „O programie” otwarte." if app.about(toggle=True) is not None else "Okno „O programie” zamknięte."
+
+
+@command("UPDATES", "[AUTO ON|OFF]", "Sprawdza, czy jest nowa wersja; AUTO – sprawdzanie przy starcie.",
+         group="Konsola i opcje")
+def _c_update(app, a):
+    if a and cmd_name(a[0]) == "AUTO":
+        _need(a, 2, "UPDATES AUTO ON|OFF")
+        on = _flag(a[1])
+        settings_set("update_auto", on)
+        return "Sprawdzanie aktualizacji przy starcie: " + ("włączone." if on else "wyłączone.")
+    chk = UpdateChecker()
+    app.cmd._upd = chk
+
+    def done(r):
+        if not r.get("ok"):
+            app.cmd.say(r.get("msg", "Nie udało się sprawdzić aktualizacji."), "err")
+        elif r.get("newer"):
+            app.cmd.say(f"Dostępna jest nowa wersja {r['version']}: {r['url']}")
+        else:
+            app.cmd.say("Używasz najnowszej wersji programu.")
+    chk.done.connect(done)
+    chk.start()
+    return "Sprawdzam dostępność nowej wersji…"
+
+
+@command("ASSUMPTIONS", "", "Okno „Założenia do obliczeń”.", group="Konsola i opcje")
+def _c_assumptions(app, a):
+    app.show_assumptions()
+
+
+@command("EXIT", "", "Kończy program (pyta o zapis zmian).", group="Konsola i opcje")
+def _c_quit(app, a):
+    app.quit_app()
+
+
+# ------------------------------------------------------------------------ file and project ---
+@command("NEW", "", "Nowy projekt.", keys=("Ctrl+N",), group="Plik i projekt")
+def _c_new(app, a):
+    app.file_new()
+
+
+@command("OPEN", "[plik.kayenn]", "Otwiera projekt (bez nazwy pliku – okno wyboru pliku).", keys=("Ctrl+O",),
+         group="Plik i projekt")
+def _c_open(app, a):
+    if not a:
+        return app.file_open()
+    path = a[0] if a[0].lower().endswith(PROJECT_EXT) or os.path.isfile(a[0]) else a[0] + PROJECT_EXT
+    if not os.path.isfile(path):
+        raise CmdError(f"Nie ma pliku „{a[0]}”.")
+    if not app.end_editor() or not app._ask_save():
+        return "Anulowano."
+    if app.open_path(path):
+        return f"Otwarto projekt: {app.project_path} ({len(app.project['cases'])} przyp.)"
+    raise CmdError("Nie udało się otworzyć projektu.")
+
+
+@command("SAVE", "", "Zapisuje projekt (bez nazwy pliku – okno „Zapisz jako”).", keys=("Ctrl+S",),
+         group="Plik i projekt")
+def _c_save(app, a):
+    if app.file_save():
+        return f"Zapisano: {app.project_path}"
+
+
+@command("SAVEAS", "[plik.kayenn]", "Zapisuje projekt pod nową nazwą.", keys=("Ctrl+Shift+S",),
+         group="Plik i projekt")
+def _c_save_as(app, a):
+    if not a:
+        if app.file_save_as():
+            return f"Zapisano: {app.project_path}"
+        return None
+    path = a[0] if a[0].lower().endswith(PROJECT_EXT) else a[0] + PROJECT_EXT
+    if app._write(os.path.abspath(path)):
+        return f"Zapisano: {app.project_path}"
+    raise CmdError("Nie udało się zapisać projektu.")
+
+
+@command("PROJECTINFO", "", "Okno „Informacje o projekcie”.", group="Plik i projekt")
+def _c_info(app, a):
+    app.project_info()
+
+
+@command("PROJECTNAME", "[nazwa projektu]", "Wyświetla / ustawia nazwę projektu.", group="Plik i projekt")
+def _c_name(app, a):
+    if not a:
+        return "Nazwa projektu: " + (app.project.get("name") or "(brak – w tytule nazwa pliku)")
+    name = " ".join(" ".join(a).split())
+    if name != (app.project.get("name") or ""):
+        app.project["name"] = name
+        app.project_changed()
+    return f"Nazwa projektu: {name}"
+
+
+@command("LOCATION", "[szerokość długość [wysokość_npm]] | MAP",
+         "Wyświetla / ustawia lokalizację projektu (strefy i A z mapy); MAP – okno mapy (ponowne wywołanie je "
+         "zamyka).", group="Plik i projekt")
+def _c_location(app, a):
+    loc = app.loc.get()
+    if not a:
+        return _loc_text(app, loc) if loc else "Lokalizacja nie została wybrana."
+    if cmd_name(a[0]) == "MAP":
+        def done(new):
+            app.set_project_location(new)
+            app.project_changed()
+        was_open = getattr(app, "_map_dlg", None) is not None and app._map_dlg.isVisible()
+        app.pick_location(app.pw, loc, done, toggle=True)           # called again – closes the map window
+        return "Okno mapy zamknięte." if was_open else "Wskaż punkt na mapie."
+    _need(a, 2, "LOCATION szerokość długość [wysokość_npm]")
+    nums = [parse_num(x) for x in a[:3]]
+    if None in nums or not -90 <= nums[0] <= 90 or not -180 <= nums[1] <= 180:
+        raise CmdError("Współrzędne: szerokość −90…90, długość −180…180, wysokość n.p.m. w metrach.")
+    new = dict(lat=nums[0], lon=nums[1], alt=nums[2] if len(nums) > 2 else None, name="")
+    app.set_project_location(new)
+    app.project_changed()
+    return _loc_text(app, new)
+
+
+@command("EDITOR", "", "Raport w domyślnym edytorze tekstu (.odt).", keys=("Ctrl+E",), group="Plik i projekt")
+def _c_editor(app, a):
+    if not app.project["cases"]:
+        raise CmdError("Projekt nie zawiera przypadków.")
+    p = app.open_in_editor()
+    return f"Raport: {p}" if p else None
+
+
+@command("PRINT", "[plik.pdf]", "Podgląd wydruku; z nazwą pliku – od razu do PDF.", keys=("Ctrl+P",),
+         group="Plik i projekt")
+def _c_print(app, a):
+    if not app.project["cases"]:
+        raise CmdError("Projekt nie zawiera przypadków.")
+    if not a:
+        app.print_project()
+        return None
+    path = os.path.abspath(a[0] if a[0].lower().endswith(".pdf") else a[0] + ".pdf")
+    app.print_project(pdf=path)
+    if not os.path.isfile(path):
+        raise CmdError("Nie udało się zapisać PDF.")
+    return f"Zapisano: {path}"
+
+
+def _undo(app, a, redo):
+    which = cmd_name(a[0]) if a else "PROJECT"
+    if which == "PROJECT":
+        hist, fn = app.proj_hist, app.undo_project
+    elif which == "FORM":
+        f = _form(app)
+        hist, fn = f.form_hist, f.undo_form
+    elif which == "LAB":
+        lw = _lab(app)
+        hist, fn = lw.hist, lw.undo
+    else:
+        raise CmdError("Użycie: " + ("REDO" if redo else "UNDO") + " [PROJECT|FORM|LAB]")
+    if not (hist.can_redo() if redo else hist.can_undo()):
+        return "Brak operacji do " + ("ponowienia." if redo else "cofnięcia.")
+    fn(redo=redo)
+    return "Ponowiono." if redo else "Cofnięto."
+
+
+@command("UNDO", "[PROJECT|FORM|LAB]", "Cofa ostatnią zmianę w projekcie (lub w formularzu / obciążeniach "
+         "własnych).", keys=("Ctrl+Z",), group="Plik i projekt")
+def _c_undo(app, a):
+    return _undo(app, a, False)
+
+
+@command("REDO", "[PROJECT|FORM|LAB]", "Ponawia cofniętą zmianę.", keys=("Ctrl+Y", "Ctrl+Shift+Z"),
+         group="Plik i projekt")
+def _c_redo(app, a):
+    return _undo(app, a, True)
+
+
+# ---------------------------------------------------------------------------- case list ---
+@command("CASES", "", "Lista przypadków projektu z numerami (te numery przyjmują pozostałe polecenia).",
+         group="Lista przypadków")
+def _c_cases(app, a):
+    tree = app.project["tree"]
+    ptree_sync(app.project)
+    nums = ptree_numbers(tree)
+    cases = {c["id"]: c for c in app.project["cases"]}
+    edited = app.edited_cases()
+    out = []
+    for n, _, depth, _ in ptree_walk(tree):
+        pre = "  " * depth + f"{nums[id(n)]:<6}"
+        if "group" in n:
+            cnt = sum(1 for m, _, _, _ in ptree_walk(n["items"]) if "case" in m)
+            out.append(f"{pre}[grupa] {n['name']} ({cnt})" + ("" if n.get("open", True) else " – zwinięta"))
+        else:
+            c = cases[n["case"]]
+            mark = "* " if c["id"] in app.pw.sel else ""
+            card = app.pw.card_of(c)
+            out.append(f"{pre}{mark}{c['name']}  ({c['extra'].get('mode', 'śnieg')})"
+                       + (" – edytowany" if any(c is e for e in edited) else "")
+                       + (" – rozwinięty" if card is not None and card.body is not None else ""))
+    return out or ["Projekt nie zawiera przypadków."]
+
+
+@command("SELECT", "[numer… | ALL | NONE]", "Zaznacza przypadki (jak kliknięcie z Ctrl); DELETE i GROUP bez "
+         "argumentów działają na zaznaczonych.", group="Lista przypadków")
+def _c_select(app, a):
+    pw = app.pw
+    ptree_sync(app.project)
+    if a and cmd_name(a[0]) == "ALL":
+        ids = {c["id"] for c in app.project["cases"]}
+    elif not a or cmd_name(a[0]) == "NONE":
+        ids = set()
+    else:
+        ids = set()
+        for t in a:
+            n = _node_ref(app, t)
+            ids |= {m["case"] for m, _, _, _ in ptree_walk(n["items"]) if "case" in m} if "group" in n else {n["case"]}
+    pw.sel = ids
+    pw._apply_sel()
+    pw.update_buttons()
+    return f"Zaznaczono przypadków: {len(ids)}."
+
+
+def _targets(app, a):
+    """Cases named in the arguments, else the selected ones."""
+    if a:
+        return [_case_ref(app, t) for t in a]
+    sel = [c for c in app.project["cases"] if c["id"] in app.pw.sel]
+    if not sel:
+        raise CmdError("Podaj numery przypadków albo najpierw je zaznacz (SELECT).")
+    return sel
+
+
+@command("DELETE", "[numer…]", "Usuwa przypadki (bez argumentów – zaznaczone). UNDO przywraca.",
+         group="Lista przypadków")
+def _c_delete(app, a):
+    cases = _targets(app, a)
+    app.pw.sel = set()
+    app.pw.remove_cases(cases)
+    return f"Usunięto przypadków: {len(cases)}."
+
+
+@command("DUPLICATE", "numer", "Kopia przypadku tuż pod nim (nazwa „… - kopia”).", group="Lista przypadków")
+def _c_duplicate(app, a):
+    _need(a, 1, "DUPLICATE numer")
+    app.pw.duplicate_case(_case_ref(app, a[0]))
+    return "Zduplikowano przypadek."
+
+
+@command("RENAME", "numer nazwa…", "Zmienia nazwę przypadku lub grupy.", group="Lista przypadków")
+def _c_rename(app, a):
+    _need(a, 2, "RENAME numer nazwa")
+    node, name = _node_ref(app, a[0]), " ".join(" ".join(a[1:]).split())
+    if not name:
+        raise CmdError("Nazwa nie może być pusta.")
+    if "group" in node:
+        app.pw.rename_group(node, name)
+    else:
+        c = next(c for c in app.project["cases"] if c["id"] == node["case"])
+        if c["name"] != name:
+            c["name"] = name
+            card = app.pw.card_of(c)
+            if card is not None:
+                card.name.setText(name)
+            app.project_changed()
+            app.pw.relayout()
+    return f"Nazwa: {name}"
+
+
+@command("EDIT", "numer", "Otwiera przypadek do edycji (jak przycisk Edytuj); koniec – ENDEDIT.",
+         group="Lista przypadków")
+def _c_edit(app, a):
+    _need(a, 1, "EDIT numer")
+    c = _case_ref(app, a[0])
+    if any(c is e for e in app.edited_cases()):
+        return "Ten przypadek jest już edytowany."
+    app.pw.edit_case(c)
+    return f"Edycja: {c['name']}. FIELD / TAB działają na formularzu edycji; koniec – ENDEDIT."
+
+
+@command("ENDEDIT", "", "Kończy edycję przypadku (zmiany trafiają do przypadku).", group="Lista przypadków")
+def _c_end_edit(app, a):
+    if not app.edited_cases():
+        raise CmdError("Żaden przypadek nie jest edytowany.")
+    ok = app.end_editor()
+    app.pw.update_buttons()
+    return "Zakończono edycję." if ok else "Edycja trwa (dane niepoprawne)."
+
+
+def _open_cmd(app, a, opened):
+    pw = app.pw
+    if not a or cmd_name(a[0]) == "ALL":
+        pw.set_all_open(opened)
+        return "Rozwinięto wszystko." if opened else "Zwinięto wszystkie przypadki."
+    for t in a:
+        n = _node_ref(app, t)
+        if "group" in n:
+            n["open"] = opened
+            pw.keep_view(pw.relayout)
+        else:
+            card = pw.card_of(next(c for c in app.project["cases"] if c["id"] == n["case"]))
+            if card is not None:
+                pw.keep_view(lambda card=card: card.set_open(opened))
+    return None
+
+
+@command("EXPAND", "[numer… | ALL]", "Rozwija przypadki / grupy (Rozwiń wszystko).", group="Lista przypadków")
+def _c_expand(app, a):
+    return _open_cmd(app, a, True)
+
+
+@command("COLLAPSE", "[numer… | ALL]", "Zwija przypadki / grupy (Zwiń wszystko).", group="Lista przypadków")
+def _c_collapse(app, a):
+    return _open_cmd(app, a, False)
+
+
+def _group_info(app, g):
+    return f"{ptree_numbers(app.project['tree'])[id(g)].rstrip('.')} {g['name']}"
+
+
+@command("GROUP", "[numer…]", "Tworzy grupę z przypadków (bez argumentów – z zaznaczonych).", group="Lista przypadków")
+def _c_group(app, a):
+    cases = _targets(app, a)
+    g = app.pw.group_cases({c["id"] for c in cases}, edit=False)
+    return f"Utworzono grupę: {_group_info(app, g)} (RENAME zmienia nazwę)."
+
+
+@command("SUBGROUP", "numer_grupy", "Nowa podgrupa w grupie.", group="Lista przypadków")
+def _c_subgroup(app, a):
+    _need(a, 1, "SUBGROUP numer_grupy")
+    g = app.pw.new_subgroup(_group_ref(app, a[0]), edit=False)
+    return f"Utworzono podgrupę: {_group_info(app, g)}"
+
+
+@command("UNGROUP", "numer_grupy", "Rozwiązuje grupę (przypadki zostają).", group="Lista przypadków")
+def _c_ungroup(app, a):
+    _need(a, 1, "UNGROUP numer_grupy")
+    app.pw.ungroup(_group_ref(app, a[0]))
+    return "Rozgrupowano."
+
+
+@command("DELETEGROUP", "numer_grupy", "Usuwa grupę razem z przypadkami. UNDO przywraca.", group="Lista przypadków")
+def _c_del_group(app, a):
+    _need(a, 1, "DELETEGROUP numer_grupy")
+    app.pw.delete_group(_group_ref(app, a[0]), ask=False)
+    return "Usunięto grupę."
+
+
+@command("MOVE", "numer BEFORE|AFTER|INTO numer  |  numer START|END",
+         "Przenosi przypadek lub grupę (zamiast przeciągania uchwytem ⠿): BEFORE / AFTER – obok pozycji, INTO – na koniec "
+         "grupy.", group="Lista przypadków")
+def _c_move(app, a):
+    usage = "MOVE numer BEFORE|AFTER|INTO numer  lub  MOVE numer START|END"
+    _need(a, 2, usage)
+    pw, tree = app.pw, app.project["tree"]
+    node, how = _node_ref(app, a[0]), cmd_name(a[1])
+    if how in ("BEFORE", "AFTER", "INTO"):
+        _need(a, 3, usage)
+        tgt = _node_ref(app, a[2])
+        if tgt is node or ("group" in node and any(m is tgt for m, _, _, _ in ptree_walk(node["items"]))):
+            raise CmdError("Nie można przenieść pozycji do niej samej.")
+        if how == "INTO" and "case" in tgt:
+            raise CmdError("INTO – celem musi być grupa.")
+    elif how not in ("START", "END"):
+        raise CmdError("Użycie: " + usage)
+    pw._list_of(node).remove(node)
+    if how == "START":
+        tree.insert(0, node)
+    elif how == "END":
+        tree.append(node)
+    elif how == "INTO":
+        tgt["items"].append(node)
+        tgt["open"] = True
+    else:
+        lst = pw._list_of(tgt)
+        lst.insert(lst.index(tgt) + (0 if how == "BEFORE" else 1), node)
+    pw.keep_view(pw.relayout)
+    app.project_changed()
+    return "Przeniesiono."
+
+
+@command("RESULTS", "[numer]", "Raport tekstowy: przypadku z projektu albo (bez numeru) bieżącego formularza.",
+         group="Lista przypadków")
+def _c_results(app, a):
+    if a:
+        c = _case_ref(app, a[0])
+        app.ensure_calc(c)
+        return _plain(c.get("report"))
+    f = _form(app)
+    if f._pending:
+        f.recalc()
+    tab = f.nb.currentIndex()
+    if tab == TAB_USE:
+        return _plain(f.use_norm.text()) or "Brak wyników."
+    return f.snow_text.toPlainText() if tab == TAB_SNOW else f.wind_text.toPlainText()
+
+
+# ------------------------------------------------------------------- code loads (normowe) ---
+@command("CODES", "[OPEN|CLOSE]", "Okno Obciążenia normowe (menu Obciążenia).",
+         group="Obciążenia normowe")
+def _c_codes(app, a):
+    how = cmd_name(a[0]) if a else "TOGGLE"
+    if how == "OPEN":
+        app.open_codes()
+    elif how == "CLOSE":
+        app.close_codes()
+    elif how == "TOGGLE":
+        app.toggle_codes()
+    else:
+        raise CmdError("Użycie: CODES [OPEN|CLOSE]")
+
+
+@command("TAB", "USE|SNOW|WIND", "Wybiera zakładkę formularza obciążeń normowych.",
+         group="Obciążenia normowe")
+def _c_tab(app, a):
+    f = _form(app)
+    if not a:
+        return "Zakładka: " + f.nb.tabText(f.nb.currentIndex()).strip()
+    name = cmd_name(a[0])
+    if name not in TAB_NAMES:
+        raise CmdError("Użycie: TAB USE|SNOW|WIND")
+    f.nb.setCurrentIndex(TAB_NAMES[name])
+    return "Zakładka: " + f.nb.tabText(f.nb.currentIndex()).strip()
+
+
+@command("FIELD", "[pole [wartość…]]", "Bez argumentów wypisuje pola bieżącej zakładki; z nazwą pokazuje pole; z "
+         "wartością ustawia je (np. FIELD snow_type Dwupołaciowy, FIELD s_L 12).", group="Obciążenia normowe")
+def _c_field(app, a):
+    f = _form(app)
+    fields = form_fields(f)
+    if not a:
+        out = [f"Zakładka {f.nb.tabText(f.nb.currentIndex()).strip()} – pola (FIELD nazwa wartość):"]
+        for x in fields:
+            out.append(f"  {x.name:<16}= {x.get()}" + (f" {x.unit}" if x.unit else "") + f"   [{x.label}]")
+        return out
+    x = _find_field(fields, a[0])
+    if len(a) == 1:
+        return [f"{x.name} = {x.get()}" + (f" {x.unit}" if x.unit else "") + f"   [{x.label}]"] + (
+            ["  dozwolone: " + "; ".join(x.options)] if x.options else [])
+    x.put(" ".join(a[1:]))
+    if f.nb.currentIndex() != TAB_USE and f._pending:
+        f.recalc()
+    out = [f"{x.name} = {x.get()}"]
+    st = f.status.text().strip() if f.nb.currentIndex() != TAB_USE else ""
+    if st:
+        out.append("Uwaga: " + st)
+    return out
+
+
+@command("RESTORELOC", "", "Strefy i wysokość n.p.m. z lokalizacji wybranej na mapie (przycisk Przywróć).",
+         group="Obciążenia normowe")
+def _c_restore(app, a):
+    f = _form(app)
+    if not f.loc.get():
+        raise CmdError("Lokalizacja nie została wybrana (LOCATION).")
+    f.restore_location()
+    return _loc_text(f, f.loc.get())
+
+
+@command("ADD", "", "Dodaje bieżący formularz obciążeń normowych do projektu (przycisk Dodaj do projektu).",
+         group="Obciążenia normowe")
+def _c_add(app, a):
+    if app.editing is not None or app.edited_cases():
+        raise CmdError("Trwa edycja przypadku – ENDEDIT.")
+    if app._pending:
+        app.recalc()
+    r = app._grab_current(app._cur_mode())
+    if not r["ok"]:
+        raise CmdError("Nie można dodać przypadku – dane są niepoprawne: " + (r["err"] or "sprawdź dane budynku."))
+    app.add_or_update()
+    return app.proj_msg.text() or "Dodano do projektu."
+
+
+# ------------------------------------------------------------------------------ own loads ---
+@command("LAB", "[OPEN|CLOSE]", "Okno Obciążenia własne (menu Obciążenia).",
+         group="Obciążenia własne")
+def _c_lab(app, a):
+    how = cmd_name(a[0]) if a else "TOGGLE"
+    w = getattr(app, "lab", None)
+    shown = w is not None and w.isVisible()
+    if how == "OPEN" and not shown or how == "CLOSE" and shown or how == "TOGGLE":
+        app.toggle_lab()
+    elif how not in ("OPEN", "CLOSE"):
+        raise CmdError("Użycie: LAB [OPEN|CLOSE]")
+
+
+def _lab_row(lw, tok):
+    try:
+        i = int(tok)
+        if 1 <= i <= len(lw.rows):
+            return lw.rows[i - 1]
+    except ValueError:
+        pass
+    raise CmdError(f"Na liście obciążeń nie ma pozycji „{tok}” (LABLIST).")
+
+
+@command("LABLIST", "", "Pozycje obciążeń własnych z wynikami i sumą.", group="Obciążenia własne")
+def _c_lab_list(app, a):
+    lw = _lab(app)
+    s = lab_summary(lw.items)
+    out = []
+    for i, (it, r) in enumerate(zip(lw.items, s["rows"]), 1):
+        res = f"{lab_fmt(r['val'])} {r['unit']}" if r["ok"] else r["err"]
+        out.append(f"{i}. {it.get('nazwa', '')}: {it.get('wartosc', '')} {it.get('jedn', '')}"
+                   + (f" × {it['mnoznik']}" if it.get("mnoznik") else "") + f"  = {res}")
+    out.append(f"Suma: {lab_fmt(s['total'])} {s['unit']}" if s["ok"] and lw.items else
+               (s["err"] if lw.items else "Brak pozycji."))
+    return out
+
+
+@command("LABADD", "nazwa [wartość [jednostka [mnożnik]]]",
+         "Dodaje obciążenie wpisane ręcznie; jednostka: kN, kN/m, kN/m², kN/m³ (domyślnie kN/m²). "
+         "Nazwę ze spacjami weź w cudzysłów.", group="Obciążenia własne")
+def _c_lab_add(app, a):
+    _need(a, 1, "LABADD nazwa [wartość [jednostka [mnożnik]]]")
+    lw = _lab(app)
+    val = a[1] if len(a) > 1 else ""
+    if val and parse_num(val) is None:
+        raise CmdError(f"„{val}” nie jest liczbą.")
+    e = unit_exp(a[2]) if len(a) > 2 else 2
+    if e is None:
+        raise CmdError("Jednostka: kN, kN/m, kN/m2, kN/m3.")
+    it = dict(nazwa=a[0], wartosc=val, jedn=LAB_UNITS[e], z_bazy=False, wym={})
+    if len(a) > 3:
+        if parse_num(a[3]) is None:
+            raise CmdError(f"Mnożnik „{a[3]}” nie jest liczbą.")
+        it["mnoznik"] = a[3]
+    lw._append(it)
+    return f"Dodano pozycję {len(lw.items)}: {a[0]}"
+
+
+@command("DBSEARCH", "fraza…", "Szuka w bazie materiałów (wszystkie słowa, bez polskich znaków); wyniki dodaje "
+         "LABDB.", group="Obciążenia własne")
+def _c_db_search(app, a):
+    _need(a, 1, "DBSEARCH fraza")
+    words = _fold(" ".join(a)).split()
+    found = [it for it in mat_db_items() if not it.get("empty")
+             and all(w in _fold(it["name"] + " " + it["cat"]) for w in words)]
+    app.cmd.found = found[:500]
+    if not found:
+        return "Brak pozycji w bazie."
+    out = [f"{i}. {it['name']} – {mat_value_text(it['value'], it['unit'], long=False)}   [{it['cat']}]"
+           for i, it in enumerate(found[:40], 1)]
+    return out + ([f"… i {len(found) - 40} więcej – zawęź frazę."] if len(found) > 40 else [])
+
+
+@command("LABDB", "numer… | nazwa", "Dodaje do obciążeń własnych pozycje z ostatniego wyniku DBSEARCH albo pozycję "
+         "o podanej nazwie.",
+         group="Obciążenia własne")
+def _c_lab_db(app, a):
+    _need(a, 1, "LABDB numer… (po DBSEARCH) | nazwa pozycji")
+    lw, found, out = _lab(app), app.cmd.found, []
+    if all(t.isdigit() for t in a):
+        items = []
+        for t in a:
+            if not 1 <= int(t) <= len(found):
+                raise CmdError(f"Wynik „{t}” nie istnieje – najpierw DBSEARCH.")
+            items.append(found[int(t) - 1])
+    else:                                                # the name of an item (as the window of the database adds it)
+        f = _fold(" ".join(a))
+        items = [it for it in mat_db_items() if not it.get("empty") and _fold(it["name"]) == f]
+        if len(items) != 1:
+            raise CmdError(f"Nazwa „{' '.join(a)}” " + ("pasuje do kilku pozycji bazy – użyj DBSEARCH." if items
+                                                       else "nie występuje w bazie – użyj DBSEARCH."))
+    for it in items:
+        lw.add_material(it)
+        out.append(it["name"])
+    return "Dodano: " + "; ".join(out)
+
+
+LAB_FIELDS = {"NAME": "nazwa", "VALUE": "wartosc", "UNIT": "jedn", "MULTIPLIER": "mnoznik",
+              "THICKNESS": "t", "WIDTH": "b", "LENGTH": "d"}
+
+
+@command("LABFIELD", "numer NAME|VALUE|UNIT|MULTIPLIER|THICKNESS|WIDTH|LENGTH wartość",
+         "Zmienia pole pozycji obciążeń własnych; wymiar (grubość, szerokość, długość) ustawia wartość i włącza go, "
+         "wartość „-” wyłącza.", group="Obciążenia własne")
+def _c_lab_field(app, a):
+    _need(a, 3, "LABFIELD numer pole wartość")
+    lw = _lab(app)
+    row, fld = _lab_row(lw, a[0]), cmd_name(a[1])
+    if fld not in LAB_FIELDS:
+        raise CmdError("Pole: " + ", ".join(LAB_FIELDS))
+    val = " ".join(a[2:])
+    if fld == "NAME":
+        row.name.setText(val)
+    elif fld == "VALUE":
+        if parse_num(val) is None:
+            raise CmdError(f"„{val}” nie jest liczbą.")
+        row.val.setText(val)
+    elif fld == "MULTIPLIER":
+        if val != "-" and parse_num(val) is None:
+            raise CmdError(f"„{val}” nie jest liczbą.")
+        row.mult.setText("" if val == "-" else val)
+    elif fld == "UNIT":
+        e = unit_exp(val)
+        if row.unit is None:
+            raise CmdError("Jednostka pozycji z bazy jest stała.")
+        if e is None:
+            raise CmdError("Jednostka: kN, kN/m, kN/m2, kN/m3.")
+        row.unit.setCurrentIndex(next(i for i, (x, _) in enumerate(LAB_MANUAL) if x == e))
+    else:
+        k = LAB_FIELDS[fld]
+        box, ch, e = row.dims[k]
+        if val == "-":
+            ch.setChecked(False)
+        else:
+            if parse_num(val) is None:
+                raise CmdError(f"„{val}” nie jest liczbą.")
+            if box.isHidden():
+                raise CmdError("Ten wymiar nie dotyczy jednostki pozycji.")
+            ch.setChecked(True)
+            e.setText(val)
+    return None
+
+
+@command("LABDUP", "numer", "Kopia pozycji obciążeń własnych tuż pod nią.", group="Obciążenia własne")
+def _c_lab_dup(app, a):
+    _need(a, 1, "LABDUP numer")
+    lw = _lab(app)
+    lw.duplicate_row(_lab_row(lw, a[0]))
+
+
+@command("LABDEL", "numer…", "Usuwa pozycje obciążeń własnych.", group="Obciążenia własne")
+def _c_lab_del(app, a):
+    _need(a, 1, "LABDEL numer…")
+    lw = _lab(app)
+    for row in {id(r): r for r in (_lab_row(lw, t) for t in a)}.values():
+        lw.remove_row(row)
+    return f"Pozostało pozycji: {len(lw.items)}."
+
+
+@command("LABTODB", "numer [kategoria] [źródło]", "Zapisuje pozycję wpisaną ręcznie w bazie materiałów "
+         "(przycisk Dodaj do bazy; kategoria domyślnie dobrana z nazwy).", group="Obciążenia własne")
+def _c_lab_to_db(app, a):
+    _need(a, 1, "LABTODB numer [kategoria] [źródło]")
+    lw = _lab(app)
+    row = _lab_row(lw, a[0])
+    it = row.item
+    if it.get("z_bazy") or parse_num(it.get("wartosc")) is None or not it.get("nazwa", "").strip():
+        raise CmdError("Do bazy można zapisać pozycję wpisaną ręcznie, z nazwą i poprawną wartością.")
+    mat = dict(name=it["nazwa"].strip(), value=str(it["wartosc"]).strip(), unit=it["jedn"],
+               cat=(a[1] if len(a) > 1 else mat_guess_category(it["nazwa"], it["jedn"])),
+               src=(a[2] if len(a) > 2 else MAT_USER_SRC))
+    try:
+        mat_add_to_user_db(mat)
+    except OSError as e:
+        raise CmdError(f"Nie można zapisać bazy materiałów: {e}")
+    row._added(mat)
+    return f"Dodano do bazy materiałów: „{mat['name']}” (kategoria „{mat['cat']}”)."
+
+
+@command("ADDLAB", "", "Dodaje obciążenia własne do projektu (przycisk Dodaj do projektu).",
+         group="Obciążenia własne")
+def _c_lab_to_project(app, a):
+    if app.edited_cases():
+        raise CmdError("Trwa edycja przypadku – ENDEDIT.")
+    lw = app._lab_win()
+    s = lw.changed()
+    if not s["ok"]:
+        raise CmdError("Nie można dodać przypadku do projektu: " + s["err"])
+    case = app.add_lab_case(lw.data())
+    lw.info_msg(f"Dodano do projektu: „{case['name']}”.")
+    return f"Dodano do projektu: „{case['name']}”."
+
+
+# Questions asked when a command is typed without arguments (the space after the name works like Enter):
+# (prompt, required, "one" | "rest"[, condition on the answers so far]).
+def _ask_params(name, *params):
+    COMMANDS[name].params = tuple(params)
+
+
+_REF = ("Numer przypadku lub grupy:", True, "one")
+_ask_params("HELP", ("Polecenie (Enter – lista):", False, "one"))
+_ask_params("CONSOLE", ("Opcja [ON/OFF/LINES/TIME] (Enter – przełącz okno konsoli):", False, "one"),
+            ("Wartość: liczba wierszy albo sekundy (Enter – pokaż bieżącą):", False, "one",
+             lambda a: cmd_name(a[0]) in ("LINES", "TIME")))
+_ask_params("SHORTCUTSRESET", ("Zastąpić plik skrótów domyślnym? [YES]:", True, "one"))
+_ask_params("UPDATES", ("Opcja [AUTO] (Enter – sprawdź teraz):", False, "one"),
+            ("Sprawdzanie przy starcie [ON/OFF]:", True, "one"))
+_ask_params("OPEN", ("Plik projektu (Enter – okno wyboru pliku):", False, "one"))
+_ask_params("SAVEAS", ("Plik projektu (Enter – okno wyboru pliku):", False, "one"))
+_ask_params("PROJECTNAME", ("Nazwa projektu (Enter – pokaż bieżącą):", False, "one"))
+_ask_params("LOCATION", ("Szerokość geograficzna lub MAP (Enter – pokaż bieżącą):", False, "one"),
+            ("Długość geograficzna:", True, "one", lambda a: cmd_name(a[0]) != "MAP"),
+            ("Wysokość n.p.m. [m] (Enter – bez):", False, "one", lambda a: cmd_name(a[0]) != "MAP"))
+_ask_params("PRINT", ("Plik PDF (Enter – podgląd wydruku):", False, "one"))
+_ask_params("UNDO", ("Zakres [PROJECT/FORM/LAB] (Enter – PROJECT):", False, "one"))
+_ask_params("REDO", ("Zakres [PROJECT/FORM/LAB] (Enter – PROJECT):", False, "one"))
+_ask_params("SELECT", ("Numery przypadków albo ALL / NONE (Enter – odznacz):", False, "rest"))
+_ask_params("DELETE", ("Numery przypadków (Enter – zaznaczone):", False, "rest"))
+_ask_params("DUPLICATE", ("Numer przypadku:", True, "one"))
+_ask_params("RENAME", _REF, ("Nowa nazwa:", True, "one"))
+_ask_params("EDIT", ("Numer przypadku:", True, "one"))
+_ask_params("EXPAND", ("Numery albo ALL (Enter – wszystko):", False, "rest"))
+_ask_params("COLLAPSE", ("Numery albo ALL (Enter – wszystko):", False, "rest"))
+_ask_params("GROUP", ("Numery przypadków (Enter – zaznaczone):", False, "rest"))
+_ask_params("SUBGROUP", ("Numer grupy:", True, "one"))
+_ask_params("UNGROUP", ("Numer grupy:", True, "one"))
+_ask_params("DELETEGROUP", ("Numer grupy:", True, "one"))
+_ask_params("MOVE", ("Numer przenoszonej pozycji:", True, "one"),
+            ("Dokąd [BEFORE/AFTER/INTO/START/END]:", True, "one"),
+            ("Numer pozycji docelowej:", True, "one", lambda a: cmd_name(a[1]) in ("BEFORE", "AFTER", "INTO")))
+_ask_params("RESULTS", ("Numer przypadku (Enter – bieżący formularz):", False, "one"))
+_ask_params("CODES", ("[OPEN/CLOSE] (Enter – przełącz):", False, "one"))
+_ask_params("TAB", ("Zakładka [USE/SNOW/WIND]:", True, "one"))
+_ask_params("FIELD", ("Pole (Enter – lista pól):", False, "one"), ("Wartość (Enter – pokaż pole):", False, "one"))
+_ask_params("LAB", ("[OPEN/CLOSE] (Enter – przełącz):", False, "one"))
+_ask_params("LABADD", ("Nazwa obciążenia:", True, "one"), ("Wartość (Enter – wpiszę później):", False, "one"),
+            ("Jednostka [kN, kN/m, kN/m², kN/m³] (Enter – kN/m²):", False, "one"),
+            ("Mnożnik (Enter – bez):", False, "one"))
+_ask_params("DBSEARCH", ("Szukana fraza:", True, "rest"))
+_ask_params("LABDB", ("Numery wyników DBSEARCH albo nazwa pozycji bazy:", True, "rest"))
+_ask_params("LABFIELD", ("Numer pozycji:", True, "one"),
+            ("Pole [NAME/VALUE/UNIT/MULTIPLIER/THICKNESS/WIDTH/LENGTH]:", True, "one"),
+            ("Nowa wartość (- wyłącza mnożnik lub wymiar):", True, "one"))
+_ask_params("LABDUP", ("Numer pozycji:", True, "one"))
+_ask_params("LABDEL", ("Numery pozycji:", True, "rest"))
+_ask_params("LABTODB", ("Numer pozycji:", True, "one"), ("Kategoria (Enter – dobrana z nazwy):", False, "one"),
+            ("Źródło (Enter – domyślne):", False, "one"))
+
+
 class App:
     NSLOT = 6
     STATE_VARS = ("snow_type", "wind_type", "snow_zone", "snow_ce", "ct_mode", "guard", "s_diff", "s_obst", "s_exc",
@@ -9162,6 +11739,10 @@ class App:
         if self.host is self:
             self.dirty = False
             self.proj_hist = History()
+        self.cmd = CommandProcessor(self) if self.host is self else None     # console (main object only)
+        if self.cmd is not None:                                              # typing from any window of the program
+            self.cmd._keys = CommandKeys(self.cmd)
+            qapp.installEventFilter(self.cmd._keys)
         self.sgeo = self.wgeo = self.snow = self.wind = self.env = None
         self.win3d = self.cv = None
         self._3d_geom = None
@@ -9238,6 +11819,8 @@ class App:
         self._form_reset()
         if self.host is self:
             self._proj_reset()
+            SHORTCUTS.start(self)                      # the shortcut file: menu items, console aliases, key combinations
+            self.cmd.say("Wpisz polecenie (HELP – lista poleceń).", "note")      # scrolls away with the history
 
     # ------------------------------------------------------ Cofnij / Ponów ---
     def _form_reset(self):
@@ -9367,7 +11950,8 @@ class App:
         cb = QComboBox()
         cb._var, cb._sync, cb._items = var, False, []
         self._set_items(cb, values)
-        cb.currentTextChanged.connect(lambda t, cb=cb: None if cb._sync else cb._var.set(t))
+        cb.currentTextChanged.connect(lambda t, cb=cb: None if cb._sync else (
+            cb._var.set(t), self._user_field(self._var_name(cb._var), cb._var.get, now=True)))
         var.trace(lambda cb=cb: self._sync_combo(cb))
         if width:
             fm = QFontMetrics(cb.font())
@@ -9377,8 +11961,9 @@ class App:
     def _mk_check(self, text, var):
         ch = QCheckBox(text)
         ch.setChecked(bool(var.get()))
-        ch._sync = False
-        ch.toggled.connect(lambda on, ch=ch, var=var: None if ch._sync else var.set(bool(on)))
+        ch._sync, ch._var = False, var
+        ch.toggled.connect(lambda on, ch=ch, var=var: None if ch._sync else (
+            var.set(bool(on)), self._user_field(self._var_name(var), lambda var=var: "ON" if var.get() else "OFF", now=True)))
 
         def sync(ch=ch, var=var):
             if ch.isChecked() != bool(var.get()):
@@ -9429,7 +12014,8 @@ class App:
         e._label = lb
         e._key = key
         e.setText(self.v[key].get())
-        e.textEdited.connect(lambda t, k=key: self.v[k].set(t))
+        e.textEdited.connect(lambda t, k=key: (self.v[k].set(t), self._user_field(k, lambda k=k: self.v[k].get())))
+        e.editingFinished.connect(lambda k=key: self._flush_field(k))
         g.addWidget(e, r, col * 3 + 1, 1, 1, AL_R)
         g.addWidget(self._unit(unit), r, col * 3 + 2)
         self.entries.setdefault(key, []).append(e)
@@ -9481,7 +12067,8 @@ class App:
             lb = QLabel("")
             e = self._mk_entry()
             e._key, e._shown = None, False
-            e.textEdited.connect(lambda t, e=e: self.v[e._key].set(t) if e._key else None)
+            e.textEdited.connect(lambda t, e=e: (self.v[e._key].set(t), self._user_field(
+                e._key, lambda k=e._key: self.v[k].get())) if e._key else None)
             un = self._unit("")
             c.grid.addWidget(lb, r, col * 3)
             c.grid.addWidget(e, r, col * 3 + 1, 1, 1, AL_R)
@@ -9522,6 +12109,7 @@ class App:
         self.edit_menu = edit_menu(mb, self.form_hist, self.undo_form, self.redo_form)
         mh = mb.addMenu("Pomoc")
         act = mh.addAction("Założenia do obliczeń")
+        SHORTCUTS.bind(act, "ASSUMPTIONS")
         act.triggered.connect(lambda checked=False: self.show_assumptions())
 
         central = QWidget()
@@ -9560,6 +12148,7 @@ class App:
 
         # ================= IMPOSED LOADS
         self._build_use_page()
+        self._hook_use()
 
         # ================= SNOW
         lay = self._page("  Śnieg  ")
@@ -9744,29 +12333,74 @@ class App:
     def file_menu(self, mb, project):
         """Plik menu. Main window: Nowy projekt, Otwórz, Zapisz, Zapisz jako, Zakończ; code loads: Zakończ."""
         mf = mb.addMenu("Plik")
-        entries = [("Zakończ", None, self.on_close)]
+        entries = [("Zakończ", "EXIT", self.on_close)]
         if project:
-            entries = [("Nowy projekt", "Ctrl+N", self.file_new),
-                       ("Otwórz plik projektu…", "Ctrl+O", self.file_open), None,
-                       ("Zapisz", "Ctrl+S", self.file_save), ("Zapisz jako…", "Ctrl+Shift+S", self.file_save_as),
-                       None, ("Informacje o projekcie…", None, self.project_info),
-                       ("Otwórz w edytorze tekstu", None, self.open_in_editor),
-                       ("Drukuj…", "Ctrl+P", self.print_project), None] + entries
+            entries = [("Nowy projekt", "NEW", self.file_new),
+                       ("Otwórz plik projektu…", "OPEN", self.file_open), None,
+                       ("Zapisz", "SAVE", self.file_save), ("Zapisz jako…", "SAVEAS", self.file_save_as),
+                       None, ("Informacje o projekcie…", "PROJECTINFO", self.project_info),
+                       ("Otwórz w edytorze tekstu", "EDITOR", self.open_in_editor),
+                       ("Drukuj…", "PRINT", self.print_project), None,
+                       ("Opcje…", "OPTIONS", self.options), None] + entries
         for entry in entries:
             if entry is None:
                 mf.addSeparator()
                 continue
-            text, sc, fn = entry
+            text, cmd, fn = entry                      # cmd – the console command of the item (shortcuts file)
             act = mf.addAction(text)
-            if sc:
-                act.setShortcut(QKeySequence(sc))
+            SHORTCUTS.bind(act, cmd, scope="app" if project else None)       # main window: in every window
             act.triggered.connect(lambda checked=False, fn=fn: fn())
         return mf
 
-    def about(self):
-        """O programie (menu bar): non-blocking window with the version and the update check."""
+    def view_menu(self, mb):
+        """Widok menu: Konsola (the command line with its history; the check mark follows the window)."""
+        mv = mb.addMenu("Widok")
+        act = mv.addAction("Konsola")
+        act.setCheckable(True)
+        SHORTCUTS.bind(act, "CONSOLE", scope="app")
+        act.triggered.connect(lambda checked=False: self.cmd.show_console(checked))
+        self.cmd.view_action = act
+        return mv
+
+    def loads_menu(self, mb):
+        """Obciążenia menu: Obciążenia normowe, Obciążenia własne (check mark = the window is open)."""
+        m = mb.addMenu("Obciążenia")
+        out = []
+        for text, cmd, fn in (("Obciążenia normowe", "CODES", self.toggle_codes),
+                              ("Obciążenia własne", "LAB", self.toggle_lab)):
+            act = m.addAction(text)
+            act.setCheckable(True)
+            SHORTCUTS.bind(act, cmd, echo=False, scope="app")          # toggle_codes / toggle_lab write the echo themselves
+            act.triggered.connect(lambda checked=False, fn=fn: fn())
+            out.append(act)
+        return out
+
+    def options(self, toggle=False):
+        """Plik → Opcje…: non-blocking window (keyboard shortcuts); toggle (the command OPTIONS) – an open window
+        is closed."""
+        host = self.host
+        d = getattr(host, "_opt_dlg", None)
+        if toggle and d is not None and d.isVisible():
+            d.close()
+            return None
+        if d is None:
+            d = OptionsDialog(host, host.pw)
+            d.setModal(False)
+            host._opt_dlg = d
+            d.finished.connect(lambda r: (setattr(host, "_opt_dlg", None), d.deleteLater()))
+        d.show()
+        d.raise_()
+        d.activateWindow()
+        return d
+
+    def about(self, toggle=False):
+        """O programie (menu bar): non-blocking window with the version and the update check; toggle (the command
+        ABOUT) – an open window is closed."""
         host = self.host
         d = getattr(host, "_about_dlg", None)
+        if toggle and d is not None and d.isVisible():
+            d.close()
+            return None
         if d is None:
             d = AboutDialog(host, host.pw)
             d.setModal(False)
@@ -9826,6 +12460,7 @@ class App:
     def about_menu(self, mb):
         """O programie – an item right on the menu bar (opens the window; no drop-down menu)."""
         act = mb.addAction("O programie")
+        SHORTCUTS.bind(act, "ABOUT", scope="app")
         act.triggered.connect(lambda checked=False: self.about())
         return act
 
@@ -9873,33 +12508,25 @@ class App:
         if changed:
             host.project_changed()
 
-    def pick_location(self, parent, cur, done):
-        """Picking a point on the map (without QtWebEngine – coordinates typed by hand); result → done(loc).
-        The map does not block other windows."""
-        try:
-            import PySide6.QtWebEngineWidgets  # noqa: F401
-        except ImportError:
-            QMessageBox.warning(parent, "Mapa",
-                                "Mapa wymaga modułu QtWebEngine (pełny pakiet PySide6).\n\n"
-                                "Instalacja w wierszu poleceń:\n    py -m pip install PySide6\n\n"
-                                "Możesz też podać współrzędne ręcznie.")
-            from PySide6.QtWidgets import QInputDialog
-            txt, ok = QInputDialog.getText(parent, "Lokalizacja",
-                                           "Szerokość i długość geograficzna (np. 51.673, 21.874):",
-                                           text=f"{cur['lat']:.5f}, {cur['lon']:.5f}" if cur else "")
-            if not ok:
-                return
-            try:
-                la, lo = [float(t.replace(",", ".")) for t in txt.replace(";", " ").replace(", ", " ").split()[:2]]
-            except ValueError:
-                QMessageBox.warning(parent, "Lokalizacja", "Nie rozpoznano współrzędnych.")
-                return
-            done(dict(lat=la, lon=lo, alt=None, name=""))
+    def pick_location(self, parent, cur, done, toggle=False):
+        """Picking a point on the map; result → done(loc).
+        The map does not block other windows; there is only one map window (called again it is brought to the
+        front, with toggle – closed)."""
+        host = self.host
+        old = getattr(host, "_map_dlg", None)
+        if old is not None and old.isVisible():
+            if toggle:
+                old.close()
+            else:
+                old.raise_()
+                old.activateWindow()
             return
         dlg = MapDialog(parent, "snow", cur)
         dlg.setModal(False)
+        host._map_dlg = dlg
         dlg.accepted.connect(lambda: dlg.result_loc and done(dlg.result_loc))
-        dlg.finished.connect(lambda r: dlg.deleteLater())
+        dlg.finished.connect(lambda r: (setattr(host, "_map_dlg", None) if getattr(host, "_map_dlg", None) is dlg
+                                        else None, dlg.deleteLater()))
         dlg.show()
 
     @staticmethod
@@ -10150,6 +12777,8 @@ class App:
         use = i == TAB_USE
         self.btn_add.setToolTip("Zapisz przyjęte obciążenia użytkowe jako nowy przypadek projektu" if use else
                                 "Zapisz bieżący model 3D i wyniki jako nowy przypadek projektu")
+        if not self._loading and 0 <= i <= 2:
+            self.echo("TAB " + ("USE", "SNOW", "WIND")[i])
         if i in (TAB_SNOW, TAB_WIND):
             self.mode3d.set("śnieg" if i == TAB_SNOW else "wiatr")
         self.draw3d()                                # 3D window: model or the „no model” message
@@ -11299,8 +13928,56 @@ class App:
             setattr(host, attr, w)
         return w
 
+    def echo(self, line):
+        """Writes what the user did in the windows to the console, as the command that does the same."""
+        c = self.host.cmd
+        if c is not None:
+            c.echo(line)
+
+    def _var_name(self, var):
+        names = self.__dict__.get("_var_names")
+        if names is None:
+            names = self._var_names = {id(getattr(self, n)): n for n in self.STATE_VARS + ("w_diff", "snow_case")}
+        return names.get(id(var))
+
+    def _user_field(self, name, getter, now=False):
+        """A field changed by the user: the console gets „FIELD name value” – at once for a choice (now), for typed
+        text after a short pause in typing (or at once when the field is left / Enter – `_flush_field`)."""
+        h = self.host
+        if not name or h.cmd is None or h.cmd.depth or self._loading:
+            return
+        tm = self.__dict__.setdefault("_fe_timers", {})
+        t = tm.get(name)
+        if t is None:
+            t = tm[name] = QTimer()
+            t.setSingleShot(True)
+            t.setInterval(300)
+            t.timeout.connect(lambda t=t, name=name: self.echo(f"FIELD {name} {cq(t._g())}"))
+        t._g = getter
+        if now:
+            t.stop()
+            self.echo(f"FIELD {name} {cq(getter())}")
+        else:
+            t.start()
+
+    def _flush_field(self, name):
+        t = self.__dict__.get("_fe_timers", {}).get(name)
+        if t is not None and t.isActive():
+            t.stop()
+            t.timeout.emit()
+
+    def _hook_use(self):
+        """Fields of the imposed-loads tab: the user's changes go to the console."""
+        for name, label, w, kind in use_spec(self):
+            if kind == "combo":
+                w.activated.connect(lambda i, name=name, w=w: self._user_field(name, w.currentText, now=True))
+            else:
+                w.textEdited.connect(lambda t, name=name, w=w: self._user_field(name, w.text))
+                w.editingFinished.connect(lambda name=name: self._flush_field(name))
+
     def toggle_lab(self):
         w = getattr(self.host, "lab", None)
+        self.echo("LAB CLOSE" if w is not None and w.isVisible() else "LAB OPEN")
         if w is not None and w.isVisible():
             w.close_panel()
         else:
@@ -11337,6 +14014,7 @@ class App:
 
     # --- code loads window (KAYENN Codes) above the main window
     def toggle_codes(self):
+        self.echo("CODES CLOSE" if self.win.isVisible() else "CODES OPEN")
         if self.win.isVisible():
             self.close_codes()
         else:
@@ -11424,6 +14102,7 @@ class App:
         return msg
 
     def add_or_update(self):
+        self.echo("ADD")
         if self._pending:
             self.recalc()
         self.close_editor()
@@ -11581,7 +14260,8 @@ class App:
         doc._project = self.project_title()
         return doc
 
-    def print_project(self):
+    def print_project(self, pdf=None):
+        """Drukuj… (print preview); pdf – the console: straight to a PDF file, no window."""
         if not self.project["cases"]:
             QMessageBox.information(self.pw or self.win, "Drukuj", "Projekt nie zawiera przypadków.")
             return
@@ -11596,6 +14276,13 @@ class App:
         finally:
             QApplication.restoreOverrideCursor()
         dlg = PrintManager(self, self.pw or self.win, doc, self.project_title())
+        if pdf:
+            try:
+                dlg.print_to(pdf)
+            finally:
+                dlg.close()
+                dlg.deleteLater()
+            return pdf
         scr = (self.pw or self.win).screen().availableGeometry()
         dlg.resize(min(1200, scr.width() - 80), scr.height() - 80)
         # the manager owns its printer; the document must live as long as the window
@@ -12237,7 +14924,14 @@ class App:
         slabs = []
         # zone edges split at the vertices of neighbouring zones – shared edges are then identical
         # (layers joined at corners, eaves and ridge without gaps)
-        allv = [q for z in w["zones"] if not z.get("dome") for q in z["poly"]]
+        par_in = g.kind == "flat" and g.hp > 0      # parapet: the roof layers only inside its inner faces
+        t_par = 0.25          # thickness of parapet_faces (t)
+
+        def zpoly(z):
+            if par_in and z["kind"] == "roof":
+                return clip_rect(z["poly"], t_par, g.L - t_par, t_par, g.B - t_par)
+            return z["poly"]
+        allv = [q for z in w["zones"] if not z.get("dome") for q in zpoly(z)]
 
         def split_edges(P):
             out = []
@@ -12265,7 +14959,9 @@ class App:
             dome = z.get("dome")
             lab = None if dome else f"{f2(z['we'], 3, True)} kN/m²"
             grp = None if dome else (z["kind"], z["name"], round(z["cpe"], 4), z.get("rect") or id(z))
-            P = z["poly"]
+            P = zpoly(z)
+            if len(P) < 3:
+                continue
             n = unit(newell(P))
             if z["kind"] in ("roof", "canopy"):     # roof slope: normal always up (troughed roofs)
                 if n[2] < 0:
@@ -12818,6 +15514,8 @@ class App:
             self._angle_label(*args)
         if mode == "śnieg" and self.snow["overhang"]:
             self.draw_overhang(cv, g, P, facing, self.snow["overhang"], size)
+        if hasattr(cv, "raise_tagged"):
+            cv.raise_tagged("plaque")                 # dimension / load plaques above everything else (they mask it)
         self.draw_legend(cv, mode, g, Hc, fnt)
         if terr:
             cv.create_text(14, 14, anchor="nw", font=(FONT, 9, "bold"), fill=MUTED, text="orografia w realnej skali")
@@ -12878,6 +15576,8 @@ class App:
         rid = cv.create_rectangle(bx[0] - 2, bx[1] - 1, bx[2] + 2, bx[3] + 1, fill="#ffffff", outline=outline,
                                   stipple="" if outline else "gray75")
         cv.tag_raise(tid, rid)
+        for it in (rid, tid):
+            cv.addtag_withtag("plaque", it)
         return True
 
     def draw_legend(self, cv, mode, g, Hc, fnt):
@@ -13039,6 +15739,8 @@ class App:
                                   dash=() if key else (2, 2))
         self._placed = getattr(self, "_placed", []) + [(bx[0] - 3, bx[1] - 1, bx[2] + 3, bx[3] + 1)]
         cv.tag_raise(tid, rid)
+        for it in (rid, tid):                           # plaques stay above all other drawing
+            cv.addtag_withtag("plaque", it)
         if key:
             tag = f"edit{len(self._edit_keys)}"
             self._edit_keys[tag] = (key, (x, y))
@@ -13678,10 +16380,6 @@ class _FileOpener(QObject):
 
 
 def main():
-    try:   # the map module (QtWebEngine) must be loaded before the application is created
-        import PySide6.QtWebEngineWidgets  # noqa: F401
-    except ImportError:
-        pass
     if sys.platform == "win32":
         try:   # own identifier – the taskbar shows the KAYENN icon instead of the Python one
             import ctypes
@@ -13730,22 +16428,25 @@ def _autotest(app, qapp):
                 dpr=scr.devicePixelRatio() if scr else None, materials=n_mat, base_dir=BASE_DIR,
                 user_data=user_data_dir())
     ok = fam == FONT and n_mat > 1000
-    try:                                             # map engine (QtWebEngine) – the page loads
-        from PySide6.QtWebEngineWidgets import QWebEngineView
-        from PySide6.QtCore import QEventLoop
-        v = QWebEngineView()
-        res = []
-        v.loadFinished.connect(lambda r_: res.append(r_))
-        v.setHtml("<html><body><p id='x'>KAYENN</p></body></html>")
-        loop = QEventLoop()
-        QTimer.singleShot(20000, loop.quit)
-        v.loadFinished.connect(lambda r_: loop.quit())
-        loop.exec()
-        info["map"] = bool(res and res[0])
-        v.deleteLater()
+    try:                                             # the map: the widget with the zones paints (no network)
+        from PySide6.QtGui import QImage
+        MapView.NETWORK = False
+        mv = MapView()
+        mv.resize(400, 300)
+        mv.jump_to(21.01, 52.23, 9)
+        img = QImage(400, 300, QImage.Format.Format_ARGB32)
+        mv.render(img)
+        info["map"] = img.pixel(200, 150) != QColor("#e4e8ee").rgba()       # the zone tints the background
+        mv.deleteLater()
+        MapView.NETWORK = True
     except Exception as e:
         info["map"] = repr(e)
-    ok = ok and info["map"] is True
+    try:                                             # TLS for the map tiles, search and altitude (https)
+        from PySide6.QtNetwork import QSslSocket
+        info["tls"] = bool(QSslSocket.supportsSsl())
+    except Exception as e:
+        info["tls"] = repr(e)
+    ok = ok and info["map"] is True and info["tls"] is True
     if d:
         os.makedirs(d, exist_ok=True)
 

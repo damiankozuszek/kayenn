@@ -1,0 +1,52 @@
+name: Błąd / Bug report
+description: Zgłoś błąd w programie lub w wynikach obliczeń / Report a bug or a wrong result
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Dziękujemy za zgłoszenie! Możesz pisać po polsku lub po angielsku. / Thank you! Polish or English is fine.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Rodzaj problemu
+      options:
+        - Błędny wynik obliczeń (podaj punkt normy)
+        - Awaria / błąd programu
+        - Problem z wyglądem lub obsługą
+        - Instalacja / uruchomienie
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: Co się stało i czego oczekiwano
+      description: Dla błędnego wyniku – punkt / tabela normy i oczekiwana wartość.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Kroki do odtworzenia
+      placeholder: "1. ...\n2. ...\n3. ..."
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Wersja programu (O programie)
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: System
+      options: [Windows, macOS, Linux]
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Plik projektu / zrzut ekranu
+      description: Przeciągnij tu plik `.kayenn` (bez poufnych danych) lub zrzut ekranu.

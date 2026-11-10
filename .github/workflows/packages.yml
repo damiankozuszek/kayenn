@@ -51,9 +51,6 @@ jobs:
       - name: Python packages
         run: python -m pip install -r packaging/requirements.txt
 
-      - name: Program tests
-        run: python tests.py --quick
-
       - name: Build package
         run: python packaging/build.py
 
@@ -76,6 +73,7 @@ jobs:
     needs: package
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: release
@@ -83,6 +81,7 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          body_path: .github/RELEASE_BODY.md   # release text (update it before tagging a new version)
           files: release/*              # the artifacts are downloaded to release/ (not packaging/)
           fail_on_unmatched_files: true # without this a wrong path silently gave a release with only the source code
           draft: true

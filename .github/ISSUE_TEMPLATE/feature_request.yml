@@ -1,0 +1,15 @@
+name: Pomysł / Feature request
+description: Zaproponuj nową funkcję lub usprawnienie / Suggest a feature
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: Czego brakuje
+      description: Opisz potrzebę z punktu widzenia inżyniera; jeśli to metoda z normy – podaj punkt.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Jak miałoby to działać / dlaczego jest potrzebne

@@ -26,6 +26,7 @@ UninstallDisplayIcon={app}\KAYENN.exe
 UninstallDisplayName=KAYENN {#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
+LicenseFile={#RootDir}\LICENSE
 WizardStyle=modern
 ChangesAssociations=yes
 CloseApplications=yes

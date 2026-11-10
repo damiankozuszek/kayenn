@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Luka w zabezpieczeniach / Security vulnerability
+    url: https://github.com/damiankozuszek/kayenn/security/advisories/new
+    about: Zgłoś prywatnie, nie w publicznym zgłoszeniu. / Report privately.

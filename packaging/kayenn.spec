@@ -10,7 +10,9 @@ VERSION = re.search(r'^APP_VERSION = "([^"]+)"', open(os.path.join(ROOT, "kayenn
                     re.M).group(1)
 
 datas = [(os.path.join(ROOT, "kayenn_materials_pl.txt"), "."),
-         (os.path.join(ROOT, "fonts"), "fonts")]
+         (os.path.join(ROOT, "fonts"), "fonts"),
+         (os.path.join(ROOT, "LICENSE"), "."),
+         (os.path.join(ROOT, "THIRD_PARTY_NOTICES.md"), ".")]
 for f in os.listdir(os.path.join(ROOT, "branding")):
     if f.endswith((".svg", ".png", ".ico")):
         datas.append((os.path.join(ROOT, "branding", f), "branding"))
@@ -19,18 +21,20 @@ a = Analysis(
     [os.path.join(ROOT, "kayenn.pyw")],
     pathex=[ROOT],
     datas=datas,
-    hiddenimports=["PySide6.QtSvg", "PySide6.QtPrintSupport", "PySide6.QtWebEngineWidgets"],
+    hiddenimports=["PySide6.QtSvg", "PySide6.QtPrintSupport", "PySide6.QtNetwork"],
     excludes=["tkinter", "PySide6.Qt3DCore", "PySide6.Qt3DRender", "PySide6.QtBluetooth", "PySide6.QtCharts",
               "PySide6.QtDataVisualization", "PySide6.QtGraphs", "PySide6.QtMultimedia", "PySide6.QtNfc",
-              "PySide6.QtSensors", "PySide6.QtSerialPort", "PySide6.QtSql", "PySide6.QtTest"],
+              "PySide6.QtSensors", "PySide6.QtSerialPort", "PySide6.QtSql", "PySide6.QtTest",
+              "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineQuick",
+              "PySide6.QtWebChannel", "PySide6.QtWebSockets"],
     noarchive=False,
 )
 # slimming: Qt modules the program does not use (pulled in by QML dependencies), QML files,
-# Qt translations and browser engine languages other than Polish and English, browser developer tools
+# Qt translations (the map is native – no browser engine in the package)
 _DROP = re.compile(r"qt6?(3d|quick3d|charts|datavisualization|graphs|multimedia|location|labs|quickcontrols2|"
                    r"quickdialogs2|quicktimeline|quickparticles|quickvectorimage|spatialaudio|texttospeech|"
                    r"virtualkeyboard|scxml|statemachine|remoteobjects|bluetooth|nfc|serialport|serialbus|sql|"
-                   r"designer|help|uitools|httpserver|protobuf|grpc|sensors|webview|quicktest|"
+                   r"designer|help|uitools|httpserver|protobuf|grpc|sensors|webview|webengine|quicktest|"
                    r"qmldesign|shadertools)", re.I)
 
 
@@ -39,15 +43,10 @@ def _keep(dest):
     name = d.rsplit("/", 1)[-1]
     if "/qml/" in "/" + d or d.startswith("qml/"):
         return False
-    # browser developer tools (QtWebEngine DevTools, ~83 MB) – not used by the program (map only)
-    if name.startswith("qtwebengine_devtools_resources"):
-        return False
     if _DROP.search(name) or re.search(r"/(qt6?)?(3d|quick3d|charts|datavisualization|multimedia|location|"
                                         r"quickcontrols2)[^/]*\.framework/", "/" + d):
         return False
     if "/translations/" in "/" + d and not d.endswith(("_pl.qm", "_en.qm")):
-        if "qtwebengine_locales/" in d:
-            return name in ("pl.pak", "en-us.pak")
         return False
     return True
 

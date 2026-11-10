@@ -85,6 +85,16 @@ Program działa i wygląda tak samo w systemach Windows, macOS i Linux.
 Kolejne kierunki rozwoju – metody inżynierskie dla obciążeń własnych, wspólny format projektu i w dalszej
 perspektywie obliczenia MES – opisano w [ROADMAP.md](ROADMAP.md).
 
+## Licencja i wsparcie
+
+KAYENN jest darmowym oprogramowaniem open source na licencji [MIT](LICENSE); składniki zewnętrzne wymieniono
+w [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Oprogramowanie udostępniane jest „tak jak jest”, bez gwarancji –
+wyniki należy weryfikować z normami.
+
+Chcesz pomóc? Testuj program i [zgłaszaj problemy](../../issues/new/choose); zob. [CONTRIBUTING.md](CONTRIBUTING.md).
+Jeśli uważasz, że projekt jest wart rozwijania, możesz go też wesprzeć materialnie – przycisk **Sponsor**
+w repozytorium.
+
 ---
 
 Informacje dla programistów (uruchamianie ze źródeł, testy, budowanie pakietów): [DEVELOPMENT.md](DEVELOPMENT.md).

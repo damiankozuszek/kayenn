@@ -84,6 +84,16 @@ The program works and looks the same on Windows, macOS and Linux.
 The next development directions – engineering methods for own loads, a common project format and, further on,
 FEM calculations – are described in [ROADMAP.md](ROADMAP.md).
 
+## Licence and support
+
+KAYENN is free and open source software under the [MIT licence](LICENSE); third-party components are listed
+in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The software is provided “as is”, without warranty – the
+results must be verified against the design codes.
+
+Want to help? Test the program and [report problems](../../issues/new/choose); see [CONTRIBUTING.md](CONTRIBUTING.md).
+If you think the project is worth developing, you can also support it financially – use the **Sponsor** button
+of the repository.
+
 ---
 
 Information for developers (running from source, tests, building packages): [DEVELOPMENT.md](DEVELOPMENT.md).
