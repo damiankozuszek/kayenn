@@ -3,8 +3,9 @@
 # file for the user's computer exists).
 # - push a v* tag (e.g. v0.3.0): a draft release is created (text .github/RELEASE_BODY.md), every system builds and
 #   adds its packages to it; when the last one is in, the release is published;
-# - every hour: the systems still missing in the newest draft are built again – GitHub cancels a job that got no
-#   runner (e.g. no free macOS arm64 machine), so the draft simply waits, hour after hour, until it gets one;
+# - scheduled (hourly check; retries hourly for 3 h, then every 6 h): the systems still missing in the newest draft
+#   are built again – GitHub cancels a job that got no runner (e.g. no free macOS arm64 machine), so the draft
+#   simply waits until it gets one (a run with nothing to build succeeds – no failure e-mail);
 # - Actions → „Installation packages” → Run workflow: tag empty – a test build of the branch (artifacts only);
 #   with a tag – the packages of that release (the systems given, else the missing ones).
 # Which release and which systems: .github/release_plan.py.
