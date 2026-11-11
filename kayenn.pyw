@@ -4339,12 +4339,85 @@ class VtkScene:
         if renderer_choice() != "vtk" or cls._failed:
             return None
         if cls._inst is None:
+            if not cls.probe():
+                return None
             try:
                 cls._inst = cls()
             except Exception as e:                   # no VTK, no OpenGL 3.2 (e.g. a virtual machine)
                 cls._failed = str(e) or type(e).__name__
                 return None
         return cls._inst
+
+    PROBE_OK_DAYS, PROBE_FAIL_DAYS = 30, 1
+
+    @classmethod
+    def probe(cls):
+        """Can VTK draw on this computer? Checked in a separate short process (`--vtk-probe`): without a usable
+        OpenGL driver (a virtual machine, a remote desktop, an old driver) VTK can crash the whole process instead of
+        raising an error – the program must not go down with it. The answer is remembered in settings.json
+        (`vtk_probe`: a success for 30 days, a failure is checked again the next day; per VTK version and program)."""
+        import subprocess
+        try:
+            from vtkmodules.vtkCommonCore import vtkVersion
+            ver = vtkVersion.GetVTKVersion()
+        except Exception as e:                       # VTK not installed (running from source without it)
+            cls._failed = f"brak biblioteki VTK ({type(e).__name__})"
+            return False
+        key = f"{ver}|{sys.executable}"
+        c = settings_get("vtk_probe") or {}
+        age = time.time() - float(c.get("t", 0) or 0) if isinstance(c, dict) else 1e12
+        if isinstance(c, dict) and c.get("key") == key and age < (cls.PROBE_OK_DAYS if c.get("ok") else
+                                                                    cls.PROBE_FAIL_DAYS) * 86400:
+            if not c.get("ok"):
+                cls._failed = c.get("why") or "OpenGL 3.2 niedostępny"
+            return bool(c.get("ok"))
+        argv = [sys.executable] + ([] if FROZEN else [os.path.abspath(__file__)]) + ["--vtk-probe"]
+        kw = dict(capture_output=True, timeout=40)
+        if sys.platform == "win32":
+            kw["creationflags"] = 0x08000000           # no console window
+        try:
+            r = subprocess.run(argv, **kw)
+            ok = r.returncode == 0
+            why = "" if ok else f"OpenGL 3.2 niedostępny (test: kod {r.returncode})"
+        except (OSError, subprocess.SubprocessError) as e:
+            ok, why = False, f"test VTK nieudany ({type(e).__name__})"
+        settings_set("vtk_probe", dict(key=key, ok=ok, t=time.time(), why=why))
+        if not ok:
+            cls._failed = why
+        return ok
+
+    @staticmethod
+    def probe_main():
+        """`kayenn --vtk-probe`: a tiny off-screen VTK picture; exit code 0 – VTK works here (else it crashes or
+        returns 3)."""
+        try:
+            import vtkmodules.vtkRenderingOpenGL2          # noqa: F401
+            from vtkmodules.vtkCommonCore import vtkPoints
+            from vtkmodules.vtkCommonDataModel import vtkPolyData, vtkCellArray
+            from vtkmodules.vtkRenderingCore import vtkRenderer, vtkRenderWindow, vtkActor, vtkPolyDataMapper
+            rw = vtkRenderWindow()
+            rw.SetOffScreenRendering(1)
+            rw.SetSize(64, 64)
+            ren = vtkRenderer()
+            ren.SetUseDepthPeeling(1)
+            rw.AddRenderer(ren)
+            pts, cells = vtkPoints(), vtkCellArray()
+            cells.InsertNextCell(3)
+            for q in ((0, 0, 0), (1, 0, 0), (0, 1, 0)):
+                cells.InsertCellPoint(pts.InsertNextPoint(*q))
+            pd = vtkPolyData()
+            pd.SetPoints(pts)
+            pd.SetPolys(cells)
+            mp = vtkPolyDataMapper()
+            mp.SetInputData(pd)
+            act = vtkActor()
+            act.SetMapper(mp)
+            ren.AddActor(act)
+            rw.Render()
+            ok = not hasattr(rw, "SupportsOpenGL") or rw.SupportsOpenGL()
+        except Exception:
+            ok = False
+        os._exit(0 if ok else 3)
 
     @classmethod
     def status(cls):
@@ -17856,6 +17929,8 @@ class _FileOpener(QObject):
 
 
 def main():
+    if "--vtk-probe" in sys.argv:                    # the 3D engine test in a child process (VtkScene.probe)
+        VtkScene.probe_main()
     if sys.platform == "win32":
         try:   # own identifier – the taskbar shows the KAYENN icon instead of the Python one
             import ctypes
