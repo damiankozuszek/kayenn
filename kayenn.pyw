@@ -4316,6 +4316,213 @@ class _Ev:
         self.x, self.y = x, y
 
 
+# ======================================================= 3D drawing on the graphics card (VTK) ===
+# The faces of a 3D scene (building, load layers, ground or terrain) are drawn by VTK (OpenGL, off screen) into an
+# image that Canvas3D paints first; dimensions, labels, arrows and the legend are painted over it by QPainter as
+# before, with exactly the same projection (VTK parallel camera = the program's orthographic view). One shared
+# off-screen window serves every canvas (3D window, card previews, printout). No VTK / no OpenGL 3.2 / switched off
+# (Plik → Opcje, RENDERER BASIC, KAYENN_RENDERER=basic) – Canvas3D draws the faces itself (the basic renderer).
+def renderer_choice():
+    env = (os.environ.get("KAYENN_RENDERER") or "").strip().lower()
+    if env in ("basic", "vtk"):
+        return env
+    return "basic" if settings_get("renderer", "vtk") == "basic" else "vtk"
+
+
+class VtkScene:
+    _inst = None
+    _failed = None                                   # the reason VTK cannot be used (None – not tried / fine)
+
+    @classmethod
+    def get(cls):
+        """The shared VTK renderer, or None (the basic renderer draws the faces)."""
+        if renderer_choice() != "vtk" or cls._failed:
+            return None
+        if cls._inst is None:
+            try:
+                cls._inst = cls()
+            except Exception as e:                   # no VTK, no OpenGL 3.2 (e.g. a virtual machine)
+                cls._failed = str(e) or type(e).__name__
+                return None
+        return cls._inst
+
+    @classmethod
+    def status(cls):
+        """Text for the console / options: which renderer draws the 3D models."""
+        if renderer_choice() != "vtk":
+            return "prosty (bez karty graficznej) – wybrany w opcjach"
+        v = cls.get()
+        if v is None:
+            return f"prosty – VTK niedostępne ({cls._failed})"
+        return f"VTK {v.version} (karta graficzna, OpenGL)"
+
+    def __init__(self):
+        import vtkmodules.vtkRenderingOpenGL2          # noqa: F401 – registers the OpenGL implementation
+        from vtkmodules.vtkCommonCore import vtkVersion
+        from vtkmodules.vtkRenderingCore import vtkRenderer, vtkRenderWindow, vtkLight
+        self.version = vtkVersion.GetVTKVersion()
+        rw = vtkRenderWindow()
+        rw.SetOffScreenRendering(1)
+        rw.SetMultiSamples(0)
+        rw.SetAlphaBitPlanes(1)
+        rw.SetSize(32, 32)
+        ren = vtkRenderer()
+        ren.SetUseDepthPeeling(1)                    # translucent load layers in the right order (no sorting)
+        ren.SetMaximumNumberOfPeels(10)
+        ren.SetOcclusionRatio(0.0)
+        ren.SetUseFXAA(True)                         # smooth edges
+        ren.AutomaticLightCreationOff()
+        for pos, inten in (((-0.55, -0.85, 1.0), 0.62), ((0.7, 0.4, 0.6), 0.22)):   # key and fill light (world)
+            lt = vtkLight()
+            lt.SetLightTypeToSceneLight()
+            lt.SetPositional(False)
+            lt.SetPosition(*pos)
+            lt.SetFocalPoint(0, 0, 0)
+            lt.SetIntensity(inten)
+            ren.AddLight(lt)
+        head = vtkLight()
+        head.SetLightTypeToHeadlight()
+        head.SetIntensity(0.28)
+        ren.AddLight(head)
+        rw.AddRenderer(ren)
+        rw.Render()
+        if hasattr(rw, "SupportsOpenGL") and not rw.SupportsOpenGL():
+            raise RuntimeError("OpenGL 3.2 niedostępny")
+        self.rw, self.ren = rw, ren
+        self._actors = []
+
+    @staticmethod
+    def _rgb(c):
+        c = QColor(c or "#cccccc")
+        return c.red(), c.green(), c.blue()
+
+    def _build(self, polys, edges):
+        """polys: [(points3d, fill, alpha 0–255 or None, lit)], edges: [(a3d, b3d, color, width)] → actors.
+        No normals are given: VTK takes the face normal on the viewer's side (flat shading), so every visible face
+        is lit the same way whatever the order of its points. Unlit faces (the flat ground) keep their colour."""
+        from vtkmodules.vtkCommonCore import vtkPoints, vtkUnsignedCharArray
+        from vtkmodules.vtkCommonDataModel import vtkPolyData, vtkCellArray
+        from vtkmodules.vtkRenderingCore import vtkActor, vtkPolyDataMapper
+        out = []
+        for want_opaque, want_lit in ((True, False), (True, True), (False, True)):
+            pts, cells = vtkPoints(), vtkCellArray()
+            cols = vtkUnsignedCharArray()
+            cols.SetNumberOfComponents(4)
+            cols.SetName("rgba")
+            n_ = 0
+            for P, fill, alpha, lit in polys:
+                a = 255 if alpha is None else int(alpha)
+                if (a >= 255) != want_opaque or (want_opaque and bool(lit) != want_lit) or len(P) < 3:
+                    continue
+                cells.InsertNextCell(len(P))
+                for q in P:
+                    cells.InsertCellPoint(pts.InsertNextPoint(*q))
+                r, g, b = self._rgb(fill)
+                cols.InsertNextTuple4(r, g, b, a)
+                n_ += 1
+            if not n_:
+                continue
+            pd = vtkPolyData()
+            pd.SetPoints(pts)
+            pd.SetPolys(cells)
+            pd.GetCellData().SetScalars(cols)
+            mp = vtkPolyDataMapper()
+            mp.SetInputData(pd)
+            mp.SetScalarModeToUseCellData()
+            mp.SetColorModeToDirectScalars()
+            mp.SetResolveCoincidentTopologyToPolygonOffset()
+            mp.SetRelativeCoincidentTopologyPolygonOffsetParameters(1.0, 1.0)
+            act = vtkActor()
+            act.SetMapper(mp)
+            pr = act.GetProperty()
+            pr.SetInterpolationToFlat()
+            if not want_lit:
+                pr.LightingOff()
+            else:
+                pr.SetAmbient(0.55 if want_opaque else 0.62)
+                pr.SetDiffuse(0.55 if want_opaque else 0.45)
+                pr.SetSpecular(0.0 if want_opaque else 0.12)
+                pr.SetSpecularPower(18)
+            pr.BackfaceCullingOff()
+            out.append(act)
+        by_w = {}
+        for a3, b3, col, w in edges:
+            by_w.setdefault(float(w), []).append((a3, b3, col))
+        for w, segs in by_w.items():
+            pts, cells = vtkPoints(), vtkCellArray()
+            cols = vtkUnsignedCharArray()
+            cols.SetNumberOfComponents(3)
+            for a3, b3, col in segs:
+                cells.InsertNextCell(2)
+                cells.InsertCellPoint(pts.InsertNextPoint(*a3))
+                cells.InsertCellPoint(pts.InsertNextPoint(*b3))
+                cols.InsertNextTuple3(*self._rgb(col))
+            pd = vtkPolyData()
+            pd.SetPoints(pts)
+            pd.SetLines(cells)
+            pd.GetCellData().SetScalars(cols)
+            mp = vtkPolyDataMapper()
+            mp.SetInputData(pd)
+            mp.SetScalarModeToUseCellData()
+            mp.SetColorModeToDirectScalars()
+            act = vtkActor()
+            act.SetMapper(mp)
+            pr = act.GetProperty()
+            pr.SetLineWidth(w)
+            pr.LightingOff()
+            out.append(act)
+        return out
+
+    def image(self, scene, w, h, dpr=1.0):
+        """QImage w×h (logical px, painted at dpr) of the scene: dict(polys, edges, proj, bg)."""
+        from PySide6.QtGui import QImage
+        from vtkmodules.vtkRenderingCore import vtkWindowToImageFilter
+        W, H = max(int(round(w * dpr)), 8), max(int(round(h * dpr)), 8)
+        ren, rw = self.ren, self.rw
+        for a in self._actors:
+            ren.RemoveActor(a)
+        edges = [(a3, b3, col, wd * dpr) for a3, b3, col, wd in scene["edges"]]
+        self._actors = self._build(scene["polys"], edges)
+        for a in self._actors:
+            ren.AddActor(a)
+        bg = QColor(scene.get("bg") or "#fbfbfc")
+        ren.SetBackground(bg.redF(), bg.greenF(), bg.blueF())
+        ren.SetBackgroundAlpha(1.0)
+        # the camera = the program's view: P(p) → (ox + xr·sc, oy − (z·cp + yr·sp)·sc), depth yr·cp − z·sp
+        ctr, sc, cy, sy, cp, sp, ox, oy, PW, PH = scene["proj"]
+        R = (cy, -sy, 0.0)
+        U = (sy * sp, cy * sp, cp)
+        D = (sy * cp, cy * cp, -sp)
+        cx_, cy_ = PW / 2.0, PH / 2.0
+        a_ = (cx_ - ox) / sc
+        b_ = (oy - cy_) / sc
+        f = tuple(ctr[i] + R[i] * a_ + U[i] * b_ for i in range(3))
+        cam = ren.GetActiveCamera()
+        cam.ParallelProjectionOn()
+        dist = 1000.0
+        cam.SetFocalPoint(*f)
+        cam.SetPosition(*(f[i] - D[i] * dist for i in range(3)))
+        cam.SetViewUp(*U)
+        cam.SetParallelScale(PH / 2.0 / sc)
+        ren.ResetCameraClippingRange()
+        rw.SetSize(W, H)
+        rw.Render()
+        wi = vtkWindowToImageFilter()
+        wi.SetInput(rw)
+        wi.SetInputBufferTypeToRGB()
+        wi.ReadFrontBufferOff()
+        wi.ShouldRerenderOff()
+        wi.Update()
+        img = wi.GetOutput()
+        arr = img.GetPointData().GetScalars()
+        nx, ny, _ = img.GetDimensions()
+        data = bytes(memoryview(arr))
+        q = QImage(data, nx, ny, nx * 3, QImage.Format.Format_RGB888)
+        q = (q.flipped(Qt.Orientation.Vertical) if hasattr(q, "flipped") else q.mirrored(False, True)).copy()
+        q.setDevicePixelRatio(dpr)
+        return q
+
+
 class Canvas3D(QWidget):
     """List of drawing items (polygons, lines, texts…) painted with QPainter.
     The create_* / bbox / delete / tag_raise methods follow tk.Canvas."""
@@ -4385,6 +4592,12 @@ class Canvas3D(QWidget):
 
     def create_oval(self, x0, y0, x1, y1, fill="", outline="#000000", width=1, **kw):
         return self._add(dict(k="oval", box=(x0, y0, x1, y1), fill=fill, outline=outline, width=width))
+
+    def create_scene3d(self, scene):
+        """The faces of the 3D scene drawn by VTK (`VtkScene`) – painted where this item stands in the order (the
+        items added after it are painted over it). scene["flat"] – the same faces projected, painted by QPainter
+        when VTK fails."""
+        return self._add(dict(k="scene3d", scene=scene, img=None, key=None))
 
     def create_text(self, x, y, text="", font=(FONT, 9), fill="#000000", anchor="center", justify="center", **kw):
         fm = _METRICS.get(tuple(font))
@@ -4467,6 +4680,9 @@ class Canvas3D(QWidget):
         for iid in self.order:
             it = self.items[iid]
             k = it["k"]
+            if k == "scene3d":
+                self._paint_scene3d(p, it)
+                continue
             if k == "poly":
                 br = self._brush(it["fill"])
                 if it.get("alpha") is not None and it["fill"]:
@@ -4512,6 +4728,41 @@ class Canvas3D(QWidget):
         p.setBrush(QBrush(Qt.BrushStyle.NoBrush))
         p.drawRect(QRectF(0.5, 0.5, self.width() - 1, self.height() - 1))
         p.end()
+
+    def _paint_scene3d(self, p, it):
+        dpr = p.device().devicePixelRatioF() if p.device() is not None else 1.0
+        key = (self.width(), self.height(), round(dpr, 3))
+        if it["key"] != key:
+            it["key"], it["img"] = key, None
+            v = VtkScene.get()
+            if v is not None:
+                try:
+                    it["img"] = v.image(it["scene"], self.width(), self.height(), dpr)
+                except Exception as e:               # the driver failed – the basic renderer from now on
+                    VtkScene._failed = str(e) or type(e).__name__
+        if it["img"] is not None:
+            p.drawImage(QRectF(0, 0, self.width(), self.height()), it["img"])
+            return
+        for pts, fill, outline, alpha, edges, width in it["scene"]["flat"]:
+            fake = dict(fill=fill, outline=outline, alpha=alpha, edges=edges, width=width, pts=pts)
+            br = self._brush(fill)
+            if alpha is not None and fill:
+                c = QColor(fill)
+                c.setAlpha(int(alpha))
+                br = QBrush(c)
+            p.setBrush(br)
+            qp = [QPointF(x, y) for x, y in pts]
+            if edges is None:
+                p.setPen(self._pen(outline, width))
+                p.drawPolygon(QPolygonF(qp))
+            else:
+                p.setPen(self._pen("", 1))
+                p.drawPolygon(QPolygonF(qp))
+                p.setPen(self._pen(outline, width))
+                for i_, on in enumerate(edges):
+                    if on:
+                        p.drawPolyline(QPolygonF([qp[i_], qp[(i_ + 1) % len(qp)]]))
+            del fake
 
     def _paint_line(self, p, it):
         pts = list(it["pts"])
@@ -11707,7 +11958,7 @@ class OptionsDialog(QDialog):
         super().__init__(parent)
         self.app = app
         self.setWindowTitle("Opcje")
-        self.resize(560, 300)
+        self.resize(560, 380)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(16, 14, 16, 14)
         lay.setSpacing(8)
@@ -11734,6 +11985,17 @@ class OptionsDialog(QDialog):
         self.msg.setObjectName("muted")
         self.msg.setWordWrap(True)
         lay.addWidget(self.msg)
+        t3 = QLabel("Model 3D")
+        t3.setObjectName("cardTitle")
+        lay.addWidget(t3)
+        self.ck_vtk = QCheckBox("Rysuj modele 3D kartą graficzną (VTK)")
+        self.ck_vtk.setChecked(renderer_choice() == "vtk")
+        self.ck_vtk.toggled.connect(lambda on: self.set_renderer("vtk" if on else "basic"))
+        lay.addWidget(self.ck_vtk)
+        self.r_status = QLabel("Silnik: " + VtkScene.status())
+        self.r_status.setObjectName("muted")
+        self.r_status.setWordWrap(True)
+        lay.addWidget(self.r_status)
         lay.addStretch(1)
         hb = QHBoxLayout()
         hb.addStretch(1)
@@ -11741,6 +12003,11 @@ class OptionsDialog(QDialog):
         b.clicked.connect(lambda checked=False: self.close())
         hb.addWidget(b)
         lay.addLayout(hb)
+
+    def set_renderer(self, which):
+        self.app.echo("RENDERER " + which.upper())
+        self.app.set_renderer(which)
+        self.r_status.setText("Silnik: " + VtkScene.status())
 
     def edit(self):
         p = SHORTCUTS.edit()
@@ -12098,6 +12365,17 @@ def _c_language(app, a):
         raise CmdError("Język: EN albo PL.")
     app.set_language(code)
     return f"Język interfejsu: {names[code]} ({code.upper()})."
+
+
+@command("RENDERER", "[VTK|BASIC]", "Silnik rysowania modeli 3D: VTK (karta graficzna) albo prosty (bez karty "
+         "graficznej); bez argumentu – bieżący.", group="Konsola i opcje")
+def _c_renderer(app, a):
+    if a:
+        w = cmd_name(a[0])
+        if w not in ("VTK", "BASIC"):
+            raise CmdError("Silnik: VTK albo BASIC.")
+        app.set_renderer(w.lower())
+    return "Silnik modeli 3D: " + VtkScene.status()
 
 
 @command("ASSUMPTIONS", "", "Okno „Założenia do obliczeń”.", group="Konsola i opcje")
@@ -12745,6 +13023,7 @@ _ask_params("CONSOLE", ("Opcja [ON/OFF/LINES/TIME] (Enter – przełącz okno ko
              lambda a: cmd_name(a[0]) in ("LINES", "TIME")))
 _ask_params("SHORTCUTSRESET", ("Zastąpić plik skrótów domyślnym? [YES]:", True, "one"))
 _ask_params("LANGUAGE", ("Język [EN/PL] (Enter – pokaż bieżący):", False, "one"))
+_ask_params("RENDERER", ("Silnik [VTK/BASIC] (Enter – pokaż bieżący):", False, "one"))
 _ask_params("UPDATES", ("Opcja [AUTO/INSTALL] (Enter – sprawdź teraz):", False, "one"),
             ("Sprawdzanie przy starcie [ON/OFF]:", True, "one"))
 _ask_params("OPEN", ("Plik projektu (Enter – okno wyboru pliku):", False, "one"))
@@ -13583,6 +13862,14 @@ class App:
         if changed:
             host._lang_refresh()
         return changed
+
+    def set_renderer(self, which):
+        """The 3D engine (Plik → Opcje, RENDERER): VTK on the graphics card or the basic one; every 3D view is
+        drawn again at once."""
+        settings_set("renderer", "basic" if which == "basic" else "vtk")
+        if which != "basic":
+            VtkScene._failed = None                  # try again (e.g. a driver updated)
+        self.host._lang_refresh()
 
     def _lang_refresh(self):
         """After a language change: what is built from texts at drawing time (titles, 3D models, card previews,
@@ -16523,21 +16810,46 @@ class App:
         m = (0.8 if mode == "wiatr" else 0.5) * size
         gr = [(x0 - m, y0 - m, 0), (x1 + m, y0 - m, 0), (x1 + m, y1 + m, 0), (x0 - m, y1 + m, 0)]
         cv._proj_ground = (x0 - m, x1 + m, y0 - m, y1 + m)
-        if terr:
+        # VTK (the graphics card) draws the ground / terrain and the faces; everything after is painted over it
+        sc3 = dict(polys=[], edges=[], flat=[], proj=cv._proj, bg=Canvas3D.BG_COL) if VtkScene.get() else None
+        if sc3 is not None:
+            cv.create_scene3d(sc3)
+        if terr and sc3 is not None:
+            for q in terr["quads"]:
+                sc3["polys"].append((q["poly"], q["fill"], None, True))
+                if q.get("outline"):
+                    Q = q["poly"]
+                    sc3["edges"].extend((Q[i], Q[(i + 1) % len(Q)], q["outline"], 1) for i in range(len(Q)))
+            for e in terr["edges"]:
+                sc3["edges"].extend((e[i], e[i + 1], "#7c8470", 1.5) for i in range(len(e) - 1))
+            items_ = sorted(((sum(P(p)[2] for p in q["poly"]) / 4, q) for q in terr["quads"]), key=lambda x: -x[0])
+            sc3["flat"].extend(([P(p)[:2] for p in q["poly"]], q["fill"], q["outline"], None, None, 1)
+                               for _, q in items_)
+        elif terr:
             self._draw_terrain(cv, P, terr)
         else:
-            cv.create_polygon(*[c for p in gr for c in P(p)[:2]], fill="#eef0ec", outline="#d4d8d0")
+            if sc3 is not None:
+                sc3["polys"].append((gr, "#eef0ec", None, False))                 # flat ground: unlit
+                sc3["edges"].extend((gr[i], gr[(i + 1) % 4], "#d4d8d0", 1) for i in range(4))
+                sc3["flat"].append(([P(p)[:2] for p in gr], "#eef0ec", "#d4d8d0", None, None, 1))
+            else:
+                cv.create_polygon(*[c for p in gr for c in P(p)[:2]], fill="#eef0ec", outline="#d4d8d0")
             step = 10 ** math.floor(math.log10(size / 2 if size > 2 else 1))
+            grid = []
             k = math.ceil((x0 - m) / step)
             while k * step <= x1 + m:
-                a, b = P((k * step, y0 - m, 0)), P((k * step, y1 + m, 0))
-                cv.create_line(a[0], a[1], b[0], b[1], fill="#e2e5df")
+                grid.append(((k * step, y0 - m, 0), (k * step, y1 + m, 0)))
                 k += 1
             k = math.ceil((y0 - m) / step)
             while k * step <= y1 + m:
-                a, b = P((x0 - m, k * step, 0)), P((x1 + m, k * step, 0))
-                cv.create_line(a[0], a[1], b[0], b[1], fill="#e2e5df")
+                grid.append(((x0 - m, k * step, 0), (x1 + m, k * step, 0)))
                 k += 1
+            for a3, b3 in grid:
+                if sc3 is not None:
+                    sc3["edges"].append((a3, b3, "#e2e5df", 1))
+                else:
+                    a, b = P(a3), P(b3)
+                    cv.create_line(a[0], a[1], b[0], b[1], fill="#e2e5df")
         fnt = (FONT, 9)
         self._placed = []                                # occupied label rectangles (labels, dimensions)
         self._defer_angles = None
@@ -16577,8 +16889,17 @@ class App:
             drawn.append((sum(p[2] for p in pr) / len(pr), f_, pr))
         drawn = depth_sort(drawn)
         for depth, f_, pr in drawn:
-            cv.create_polygon(*[c for p in pr for c in p[:2]], fill=f_["fill"], outline=f_["outline"], width=1,
-                              alpha=f_.get("alpha"), edges=f_.get("edges"))
+            if sc3 is None:
+                cv.create_polygon(*[c for p in pr for c in p[:2]], fill=f_["fill"], outline=f_["outline"], width=1,
+                                  alpha=f_.get("alpha"), edges=f_.get("edges"))
+                continue
+            Q = f_["poly"]
+            sc3["polys"].append((Q, f_["fill"], f_.get("alpha"), True))
+            if f_.get("outline"):
+                ed = f_.get("edges") or [True] * len(Q)
+                sc3["edges"].extend((Q[i], Q[(i + 1) % len(Q)], f_["outline"], 1)
+                                    for i, on in enumerate(ed) if on)
+            sc3["flat"].append(([p[:2] for p in pr], f_["fill"], f_["outline"], f_.get("alpha"), f_.get("edges"), 1))
         for a3, b3, col, wdt in lines:
             a, b = P(a3), P(b3)
             cv.create_line(a[0], a[1], b[0], b[1], fill=col, width=wdt)
@@ -17602,6 +17923,10 @@ def _autotest(app, qapp):
     except Exception as e:
         info["tls"] = repr(e)
     ok = ok and info["map"] is True and info["tls"] is True
+    try:                                             # the 3D engine (VTK on the graphics card, else the basic one;
+        info["renderer"] = VtkScene.status()          # CI machines without a GPU – the basic one, not an error)
+    except Exception as e:
+        info["renderer"] = repr(e)
     if d:
         os.makedirs(d, exist_ok=True)
 

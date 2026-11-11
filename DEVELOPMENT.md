@@ -10,15 +10,25 @@ tests looks for Polish texts left in the English interface. The material databas
 
 ## Running from source
 
-Python 3 and PySide6 are required:
+Python 3 and PySide6 are required; VTK draws the 3D models on the graphics card:
 
 ```
-py -m pip install PySide6
+py -m pip install PySide6 vtk
 py kayenn.pyw
 ```
 
 On Windows a double-click on `kayenn.pyw` is enough (macOS / Linux: `python3 kayenn.pyw`). When
-PySide6 is missing, the program offers to install it on the first start.
+PySide6 is missing, the program offers to install it on the first start. Without VTK (or without OpenGL 3.2, e.g. in
+a virtual machine) the models are drawn by the basic renderer – the program works the same.
+
+## 3D models
+
+`Canvas3D` paints a list of items with QPainter. The faces of a scene (ground or terrain, building, load layers)
+go into one `scene3d` item that `VtkScene` renders with VTK off screen (parallel camera = the program's projection,
+lighting, depth peeling for the translucent layers) – one shared off-screen window for the 3D window, the card
+previews and the printout. Dimensions, labels, arrows and the legend are painted over it, as before. The engine is
+chosen in Plik → Opcje (the console: `RENDERER VTK|BASIC`, the environment: `KAYENN_RENDERER=basic`); when VTK fails
+the same faces are painted by QPainter. VTK is the base of the future FEM module (meshes, result maps).
 
 ## Checks
 

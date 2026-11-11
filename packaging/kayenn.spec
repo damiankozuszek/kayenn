@@ -22,8 +22,11 @@ a = Analysis(
     [os.path.join(ROOT, "kayenn.pyw")],
     pathex=[ROOT],
     datas=datas,
-    hiddenimports=["PySide6.QtSvg", "PySide6.QtPrintSupport", "PySide6.QtNetwork"],
-    excludes=["tkinter", "PySide6.Qt3DCore", "PySide6.Qt3DRender", "PySide6.QtBluetooth", "PySide6.QtCharts",
+    hiddenimports=["PySide6.QtSvg", "PySide6.QtPrintSupport", "PySide6.QtNetwork",
+                   # 3D models on the graphics card (VtkScene): only the modules the program imports
+                   "vtkmodules.vtkCommonCore", "vtkmodules.vtkCommonDataModel", "vtkmodules.vtkRenderingCore",
+                   "vtkmodules.vtkRenderingOpenGL2", "vtkmodules.vtkRenderingUI"],
+    excludes=["tkinter", "matplotlib", "PySide6.Qt3DCore", "PySide6.Qt3DRender", "PySide6.QtBluetooth", "PySide6.QtCharts",
               "PySide6.QtDataVisualization", "PySide6.QtGraphs", "PySide6.QtMultimedia", "PySide6.QtNfc",
               "PySide6.QtSensors", "PySide6.QtSerialPort", "PySide6.QtSql", "PySide6.QtTest",
               "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineQuick",
