@@ -14,8 +14,7 @@
 >
 > ⚠️ Please report any error you find in [Issues](../../issues) – it is the fastest way to get it fixed. ⚠️
 
-**KAYENN** is a program for structural engineers for determining building loads. The name comes from **kN** –
-the kilonewton, the unit loads are calculated in (read in English: “kay-en”).
+**KAYENN** is a program for structural engineers for determining building loads.
 
 You work on a **project**: you add load cases – snow, wind, imposed loads, self-weight – and the program collects
 them in one list, with drawings, calculations and a printout. KAYENN is intended to grow into a complete

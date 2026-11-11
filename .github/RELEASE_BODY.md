@@ -1,51 +1,49 @@
-# KAYENN 0.1.0 – pierwsza wersja dla społeczności
+# KAYENN 0.1.0 – the first community release
 
-To pierwsza wersja KAYENN nadająca się do udostępnienia społeczności. KAYENN to program dla inżynierów
-konstrukcji do wyznaczania obciążeń budynków (od **kN** – kiloniutona, czytaj „kej-en”), udostępniony na
-licencji open source **MIT**.
+This is the first version of KAYENN ready to be shared with the community. KAYENN is a program for structural
+engineers for determining building loads, released under the open source **MIT** licence.
 
-## Co potrafi
+## What it does
 
-- **Obciążenia normowe:** śnieg (PN-EN 1991-1-3 + NA), wiatr (PN-EN 1991-1-4 + NA), obciążenia użytkowe
-  (PN-EN 1991-1-1), z mapą stref i modelem 3D z rozkładem obciążeń.
-- **Obciążenia własne** z bazą materiałów (załącznik A PN-EN 1991-1-1, ponad dwa tysiące kształtowników stalowych).
-- **Projekt** w jednym pliku `.kayenn`: przypadki, grupy, cofnij / ponów, wydruk z podglądem, konsola poleceń.
-- Windows, macOS i Linux. Interfejs w języku polskim.
+- **Code loads:** snow (PN-EN 1991-1-3 + NA), wind (PN-EN 1991-1-4 + NA), imposed loads (PN-EN 1991-1-1),
+  with a zone map and a 3D model showing the load distribution.
+- **Own loads** with a material database (Annex A of PN-EN 1991-1-1, over two thousand steel sections).
+- **A project** in a single `.kayenn` file: load cases, groups, undo / redo, printout with preview, command console.
+- Windows, macOS and Linux. The user interface is in Polish; the calculations follow the Polish National Annexes.
 
-## Wersja do testowania – potrzebna Twoja pomoc
+## A testing release – your help is needed
 
-Wiele błędów zostało już wyeliminowanych, ale **jedna osoba nie jest w stanie wyłapać wszystkiego**. Dlatego
-proszę społeczność o udział w udoskonalaniu projektu: **testowanie programu i zgłaszanie problemów**
-w [Issues](https://github.com/damiankozuszek/kayenn/issues/new/choose). Szczególnie cenne są zgłoszenia
-błędnych wyników obliczeń (z podaniem punktu normy), awarii i niejasnej obsługi.
+Many bugs have already been fixed, but **one person cannot catch everything**. That is why I am asking the
+community to help improve the project: **test the program and report problems**
+in [Issues](https://github.com/damiankozuszek/kayenn/issues/new/choose). Reports of wrong calculation results
+(with the clause of the code), crashes and unclear behaviour are especially valuable.
 
 > [!WARNING]
-> Program jest pomocniczym narzędziem. Wszystkie obciążenia są **wartościami charakterystycznymi**, a wyniki
-> należy zweryfikować z normą – odpowiedzialność za projekt spoczywa na projektancie. Oprogramowanie jest
-> udostępniane „tak jak jest”, bez gwarancji (zob. [LICENSE](https://github.com/damiankozuszek/kayenn/blob/main/LICENSE)).
+> The program is an auxiliary tool. All loads are **characteristic values**, and the results must be verified
+> against the code – the responsibility for the design rests with the designer. The software is provided
+> “as is”, without warranty (see [LICENSE](https://github.com/damiankozuszek/kayenn/blob/main/LICENSE)).
 
-## Pobieranie
+## Download
 
-| System | Plik |
+| System | File |
 |---|---|
-| Windows 10 / 11 | `KAYENN-0.1.0-windows-x64-setup.exe` (instalator) lub `…-windows-x64.zip` (wersja przenośna) |
-| macOS 12+ | `KAYENN-0.1.0-macos-arm64.dmg` (Apple Silicon) lub `…-macos-x64.dmg` (Intel) |
-| Linux | `kayenn_0.1.0_amd64.deb` lub `KAYENN-0.1.0-linux-x86_64.tar.gz` |
+| Windows 10 / 11 | `KAYENN-0.1.0-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
+| macOS 12+ | `KAYENN-0.1.0-macos-arm64.dmg` (Apple Silicon) or `…-macos-x64.dmg` (Intel) |
+| Linux | `kayenn_0.1.0_amd64.deb` or `KAYENN-0.1.0-linux-x86_64.tar.gz` |
 
-Program nie jest jeszcze podpisany cyfrowo – przy pierwszym uruchomieniu system może ostrzec o nieznanym
-wydawcy (Windows: „Więcej informacji” → „Uruchom mimo to”; macOS: prawy przycisk → „Otwórz”).
+The program is not digitally signed yet – on the first start the system may warn about an unknown publisher
+(Windows: “More info” → “Run anyway”; macOS: right click → “Open”).
 
-## Licencja
+## Licence
 
-[MIT](https://github.com/damiankozuszek/kayenn/blob/main/LICENSE). Składniki zewnętrzne (Qt/PySide6, czcionki
-Noto, dane OpenStreetMap) – zob. [THIRD_PARTY_NOTICES.md](https://github.com/damiankozuszek/kayenn/blob/main/THIRD_PARTY_NOTICES.md).
-Chcesz pomóc w kodzie? [CONTRIBUTING.md](https://github.com/damiankozuszek/kayenn/blob/main/CONTRIBUTING.md).
+[MIT](https://github.com/damiankozuszek/kayenn/blob/main/LICENSE). Third-party components (Qt/PySide6, Noto
+fonts, OpenStreetMap data) – see [THIRD_PARTY_NOTICES.md](https://github.com/damiankozuszek/kayenn/blob/main/THIRD_PARTY_NOTICES.md).
+Want to help with the code? See [CONTRIBUTING.md](https://github.com/damiankozuszek/kayenn/blob/main/CONTRIBUTING.md).
 
 ---
 
-Jeśli uważasz, że ten projekt jest wart rozwijania i chcesz by stał się czymś naprawdę dobrym to możesz go wesprzeć materialnie.
+If you think this project is worth developing and you would like it to become something really good, you can
+support it financially.
 
 - ❤️ [GitHub Sponsors](https://github.com/sponsors/damiankozuszek)
-- ☕ [Buy Me a Coffee](https://buymeacoffee.com/damiankozuszek)
-- 🎗️ [Ko-fi](https://ko-fi.com/damiankozuszek)
-- 💳 [PayPal](https://www.paypal.me/damiankozuszek)
+- ☕ [Buy Me a Coffee](https://buymeacoffee.com/damiankozu1)

@@ -1,6 +1,6 @@
 # KAYENN – roadmap
 
-Development directions of KAYENN (from kN – the kilonewton, read in English “kay-en”), ordered from tasks
+Development directions of KAYENN, ordered from tasks
 that can be done soon to long-term plans. The order of the stages is not fixed – tasks may be worked on
 in parallel.
 

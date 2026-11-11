@@ -13,8 +13,7 @@
 >
 > ⚠️ Znalezione błędy zgłaszaj w [Issues](../../issues) – to najszybszy sposób na ich poprawienie. ⚠️
 
-**KAYENN** to program dla konstruktorów do wyznaczania obciążeń budynków. Nazwa pochodzi od **kN** –
-kiloniutona, jednostki, w której liczone są obciążenia (po angielsku czytane „kay-en”).
+**KAYENN** to program dla konstruktorów do wyznaczania obciążeń budynków.
 
 Pracujesz na **projekcie**: dodajesz przypadki obciążeń – śnieg, wiatr, obciążenia użytkowe, ciężar własny – a program
 zbiera je na jednej liście, z rysunkami, obliczeniami i wydrukiem. KAYENN ma w przyszłości stać się kompletnym

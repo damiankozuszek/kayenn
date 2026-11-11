@@ -1,192 +1,154 @@
 <!doctype html>
-<html lang="pl">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>KAYENN – obciążenia budynków dla inżynierów konstrukcji</title>
-<meta name="description" content="KAYENN – darmowy program open source do wyznaczania obciążeń budynków: śnieg, wiatr, obciążenia użytkowe i własne wg PN-EN, z modelem 3D. Windows, macOS, Linux.">
-<link rel="icon" type="image/png" href="img/favicon.png">
-<meta property="og:title" content="KAYENN – obciążenia budynków dla inżynierów konstrukcji">
-<meta property="og:description" content="Darmowy program open source: śnieg, wiatr, obciążenia użytkowe i własne wg PN-EN, z modelem 3D.">
+<meta name="color-scheme" content="light dark">
+<script>
+// A visitor who chose Polish before gets the Polish page (the choice is made with the PL / EN link).
+try { if (localStorage.getItem("kayenn-lang") === "pl") location.replace("/pl/"); } catch (e) {}
+</script>
+<title>KAYENN – building loads for structural engineers</title>
+<meta name="description" content="KAYENN – a free, open source program for building loads: snow, wind, imposed and own loads to PN-EN (Eurocodes with the Polish National Annexes), with a 3D model. Windows, macOS, Linux.">
+<link rel="icon" type="image/png" href="/img/favicon.png">
+<link rel="stylesheet" href="/style.css">
+<link rel="alternate" hreflang="en" href="https://kayenn.org/">
+<link rel="alternate" hreflang="pl" href="https://kayenn.org/pl/">
+<link rel="alternate" hreflang="x-default" href="https://kayenn.org/">
+<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1218" media="(prefers-color-scheme: dark)">
+<meta property="og:title" content="KAYENN – building loads for structural engineers">
+<meta property="og:description" content="A free, open source program: snow, wind, imposed and own loads to PN-EN, with a 3D model.">
 <meta property="og:image" content="https://kayenn.org/img/wiatr-3d.png">
 <meta property="og:url" content="https://kayenn.org/">
-<style>
-:root{
-  --bg:#f6f7f9; --card:#fff; --text:#1f2937; --muted:#5b6472; --line:#e3e6eb;
-  --accent:#2563eb; --accent-d:#1d4ed8; --accent-soft:#e8effd;
-}
-@media (prefers-color-scheme:dark){
-  :root{--bg:#0f1218; --card:#171c25; --text:#e6e9ef; --muted:#9aa4b2; --line:#262d39;
-        --accent:#6b9bff; --accent-d:#8fb2ff; --accent-soft:#1b2640}
-  .wordmark{filter:invert(1) hue-rotate(180deg)}
-}
-*{box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{margin:0;background:var(--bg);color:var(--text);
-  font:17px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif}
-a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
-.wrap{max-width:1040px;margin:0 auto;padding:0 20px}
-header.top{display:flex;align-items:center;justify-content:space-between;padding:18px 0}
-header.top nav a{margin-left:22px;color:var(--muted);font-size:15px}
-header.top nav a:hover{color:var(--accent)}
-.wordmark{height:26px;display:block}
-.hero{padding:56px 0 40px;text-align:center}
-.hero h1{font-size:clamp(28px,5vw,46px);line-height:1.15;margin:0 0 16px;letter-spacing:-.02em}
-.hero p.lead{font-size:clamp(17px,2.2vw,21px);color:var(--muted);max-width:720px;margin:0 auto 28px}
-.btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
-.btn{display:inline-block;padding:12px 24px;border-radius:8px;font-weight:600;font-size:16px;
-  border:1px solid var(--accent);background:var(--accent);color:#fff}
-.btn:hover{background:var(--accent-d);text-decoration:none}
-.btn.ghost{background:transparent;color:var(--accent)}
-.btn.ghost:hover{background:var(--accent-soft)}
-.sub{font-size:14px;color:var(--muted);margin-top:14px}
-.shot{margin:44px auto 0;max-width:860px;background:var(--card);border:1px solid var(--line);
-  border-radius:12px;padding:10px;box-shadow:0 10px 40px rgba(20,30,60,.10)}
-.shot img{width:100%;height:auto;display:block;border-radius:6px}
-section{padding:56px 0}
-section h2{font-size:clamp(24px,3.5vw,32px);margin:0 0 8px;letter-spacing:-.01em}
-section .intro{color:var(--muted);margin:0 0 28px;max-width:720px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px}
-.card h3{margin:0 0 6px;font-size:18px}
-.card p{margin:0;color:var(--muted);font-size:15.5px}
-.split{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:center}
-.split img{width:100%;height:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
-.split ul{padding-left:20px;margin:10px 0 0} .split li{margin:6px 0}
-@media(max-width:760px){.split{grid-template-columns:1fr}.split.rev img{order:-1}header.top nav a{margin-left:14px}}
-table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);
-  border-radius:12px;overflow:hidden;font-size:15.5px}
-th,td{text-align:left;padding:12px 16px;border-bottom:1px solid var(--line)}
-tr:last-child td{border-bottom:0} th{background:var(--accent-soft);font-weight:600}
-.note{background:var(--accent-soft);border-left:4px solid var(--accent);padding:14px 18px;
-  border-radius:6px;font-size:15.5px;margin-top:22px}
-.help{text-align:center;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:40px 24px}
-.help p{max-width:640px;margin:0 auto 22px;color:var(--muted)}
-footer{padding:36px 0 48px;color:var(--muted);font-size:14.5px;text-align:center;border-top:1px solid var(--line)}
-footer a{color:var(--muted);text-decoration:underline}
-</style>
+<meta property="og:locale" content="en_GB">
+<meta property="og:locale:alternate" content="pl_PL">
 </head>
 <body>
 <div class="wrap">
   <header class="top">
-    <a href="/" aria-label="KAYENN"><img class="wordmark" src="img/kayenn_wordmark.svg" alt="KAYENN"></a>
+    <a href="/" aria-label="KAYENN"><img class="wordmark" src="/img/kayenn_wordmark.svg" width="153" height="26" alt="KAYENN"></a>
     <nav>
-      <a href="#mozliwosci">Możliwości</a>
-      <a href="#pobierz">Pobierz</a>
-      <a href="#pomoc">Pomóż</a>
+      <a href="#features">Features</a>
+      <a href="#download">Download</a>
+      <a href="#help">Help</a>
       <a href="https://github.com/damiankozuszek/kayenn">GitHub</a>
+      <a class="lang" href="/pl/" hreflang="pl" lang="pl" data-lang="pl" title="Polski">PL</a>
     </nav>
   </header>
 
   <div class="hero">
-    <h1>Obciążenia budynków<br>dla inżynierów konstrukcji</h1>
-    <p class="lead">Śnieg, wiatr, obciążenia użytkowe i własne według PN-EN – z modelem 3D, bazą materiałów
-      i wydrukiem. Darmowy program open source dla Windows, macOS i Linuksa.</p>
+    <h1>Building loads<br>for structural engineers</h1>
+    <p class="lead">Snow, wind, imposed and own loads to PN-EN – the Eurocodes with the Polish National Annexes –
+      with a 3D model, a material database and a printout. A free, open source program for Windows, macOS and Linux.</p>
     <div class="btns">
-      <a class="btn" href="https://github.com/damiankozuszek/kayenn/releases/latest" id="dl">Pobierz KAYENN</a>
-      <a class="btn ghost" href="https://github.com/damiankozuszek/kayenn">Kod źródłowy</a>
+      <a class="btn" href="https://github.com/damiankozuszek/kayenn/releases/latest" id="dl">Download KAYENN</a>
+      <a class="btn ghost" href="https://github.com/damiankozuszek/kayenn">Source code</a>
     </div>
-    <div class="sub" id="ver">Licencja MIT · interfejs w języku polskim</div>
-    <div class="shot"><img src="img/wiatr-3d.png" width="798" height="720"
-      alt="Model 3D budynku z rozkładem obciążenia wiatrem w KAYENN"></div>
+    <div class="sub" id="ver">MIT licence · user interface in Polish</div>
+    <div class="shot"><img src="/img/wiatr-3d.png" width="798" height="720"
+      alt="3D model of a building with the wind load distribution in KAYENN"></div>
   </div>
 
-  <section id="mozliwosci">
-    <h2>Co potrafi KAYENN</h2>
-    <p class="intro">Program do wyznaczania obciążeń charakterystycznych, w którym każdy wynik ma podstawę
-      w normie – punkt, tablica lub wzór.</p>
+  <section id="features">
+    <h2>What KAYENN does</h2>
+    <p class="intro">A program for characteristic loads in which every result is backed by the code – a clause,
+      a table or a formula.</p>
     <div class="grid">
-      <div class="card"><h3>❄️ Śnieg</h3><p>PN-EN 1991-1-3 z załącznikiem krajowym: dachy płaskie, jedno- i dwuspadowe,
-        wielopołaciowe, walcowe, z attykami i przeszkodami; zaspy, nawisy, zaspy wyjątkowe.</p></div>
-      <div class="card"><h3>💨 Wiatr</h3><p>PN-EN 1991-1-4 z załącznikiem krajowym: różne kształty dachów, daszki,
-        wszystkie kierunki wiatru, warianty parcia i ssania, orografia.</p></div>
-      <div class="card"><h3>🏢 Użytkowe</h3><p>PN-EN 1991-1-1: kategorie A–K, obciążenia poziome ścian, redukcja qk,
-        wózki widłowe i bariery.</p></div>
-      <div class="card"><h3>🧱 Obciążenia własne</h3><p>Baza materiałów z załącznika A PN-EN 1991-1-1 i ponad dwoma
-        tysiącami kształtowników stalowych. Możesz ją dowolnie rozbudowywać.</p></div>
-      <div class="card"><h3>🗺️ Mapa stref</h3><p>Wskaż lokalizację na mapie (także po numerze działki) – program ustawi
-        strefę śniegową i wiatrową oraz wysokość n.p.m.</p></div>
-      <div class="card"><h3>🖨️ Projekt i wydruk</h3><p>Wszystkie przypadki w jednym pliku, grupy, cofnij / ponów,
-        konsola poleceń oraz wydruk z obliczeniami i rysunkami 3D.</p></div>
+      <div class="card"><h3>❄️ Snow</h3><p>PN-EN 1991-1-3 with the National Annex: flat, mono- and duopitch,
+        multispan and cylindrical roofs, parapets and obstructions; drifts, overhangs, exceptional drifts.</p></div>
+      <div class="card"><h3>💨 Wind</h3><p>PN-EN 1991-1-4 with the National Annex: various roof shapes, canopies,
+        all wind directions, pressure and suction variants, orography.</p></div>
+      <div class="card"><h3>🏢 Imposed loads</h3><p>PN-EN 1991-1-1: categories A–K, horizontal loads on partitions,
+        reduction of qk, forklifts and barriers.</p></div>
+      <div class="card"><h3>🧱 Own loads</h3><p>A material database from Annex A of PN-EN 1991-1-1 with over two
+        thousand steel sections. You can extend it as you like.</p></div>
+      <div class="card"><h3>🗺️ Zone map</h3><p>Pick the location on the map (also by the land parcel number) – the
+        program sets the snow and wind zones and the altitude above sea level.</p></div>
+      <div class="card"><h3>🖨️ Project and printout</h3><p>All load cases in one file, groups, undo / redo,
+        a command console and a printout with calculations and 3D drawings.</p></div>
     </div>
   </section>
 
   <section>
     <div class="split">
       <div>
-        <h2>Widzisz, co liczysz</h2>
-        <p class="intro" style="margin-bottom:6px">Rozkład obciążenia na modelu 3D budynku – z wymiarami, które
-          zmieniasz kliknięciem.</p>
+        <h2>See what you calculate</h2>
+        <p class="intro">The load distribution on a 3D model of the building – with dimensions you change
+          with a click.</p>
         <ul>
-          <li>strefy obciążenia śniegiem i wiatrem na dachu i ścianach,</li>
-          <li>obrót i powiększanie myszą oraz gestami,</li>
-          <li>wiele widoków tego samego przypadku.</li>
+          <li>snow and wind load zones on the roof and walls,</li>
+          <li>rotate and zoom with the mouse and gestures,</li>
+          <li>several views of the same load case.</li>
         </ul>
       </div>
-      <img src="img/snieg-3d.png" width="798" height="720" alt="Obciążenie śniegiem dachu dwuspadowego na modelu 3D" loading="lazy">
+      <img src="/img/snieg-3d.png" width="798" height="720" alt="Snow load on a duopitch roof on the 3D model" loading="lazy">
     </div>
   </section>
 
   <section>
     <div class="split rev">
-      <img src="img/snieg-formularz.png" width="640" height="960" alt="Formularz obciążenia śniegiem z wynikami i podstawami z normy" loading="lazy" style="max-height:620px;object-fit:cover;object-position:top">
+      <img class="tall" src="/img/snieg-formularz.png" width="640" height="960" alt="Snow load form with the results and their basis in the code" loading="lazy">
       <div>
-        <h2>Każdy wynik z podstawą</h2>
-        <p class="intro" style="margin-bottom:6px">Obok wartości program podaje punkt normy, tablicę lub wzór,
-          z którego ją wzięto – łatwo to sprawdzić.</p>
+        <h2>Every result with its basis</h2>
+        <p class="intro">Next to each value the program gives the clause, table or formula of the code it comes
+          from – easy to check.</p>
         <ul>
-          <li>wybierasz tylko to, co dopuszcza norma,</li>
-          <li>wszystkie wartości są charakterystyczne (bez γ i ψ),</li>
-          <li>źródła wartości trafiają też na wydruk.</li>
+          <li>you choose only what the code allows,</li>
+          <li>all values are characteristic (no γ or ψ),</li>
+          <li>the sources of the values go onto the printout too.</li>
         </ul>
       </div>
     </div>
   </section>
 
-  <section id="pobierz">
-    <h2>Pobierz</h2>
-    <p class="intro">Aktualna wersja jest na stronie
-      <a href="https://github.com/damiankozuszek/kayenn/releases/latest">Releases w GitHubie</a>.</p>
-    <table>
-      <tr><th>System</th><th>Plik</th><th>Instalacja</th></tr>
-      <tr><td><b>Windows</b> 10 / 11</td><td><code>…-windows-x64-setup.exe</code><br><code>…-windows-x64.zip</code> (przenośna)</td><td>uruchom instalator</td></tr>
-      <tr><td><b>macOS</b> 12+</td><td><code>…-macos-arm64.dmg</code> (M1, M2…)<br><code>…-macos-x64.dmg</code> (Intel)</td><td>przeciągnij do Programów</td></tr>
+  <section id="download">
+    <h2>Download</h2>
+    <p class="intro">The current version is on the
+      <a href="https://github.com/damiankozuszek/kayenn/releases/latest">GitHub Releases page</a>.</p>
+    <div class="tbl"><table>
+      <tr><th>System</th><th>File</th><th>Installation</th></tr>
+      <tr><td><b>Windows</b> 10 / 11</td><td><code>…-windows-x64-setup.exe</code><br><code>…-windows-x64.zip</code> (portable)</td><td>run the installer</td></tr>
+      <tr><td><b>macOS</b> 12+</td><td><code>…-macos-arm64.dmg</code> (M1, M2…)<br><code>…-macos-x64.dmg</code> (Intel)</td><td>drag to Applications</td></tr>
       <tr><td><b>Linux</b></td><td><code>…_amd64.deb</code><br><code>…-linux-x86_64.tar.gz</code></td><td><code>sudo apt install ./kayenn_….deb</code></td></tr>
-    </table>
-    <div class="note">Program nie jest jeszcze podpisany cyfrowo, więc system może ostrzec o nieznanym wydawcy.
-      Windows: „Więcej informacji” → „Uruchom mimo to”. macOS: prawy przycisk → „Otwórz”.</div>
+    </table></div>
+    <div class="note">The program is not digitally signed yet, so the system may warn about an unknown publisher.
+      Windows: “More info” → “Run anyway”. macOS: right click → “Open”.</div>
   </section>
 
-  <section id="pomoc">
+  <section id="help">
     <div class="help">
-      <h2>Pierwsza wersja dla społeczności</h2>
-      <p>To wersja 0.1.0 – wiele błędów już wyeliminowano, ale jedna osoba nie wyłapie wszystkiego.
-        Przetestuj program i zgłoś problem, zwłaszcza błędny wynik obliczeń (z punktem normy).</p>
+      <h2>The first community release</h2>
+      <p>This is version 0.1.0 – many bugs have already been fixed, but one person cannot catch everything.
+        Test the program and report a problem, especially a wrong calculation result (with the clause of the code).</p>
       <div class="btns">
-        <a class="btn" href="https://github.com/damiankozuszek/kayenn/issues/new/choose">Zgłoś problem</a>
-        <a class="btn ghost" href="https://github.com/damiankozuszek/kayenn/blob/main/CONTRIBUTING.md">Jak pomóc</a>
+        <a class="btn" href="https://github.com/damiankozuszek/kayenn/issues/new/choose">Report a problem</a>
+        <a class="btn ghost" href="https://github.com/damiankozuszek/kayenn/blob/main/CONTRIBUTING.md">How to help</a>
       </div>
-      <p style="margin-top:26px;margin-bottom:0">Jeśli uważasz, że ten projekt jest wart rozwijania i chcesz, by stał się czymś
-        naprawdę dobrym, możesz go wesprzeć materialnie – przycisk <b>Sponsor</b> w
-        <a href="https://github.com/damiankozuszek/kayenn">repozytorium</a>.</p>
+      <p class="support">If you think this project is worth developing and you would like it to become something
+        really good, you can support it financially – the <b>Sponsor</b> button in the
+        <a href="https://github.com/damiankozuszek/kayenn">repository</a>.</p>
     </div>
   </section>
 
   <footer>
-    <p><b>KAYENN</b> – od <b>kN</b>, kiloniutona (czytaj „kej-en”). Licencja
-      <a href="https://github.com/damiankozuszek/kayenn/blob/main/LICENSE">MIT</a>.</p>
-    <p>Program jest narzędziem pomocniczym – wyniki należy zweryfikować z normą; odpowiedzialność za projekt spoczywa na projektancie.
-      Mapa: © uczestnicy <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>.</p>
+    <p><b>KAYENN</b> · licence <a href="https://github.com/damiankozuszek/kayenn/blob/main/LICENSE">MIT</a>.</p>
+    <p>The program is an auxiliary tool – verify the results against the code; the responsibility for the design
+      rests with the designer. Map: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors.</p>
   </footer>
 </div>
 <script>
+// The language link remembers the choice.
+document.querySelectorAll("a[data-lang]").forEach(function(a){
+  a.addEventListener("click", function(){ try { localStorage.setItem("kayenn-lang", a.dataset.lang); } catch (e) {} });
+});
 // Shows the current version on the button (the page works without it).
 fetch("https://api.github.com/repos/damiankozuszek/kayenn/releases/latest")
   .then(function(r){return r.ok?r.json():null})
   .then(function(j){
     if(!j||!j.tag_name) return;
-    document.getElementById("dl").textContent="Pobierz KAYENN "+j.tag_name.replace(/^v/,"");
-    document.getElementById("ver").textContent="Najnowsza wersja: "+j.tag_name+" · licencja MIT · interfejs w języku polskim";
+    document.getElementById("dl").textContent="Download KAYENN "+j.tag_name.replace(/^v/,"");
+    document.getElementById("ver").textContent="Latest version: "+j.tag_name+" · MIT licence · user interface in Polish";
   }).catch(function(){});
 </script>
 </body>

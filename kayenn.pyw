@@ -2,7 +2,7 @@
 """
 KAYENN
 ======
-A program for structural engineers (from kN – the kilonewton, read in English “kay-en”).
+A program for structural engineers.
 
 Internal names (not shown to the user):
   KAYENN Manager – main window, the core module: project, list of cases, printout (ProjectWindow);

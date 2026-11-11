@@ -47,6 +47,11 @@ A cron job pulls the changes (`crontab -e`):
 */5 * * * * cd /full/path/kayenn && git pull -q
 ```
 
+The page is in English (`site/index.html`, the default) and Polish (`site/pl/index.html`); both share
+`site/style.css` and the images in `site/img/` – change the content of both pages together. The PL / EN link
+remembers the visitor's choice (localStorage). The page has its own dark theme (`prefers-color-scheme`,
+`color-scheme: light dark` – browsers do not darken it themselves); the wordmark keeps its colours.
+
 So: edit `site/` in the repository, commit and push – the page is live within 5 minutes (nginx serves the
 files at once, no restart). After a change of `nginx.conf`: `docker compose restart` in `kayenn/website`.
 New nginx image: `docker compose pull && docker compose up -d`.
