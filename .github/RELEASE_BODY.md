@@ -1,10 +1,18 @@
-# KAYENN 0.2.1 – automatic updates
+# KAYENN 0.2.1 – automatic updates, 3D on the graphics card, working cases
 
 KAYENN is a program for structural engineers for determining building loads, released under the open source
 **MIT** licence.
 
 ## What's new
 
+- **3D models drawn on the graphics card (VTK).** Every 3D view – the 3D model window, the previews in the case
+  cards and the printout images – now uses one engine: lighting, real depth and correctly blended translucent load
+  layers. Dimensions, labels and the legend stay where they were. On a computer without a suitable OpenGL driver
+  (e.g. a virtual machine) the program automatically uses the previous renderer; the engine can also be switched in
+  **File → Options**. This is the base for the future FEM module.
+- **Printed and working cases.** Every case card and case group has a **printed** checkbox. Unchecked, the case
+  (or the whole group) stays in the project but is left out of the printout and the numbering: it gets the number
+  of the printed item before it plus a letter – 2.1, 2.1A, 2.2; a group 1A with its cases 1.1A, 1.2A.
 - **Automatic updates.** When a new version is found (at start or in **About → Check for updates**), the
   **Install** button downloads the package for your system, checks its SHA-256 checksum, closes the program (asking
   to save the project as usual), installs the new version and starts it again – no manual download or installer
