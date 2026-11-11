@@ -3275,6 +3275,155 @@ LOKALIZACJA
 Program jest pomocą obliczeniową – wyniki należy zweryfikować z normą.
 """
 
+ASSUMPTIONS_EN = """\
+KAYENN – CALCULATION ASSUMPTIONS
+================================
+
+CHARACTERISTIC VALUES
+• All loads given by the program (snow, wind, imposed, own) are characteristic values:
+  without partial factors γ and without combination factors ψ. The designer determines the design values and the
+  combinations of actions (PN-EN 1990) separately.
+
+SNOW – PN-EN 1991-1-3:2005 with corrigenda AC:2009, Ap1:2010
+• s = μᵢ·Cₑ·Cₜ·sₖ (5.2); the load acts vertically on the horizontal projection of the roof.
+• sₖ to Table NB.1 (zones 1–5, A – altitude above sea level). Cₑ – Table 5.1; Cₜ = 1.0 or expression NB.1
+  (1 ≤ U ≤ 4.5 W/m²K, tᵢ ≤ 5 °C → Cₜ = 1.0, tᵢ > 18 °C → 18 °C).
+• Mean recurrence interval n (Annex D, NB1.13): sₙ = sₖ·{1 − V·√6/π·[ln(−ln(1 − 1/n)) + 0.57722]}/(1 + 2.5923·V),
+  V = 0.8·exp(−0.0006·A) (NB.3), n ≥ 5 years; for n = 50 years sₙ = sₖ. An informative annex – a value other than
+  50 years is used with the agreement of the competent authority / according to the project assumptions (e.g. temporary
+  structures, execution stages). sₙ replaces sₖ in the whole calculation (also in the drifts and Cₜ).
+• Monopitch and duopitch roofs: μ₁ (Table 5.2), cases (i)–(iii) of Figure 5.3; snow guards / parapet: μ ≥ 0.8.
+• Multispan roofs (5.3.4, Figure 5.4): (i) μ₁ on the slopes, (ii) drifts in the valleys μ₂(ᾱ) – assumed in all
+  valleys at the same time; NA.9: slope > 60° → μ₂ = 1.6.
+• Cylindrical roofs (5.3.5, Figure 5.6): μ₃ = 0.2 + 10h/b ≤ 2.0 (β ≤ 60°), μ₃ = 0 for β > 60°; (ii) and (iii) –
+  mirror arrangements (wind from both sides); snow guards are not taken into account.
+• Roof abutting a taller construction work (5.3.6): μ₁ = 0.8; μ₂ = μₛ + μw; μw = (b₁+b₂)/2h ≤ γh/sₖ,
+  0.8 ≤ μw ≤ 4; lₛ = 2h, 5 ≤ lₛ ≤ 15 m; γ = 2 kN/m³; μₛ = 0 for α ≤ 15°, otherwise
+  50% of the load on the adjacent slope of the upper roof (duopitch, b₁/2) distributed triangularly over lₛ.
+• Drifting at projections and obstructions (6.2): μ₁ = 0.8, μ₂ = γh/sₖ (0.8…2.0), lₛ = 2h (5…15 m); parapet – drifts
+  along all edges (at the corners the nearer edge governs); wall – on both sides.
+• Snow overhang (6.3) for A > 300 m and zone 4 (NA.12) – flat, monopitch, duopitch and multispan roofs,
+  separately for each eaves.
+• Exceptional drifts (Annex B) – the „Wyjątkowe” option in the Building field; additional elements (annex,
+  canopy, obstruction, parapet at the eaves) switched on by separate toggles; accidental situation (NA: NB1.3, NB1.5,
+  NB1.6 – case B2), s = μ·sₖ (5.3) without Cₑ and Cₜ; the drift is the only snow on the roof (B1(2)), the exceptional
+  cases are alternatives (B1(3)):
+  – roof abutting a taller construction work (B3, NB1.10, Figure B2, Table B1): μ₃ = min(2h/sₖ; 2b/lₛ; 8), b – the larger
+    of b₁, b₂, lₛ = min(5h; width of the lower roof; 15 m); flat lower roof: μ₁ = μ₂ = μ₃; an annex with a duopitch roof
+    on the other side of the taller construction work – μ₁ (ridge) and μ₂ (eaves) to Table B1, h from the eaves of the
+    annex to the eaves of the taller construction work;
+  – parapet around a flat roof (B4(3)–(4), NB1.11): μ₁ = min(2h/sₖ; 2b/lₛ; 8), lₛ = min(5h; b₁; 15 m),
+    b = b₁ – the roof dimension perpendicular to the edge;
+  – obstruction in the middle of a flat roof (width × depth × h) and obstruction on a slope (length,
+    position y, h) – drifts at each wall of the obstruction; zone boundaries drawn from the corners of the obstruction
+    to the corners of the rectangle enclosing the drifts (lₛ on each side), without load steps; further as below;
+  – wall on a flat roof and obstruction on a slope (B4(2), Figure B3): μ = min(2h/sₖ; 5), lₛᵢ = min(5h; bᵢ),
+    bᵢ – distance to the roof edge, ridge or valley; B4(2) applies to obstructions up to 1 m high, and to B4(2)a
+    (AC correction) the drift may be ignored when the projection is ≤ 1 m – the designer decides;
+  – canopy over a door / loading bay with a projection b₁ ≤ 5 m (B4(2)) – all shapes, on the long wall
+    y = B (at a taller construction work – the free wall, opposite the taller one): μ₁ = min(2h/sₖ; 5) and ≤ 2b/lₛ,
+    b – the larger of b₁ and the building width, lₛ = min(5h; b₁), h – from the canopy to the roof edge (with the parapet);
+  – parapet at the eaves of a pitched or cylindrical roof (B4(4), Figure B4): μ₁ = min(2h/sₖ; 2b₂/lₛ; 8),
+    b₂ – building width, lₛ = min(5h; b₁; 15 m), b₁ – distance from the eaves to the ridge; the parapet thickness
+    included in the loaded zone;
+  – parapet on the gable walls of a monopitch, duopitch and cylindrical roof – as at the eaves, the drift along the
+    ridge: μ₁ = min(2h/sₖ; 2b/lₛ; 8), b = b₁ = L, lₛ = min(5h; L; 15 m), constant across the roof width
+    (h – parapet height above the slope); a separate case for each gable wall.
+• No exceptional drifts in the valleys of multispan roofs – NB1.3 excludes B2(1)–B2(3).
+• Multispan roof with a gable parapet (B4(5)): horizontal parapet ≤ 0.3 m above the ridge; in the valleys
+  μ₁ = min(2h/sₖ; 2b/lₛ; 8), h – from the top of the parapet to the valley line, lₛ = min(5h; L; 15 m), μ decreases
+  linearly to zero at the adjacent ridges and over the length lₛ; a separate case for each gable wall.
+• Close, non-abutting taller construction work (B3(2)): as B3, only the lower roof loaded, the load between the
+  buildings ignored (drift measured from the wall of the taller construction work); persistent cases – as for an
+  abutting construction work (on the safe side). Note: with a gap ≥ 1.5 m the construction work may be approximately ignored.
+• Snow guards (6.4): Fₛ = s·b·sin α (6.5), s = μ₁·Cₑ·Cₜ·sₖ (μ₁ ≥ 0.8), b – plan distance from the snow guard
+  at the eaves to the ridge (no intermediate snow guards); cylindrical roof – μ = 0.8, α – pitch of the tangent at the eaves.
+• Obstructions and parapets added with the „Wyjątkowe” option do not change the persistent cases (i)–(iii).
+
+WIND – PN-EN 1991-1-4:2008 with corrigenda AC:2009, Ap1:2010, Ap2:2010, Ap3:2011
+• vb,0 and qb,0 to Table NA.1: zones 1 and 3: 22 m/s, 0.30 kN/m² (A ≤ 300 m), for A > 300 m ×[1 + 0.0006(A − 300)]
+  (qb,0 – squared); zone 2: 26 m/s, 0.42 kN/m²; zone 3, A > 300 m: additionally qb,0 ×(20000 − A)/(20000 + A).
+  vb = c_dir·c_season·vb,0, qb = qb,0·(c_dir·c_season)² (ρ = 1.25 kg/m³ built into the table).
+• c_dir to Table NA.2 (12 sectors of 30°, the wind blows FROM the sector; the values depend on the zone) or 1.0 for
+  any direction (recommended when the orientation of the structure is not known). c_season ≤ 1.0 (NA.4: 1.0 recommended).
+• qp(z) = cₑ(z)·qb, cₑ(z) to Table NA.3 of the published code (2008):
+  0: 3.0(z/10)^0.17 · I: 2.8(z/10)^0.19 · II: 2.3(z/10)^0.24 · III: 1.9(z/10)^0.26 · IV: 1.5(z/10)^0.29,
+  for z < z_min z_min is taken (1, 1, 2, 5, 10 m), for z > z_max – z_max (200, 200, 300, 400, 500 m).
+• Orography (Annex A.3, expressions (A.4)–(A.13) to Ap1): hill / ridge or cliff / escarpment – H, Lu, Ld, x;
+  c₀ = 1 for Φ < 0.05, 1 + 2sΦ for 0.05 ≤ Φ ≤ 0.3, 1 + 0.6s for Φ > 0.3; outside the range of the expressions s = 0. With
+  orography qp from expression (4.8) (NA.8): cₑ = c₀²·cr² + c₀·(cₑ,NA − cr²), cr and cₑ,NA from Table NA.3 (Iv = Iv(c₀ = 1)/c₀ to (4.7)).
+• Structural factor cₛcd (6): h < 15 m → 1 (6.2(1)a); taller buildings – 6.3.1, procedure 1 to
+  Annex B (NA.10): zs = 0.6h, n₁ = 46/h (F.2), δ = δs from Table F.2 (δa, δd ignored – on the safe side),
+  L(z) to (B.1), T = 600 s. cₛcd applies to resultant forces (canopies: Fw = cₛcd·cf·qp·Aref); pressures we, wi – without cₛcd.
+• Friction forces (7.5, Table 7.10): cfr = 0.01 / 0.02 / 0.04; Afr – surfaces parallel to the wind (|n·w| ≤ sin 10°)
+  farther than min(2b; 4h) from the windward edge, ze = h; ignored when the parallel surfaces ≤ 4 × the perpendicular ones (5.3(4)).
+• Parapet on a flat roof (7.4.1, Table 7.9, Figure 7.19): φ = 1, parapet with a return corner (goes round the corners):
+  cp,net A 2.1 / B 1.8 / C 1.4 / D 1.2, zones 0.3hₚ / 2hₚ / 4hₚ from both ends of a side, ze = h + hₚ.
+• Multiskin walls and roofs (7.2.10(3), Note 2): four arrangements of the skins – cp,net of the outer skin
+  and of the inner skin (space closed at the edges, gap < 100 mm); one permeable skin – we − wi.
+• Out of scope (structures other than buildings): free-standing walls and signboards (7.4.1, 7.4.3), structural
+  elements with rectangular and polygonal sections, cylinders, spheres, lattice structures, flags (7.6–7.13), bridges (8).
+• Walls: Table 7.1, ze to Figure 7.4; e = min(b; 2h); h – the highest point of the roof.
+• Flat roofs (7.2.3, Table 7.2): sharp eaves, with parapets (hₚ/h), curved eaves (r/h; below
+  0.05 – interpolation to sharp eaves) and mansard eaves (α = 30°…60°; above 60° – interpolation to a roof
+  with sharp eaves); the 3D model then shows a flat roof. Zone I: both values (+0.2 and −0.2).
+• Roofs: flat 7.2, monopitch 7.3a/b, duopitch and troughed 7.4a/b, hipped 7.5
+  (by Note 3 the pitch of the windward face governs all faces: α₀ for θ = 0°, α₉₀ for 90°).
+  Strips J and L at the hips: width e/10 measured along the eaves (as in Figure 7.9), strip boundary
+  parallel to the hip. The boundary of zone K (parallel to the ridge) passes through the point where
+  the boundary of zone L crosses the hip – the width of K follows from the geometry; zones J cut to zone K.
+• Duopitch roof: slopes of equal pitch – Tables 7.4a/7.4b do not cover roofs with different
+  slope pitches, therefore such a roof is not available in the wind calculation.
+• Multispan (7.2.7, Figure 7.10): F/G/J only on the windward span; further spans: 0.8·cpe, 0.6·cpe
+  (sawtooth, span 1 with cpe > 0: −0.4); θ = 90°: each span as a single roof.
+  Configuration c) of Figure 7.10 (monopitch at the ends, troughs in between): span 1 – cpe of a monopitch roof
+  (Table 7.3a), span 2 – cpe of the trough (Table 7.4a, α < 0; faces H and I), further spans – 0.6·cpe (Note 2).
+• Vaulted roofs (Figure 7.11 with AC) and domes (Figure 7.12): cpe,10 from the nodes of the graphs (straight segments); ze = h + f;
+  vault – zones A, B, C = d/4, d/2, d/4, wind perpendicular to the generatrix only; dome – cpe linear
+  A → B → C along the arc. Dome walls – cylinder (7.9.1): cpe = ψλα·cp0, cp0(α) from Figure 7.27 / Table 7.12 by Re
+  (ν = 15·10⁻⁶ m²/s, v = √(2qp/ρ), ze = h of the walls), between the characteristic points a cosine curve
+  (0…αmin) and linear (αmin…αA); ψλα = 1 (on the safe side).
+• Canopies (7.3, Table 7.6 with AC and 7.7): cp,net and cf; min. interpolated linearly in φ; |α| < 5° for a duopitch
+  canopy → the values for ±5°. Force Fw = cf·qp(ze)·L·d (cs·cd = 1). Centre of pressure: d/4 from the windward
+  edge (monopitch), the centres of the slopes (duopitch); also check the load on one slope.
+• cpe for the zone A: Figure 7.2. cpi (7.2.9, not for canopies): +0.2 and −0.3 (Note 2) or from Figure 7.13 by the
+  opening ratio μ ≥ 0.33 (straight segments: h/d ≤ 0.25 → −0.3 from μ = 0.9; h/d ≥ 1 → −0.5 from μ = 0.95; in between – linear
+  interpolation), or for a dominant face cpi = 0.75·cpe (openings 2×) … 0.90·cpe (3× and more) – the cpe of the zone of the
+  chosen face; the program does not allow an arbitrary value of cpi.
+• Signs: (+) pressure – towards the surface (canopies: downwards), (−) suction.
+
+IMPOSED – PN-EN 1991-1-1:2004 with corrigenda AC:2009, Ap1:2010, Ap2:2011 (National Annex NB)
+• Values of qₖ and Qₖ from Tables 6.2, 6.4, 6.8, 6.10, 6.11, 6.12; the recommended value (underlined in the code) is
+  the default; a value below the lower limit of Table 6.2 is rejected (NB1). Category I – use as A–G.
+• Movable partitions (6.3.1.2(8)): addition to qₖ 0.50 / 0.80 / 1.20 kN/m² for a partition self-weight
+  ≤ 1.0 / 2.0 / 3.0 kN/m (floors of categories A–D, not stairs and balconies). Heavier partitions – calculate individually (9).
+• Reduction of qₖ: αA = 5/7·ψ₀ + A₀/A ≤ 1.0, A₀ = 10 m² (6.1; categories A–E; C and D: αA ≥ 0.6) or
+  αn = [2 + (n − 2)ψ₀]/n, n > 2 (6.2; categories A–D). ψ₀ to EN 1990, Table A1.1 (A–D: 0.7; E: 1.0;
+  the National Annex does not change it). The reduction applies to qₖ of Table 6.2, not to Qₖ; the addition for partitions
+  is not reduced. For an accompanying action only one of the factors ψ₀ and αn is applied (3.3.2(2)).
+• Combinations of actions and partial factors (EN 1990) – outside the scope of the program: characteristic values
+  are given.
+• Forklifts FL 1–FL 6 (6.3.2.3, Tables 6.5, 6.6): axle Qₖ, Qₖ,dyn = φ·Qₖ (φ = 1.40 pneumatic tyres,
+  2.00 solid), horizontal load 0.3·Qₖ; together with qₖ of Tables 6.2, 6.4 or 6.8 (6.3.2.2(7)). Transport vehicles
+  (6.3.2.4) – the code gives no values: determined individually.
+• Car park barriers (Annex B): F = 0.5·m·v²/(δc + δb); ≤ 2500 kg: m = 1500 kg, v = 4.5 m/s, δc = 100 mm,
+  at a height of 375 mm (B(3), B(5)); > 2500 kg: actual m (B(4)); ramps F/2 at 610 mm (B(6)); opposite the end of
+  a straight ramp > 20 m – 2F at 610 mm (B(7)); the force over any length of 1.5 m of the barrier.
+
+LOCATION
+• The snow and wind load zones are determined from the point picked on the map (OpenStreetMap
+  or satellite images) by the maps of Figure NB.1 (PN-EN 1991-1-3) and Figure NA.1 (PN-EN 1991-1-4),
+  digitised from the figures of the codes (georeferenced by the division into counties, zone boundaries as smooth
+  curves extended to the state border) – boundary accuracy about 3–5 km. Near a zone boundary the program
+  shows a warning; for snow NB1.7 allows the mean sₖ of both zones within a 10 km band (zones set by hand).
+• The location can be given by an address (OpenStreetMap / Nominatim) or by a land parcel: the precinct name
+  and the parcel number or the full identifier (ULDK service, GUGiK); the point of the site is the centre of the parcel.
+• The altitude A is taken from a digital terrain model (Copernicus DEM, Open-Meteo service);
+  it can be corrected by hand.
+
+The program is a calculation aid – the results must be verified against the code.
+"""
+
 
 
 # ===================================================================
@@ -3324,6 +3473,632 @@ except ImportError:
     if __name__ == "__main__":
         _no_qt()
     raise
+
+# ================================================================ interface language ===
+# The program's texts are written in Polish (the source language) and translated where they reach Qt: the setters
+# and constructors of the widgets are wrapped (`_install_i18n`), the source text is kept on the widget (a Qt
+# property / item data) and the getters return it – so the program logic, the project files and the tests see the
+# Polish texts in every language. A language change re-applies the translations to every existing widget and calls
+# the refresh hooks (`apply_language`, `LANG_HOOKS`). Translations: kayenn_lang_en.json (Polish text → English);
+# a key with {} is a pattern (the {} parts are translated recursively, e.g. a value of a combo inside a sentence).
+LANG = "pl"                                   # current interface language
+LANGS = (("en", "English"), ("pl", "Polski"))  # menu Język / Language – names in their own language
+LANG_DEFAULT = "en"                           # a new installation starts in English
+LANG_FILE = os.path.join(BASE_DIR, "kayenn_lang_en.json")
+LANG_HOOKS = []                               # callables run after a language change (reports, 3D, titles …)
+_TR_EXACT, _TR_PAT, _TR_CACHE = {}, [], {}
+_TR_ORIG = {}                                 # original Qt methods needed untranslated (source_html)
+_TR_WS = re.compile(r"\s+")
+_TR_LETTER = re.compile(r"[^\W\d_]")
+_TR_TAG = re.compile(r"(<[^>]*>)")
+_TR_RICH = re.compile(r"<[A-Za-z/!][^>]*>")
+SRC_ROLE = 0x0100 + 391                       # item data role with the source text (combo items, tree cells)
+
+
+def _tr_norm(s):
+    return _TR_WS.sub(" ", s).strip()
+
+
+def _tr_load():
+    """Reads the translation file (once). Patterns: the most specific (longest literal text) first."""
+    if _TR_EXACT or _TR_PAT:
+        return
+    try:
+        with open(LANG_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        data = {}
+    pats = []
+    for pl_, en_ in data.get("#glossary", []):    # whole words / phrases, the longest first
+        _TR_GLOSS.append((re.compile(r"(?<![^\W\d_])" + re.escape(pl_) + r"(?![^\W\d_])"), en_))
+    _TR_GLOSS.sort(key=lambda g: -len(g[0].pattern))
+    for k, v in data.items():
+        if not isinstance(k, str) or not isinstance(v, str) or k.startswith("#"):
+            continue
+        nk = _tr_norm(k)
+        if "{}" not in nk:
+            _TR_EXACT[nk] = v
+            continue
+        lit = nk.replace("{}", "")
+        if len(_TR_LETTER.findall(lit)) < 2:
+            continue                                  # "{} = {}" etc. – not text, would only slow things down
+        parts = nk.split("{}")
+        rx = re.compile("^" + "(.*?)".join(re.escape(p) for p in parts) + "$", re.S)
+        pats.append((len(lit), parts[0], rx, v))
+    pats.sort(key=lambda p: -p[0])
+    _TR_PAT.extend((pre, rx, v) for _, pre, rx, v in pats)
+
+
+def _tr_fill(tmpl, groups):
+    out, gi = [], 0
+    for i, part in enumerate(tmpl.split("{}")):
+        if i:
+            out.append(groups[gi] if gi < len(groups) else "")
+            gi += 1
+        out.append(part)
+    return "".join(out)
+
+
+_TR_PEEL = re.compile(r"^([\s–—\-•·:;,(*⚠]*)(.*?)([\s.:;,)=]*)$", re.S)
+_TR_SEG = re.compile(r"(\s*;\s*|,\s+|:\s+|\s+[–—→]\s+|\s*\(|\)\s*)")
+_TR_GLOSS = []                                # (regex, English) – words of code references, from "#glossary"
+_TR_DEC = re.compile(r"(?<=\d),(?=\d)")
+
+
+def _tr_lookup(n, depth):
+    """Exact text or a pattern (the parts {} translated recursively)."""
+    v = _TR_EXACT.get(n)
+    if v is None and depth < 4:
+        for pre, rx, tmpl in _TR_PAT:
+            if pre and not n.startswith(pre):
+                continue
+            mm = rx.match(n)
+            if mm:
+                return _tr_fill(tmpl, [_TR_DEC.sub(".", _tr_core(g, depth + 1)) for g in mm.groups()])
+    return v
+
+
+def _tr_core(s, depth=0):
+    m = re.match(r"(\s*)(.*?)(\s*)$", s, re.S)
+    lead, core, trail = m.groups()
+    if not core or not _TR_LETTER.search(core):
+        return s
+    n = _tr_norm(core)
+    v = _TR_EXACT.get(n)
+    if v is None and "\n" in core:                # several lines: line by line (a pattern must not swallow them)
+        lines = core.split("\n")
+        tl = [_tr_core(ln, depth) for ln in lines]
+        return lead + "\n".join(tl) + trail
+    if v is None:
+        v = _tr_lookup(n, depth)
+    if v is None:                                 # punctuation around the text: „ – opis”, „: od … do …;”
+        pre, inner, post = _TR_PEEL.match(n).groups()
+        body = n[len(pre):]
+        cands = [re.sub(r"^[\s–—\-•·:;,*⚠]+", "", n).rstrip(" .:;,="), body.rstrip(" .:;,="), inner]
+        pre_of = {c: n[:n.index(c)] if c in n else pre for c in cands}
+        for c in dict.fromkeys(cands) if (pre or post) else ():
+            if c and c != n and _TR_LETTER.search(c):
+                vi = _tr_lookup(c, depth)
+                if vi is not None:
+                    p_ = pre_of[c]
+                    v = p_ + vi + n[len(p_) + len(c):]
+                    break
+    if v is None and depth < 3 and _TR_GLOSS:     # references to the codes and similar lists: part by part
+        parts = _TR_SEG.split(n)
+        if len(parts) > 1:
+            out = []
+            for k, part in enumerate(parts):
+                if k % 2 or not _TR_LETTER.search(part):
+                    out.append(part)
+                    continue
+                vp = _tr_lookup(part, depth + 1)
+                out.append(_tr_gloss(part) if vp is None else vp)
+            if out != parts:
+                v = "".join(out)
+        elif not _TR_PEEL.match(n).group(1):
+            g = _tr_gloss(n)
+            v = g if g != n else None
+    return s if v is None else lead + v + trail
+
+
+def _tr_gloss(s):
+    for rx, en in _TR_GLOSS:
+        s = rx.sub(en, s)
+    return s
+
+
+def tr(s):
+    """Text in the current interface language (the source text – Polish – when there is no translation)."""
+    if LANG == "pl" or not isinstance(s, str) or not s:
+        return s
+    v = _TR_CACHE.get(s)
+    if v is None:
+        if len(_TR_CACHE) > 50000:
+            _TR_CACHE.clear()
+        v = _TR_CACHE[s] = _TR_DEC.sub(".", _tr_core(s)).replace("„", "“")   # English: decimal point, quotes
+    return v
+
+
+def tr_html(h):
+    """HTML with its text nodes translated (tags, styles and entities kept)."""
+    if LANG == "pl" or not isinstance(h, str) or not h:
+        return h
+    v = _TR_CACHE.get(("h", h))
+    if v is not None:
+        return v
+    out, skip = [], False
+    for p in _TR_TAG.split(h):
+        if p.startswith("<"):
+            low = p[:7].lower()
+            if low.startswith(("<style", "<script")):
+                skip = True
+            elif low.startswith(("</style", "</scrip")):
+                skip = False
+            out.append(p)
+        elif skip or not _TR_LETTER.search(p):
+            out.append(p)
+        else:
+            t = html.unescape(p)
+            r = tr(t)
+            out.append(p if r == t else html.escape(r, quote=False))
+    v = _TR_CACHE[("h", h)] = "".join(out)
+    return v
+
+
+def tr_any(s):
+    return tr_html(s) if isinstance(s, str) and _TR_RICH.search(s) else tr(s)
+
+
+def source_html(view):
+    """toHtml() of a report view with the source (Polish) texts – what a case keeps whatever the interface
+    language (the project file, the card and the printout translate it when they show it)."""
+    src = view.property("_trh")
+    if LANG == "pl" or src is None:
+        return view.toHtml()
+    doc = view.document().clone()
+    _TR_ORIG["doc_html"](doc, src)
+    return doc.toHtml()
+
+
+def no_tr(w):
+    """A widget showing user data (names typed by the user) – its texts are never translated."""
+    w.setProperty("_notr", True)
+    return w
+
+
+def _tr_ok(w):
+    try:
+        return not w.property("_notr")
+    except (RuntimeError, AttributeError):
+        return False
+
+
+def _src_get(w, key, cur, conv=tr_any):
+    """Getter value: the source text when the widget still shows its translation."""
+    try:
+        src = w.property(key)
+    except RuntimeError:
+        return cur
+    if src is None or LANG == "pl":
+        return cur if src is None else (src if cur == src else cur)
+    return src if cur == conv(src) else cur
+
+
+def _install_i18n():
+    from PySide6 import QtGui, QtWidgets
+    W = QtWidgets
+
+    def setter(cls, name, key, conv=tr_any, idx=0):
+        orig = getattr(cls, name)
+
+        def f(self, *a, **k):
+            a = list(a)
+            if len(a) > idx and isinstance(a[idx], str) and _tr_ok(self):
+                src = a[idx]
+                a[idx] = conv(src)
+                orig(self, *a, **k)
+                self.setProperty(key, src)
+            else:
+                orig(self, *a, **k)
+                if len(a) > idx and isinstance(a[idx], str):
+                    self.setProperty(key, None)
+        setattr(cls, name, f)
+
+    def getter(cls, name, key, conv=tr_any):
+        orig = getattr(cls, name)
+
+        def f(self, *a):
+            return _src_get(self, key, orig(self, *a), conv)
+        setattr(cls, name, f)
+
+    def ctor(cls, key, conv=tr_any):
+        orig = cls.__init__
+
+        def f(self, *a, **k):
+            a = list(a)
+            src = None
+            for i in range(min(2, len(a))):          # (text, parent …) or (icon, text, parent …)
+                if isinstance(a[i], str):
+                    src, a[i] = a[i], conv(a[i])
+                    break
+            orig(self, *a, **k)
+            if src is not None:
+                self.setProperty(key, src)
+        cls.__init__ = f
+
+    # texts of widgets
+    for cls in (W.QLabel, W.QAbstractButton):
+        setter(cls, "setText", "_trs")
+        getter(cls, "text", "_trs")
+    for cls in (W.QLabel, W.QPushButton, W.QCheckBox, W.QRadioButton):
+        ctor(cls, "_trs")
+    setter(W.QGroupBox, "setTitle", "_trs")
+    getter(W.QGroupBox, "title", "_trs")
+    ctor(W.QGroupBox, "_trs")
+    setter(W.QMenu, "setTitle", "_trs")
+    getter(W.QMenu, "title", "_trs")
+    ctor(W.QMenu, "_trs")
+    for name, key, conv in (("setWindowTitle", "_trs_title", tr), ("setToolTip", "_trs_tip", tr_any),
+                            ("setStatusTip", "_trs_status", tr)):
+        setter(W.QWidget, name, key, conv)
+    getter(W.QWidget, "windowTitle", "_trs_title", tr)
+    getter(W.QWidget, "toolTip", "_trs_tip")
+    for cls in (W.QLineEdit, W.QTextEdit, W.QPlainTextEdit):
+        setter(cls, "setPlaceholderText", "_trs_ph", tr)
+        getter(cls, "placeholderText", "_trs_ph", tr)
+    # actions and menus
+    A = QtGui.QAction
+    setter(A, "setText", "_trs", tr)
+    getter(A, "text", "_trs", tr)
+    setter(A, "setToolTip", "_trs_tip", tr)
+    setter(A, "setStatusTip", "_trs_status", tr)
+    ctor(A, "_trs", tr)
+
+    def adder(cls, name):
+        orig = getattr(cls, name)
+
+        def f(self, *a, **k):
+            a = list(a)
+            src = None
+            for i in range(min(2, len(a))):
+                if isinstance(a[i], str):
+                    src, a[i] = a[i], tr(a[i])
+                    break
+            r = orig(self, *a, **k)
+            if src is not None and r is not None:
+                r.setProperty("_trs", src)
+            return r
+        setattr(cls, name, f)
+    for cls in (W.QMenu, W.QMenuBar, W.QToolBar):
+        adder(cls, "addAction")
+        if cls is not W.QToolBar:
+            adder(cls, "addMenu")
+    adder(W.QMenu, "addSection")
+    # combo boxes: the item data SRC_ROLE keeps the source; the getters return it
+    C = W.QComboBox
+    o_add, o_adds, o_ins, o_inss = C.addItem, C.addItems, C.insertItem, C.insertItems
+    o_set, o_text, o_cur, o_find, o_setcur = C.setItemText, C.itemText, C.currentText, C.findText, C.setCurrentText
+
+    def c_add(self, *a, **k):
+        a = list(a)
+        i = 0 if a and isinstance(a[0], str) else 1
+        src = a[i] if len(a) > i and isinstance(a[i], str) else None
+        if src is not None and _tr_ok(self):
+            a[i] = tr(src)
+        o_add(self, *a, **k)
+        if src is not None:
+            self.setItemData(self.count() - 1, src, SRC_ROLE)
+
+    def c_adds(self, items):
+        items = [str(x) for x in items]
+        n0 = self.count()
+        o_adds(self, [tr(x) for x in items] if _tr_ok(self) else items)
+        for j, x in enumerate(items):
+            self.setItemData(n0 + j, x, SRC_ROLE)
+
+    def c_ins(self, index, *a, **k):
+        a = list(a)
+        i = 0 if a and isinstance(a[0], str) else 1
+        src = a[i] if len(a) > i and isinstance(a[i], str) else None
+        if src is not None and _tr_ok(self):
+            a[i] = tr(src)
+        o_ins(self, index, *a, **k)
+        if src is not None:
+            j = index if 0 <= index < self.count() else self.count() - 1
+            self.setItemData(j, src, SRC_ROLE)
+
+    def c_inss(self, index, items):
+        items = [str(x) for x in items]
+        o_inss(self, index, [tr(x) for x in items] if _tr_ok(self) else items)
+        j0 = index if 0 <= index <= self.count() - len(items) else self.count() - len(items)
+        for j, x in enumerate(items):
+            self.setItemData(j0 + j, x, SRC_ROLE)
+
+    def c_set(self, i, text):
+        o_set(self, i, tr(text) if _tr_ok(self) else text)
+        self.setItemData(i, text, SRC_ROLE)
+
+    def c_text(self, i):
+        src = self.itemData(i, SRC_ROLE)
+        return src if isinstance(src, str) else o_text(self, i)
+
+    def c_cur(self):
+        cur = o_cur(self)
+        i = self.currentIndex()
+        src = self.itemData(i, SRC_ROLE) if i >= 0 else None
+        if not isinstance(src, str):
+            return cur
+        return src if (not self.isEditable() or cur == o_text(self, i)) else cur
+
+    def c_find(self, text, *a, **k):
+        for i in range(self.count()):
+            if c_text(self, i) == text:
+                return i
+        return o_find(self, tr(text) if isinstance(text, str) else text, *a, **k)
+
+    def c_setcur(self, text):
+        i = c_find(self, text)
+        if i >= 0 and not self.isEditable():
+            self.setCurrentIndex(i)
+        else:
+            o_setcur(self, o_text(self, i) if i >= 0 else text)
+    C.addItem, C.addItems, C.insertItem, C.insertItems = c_add, c_adds, c_ins, c_inss
+    C.setItemText, C.itemText, C.currentText, C.findText, C.setCurrentText = c_set, c_text, c_cur, c_find, c_setcur
+    # tabs: the source text on the page widget
+    T = W.QTabWidget
+    o_tab, o_itab, o_settab, o_tabtext = T.addTab, T.insertTab, T.setTabText, T.tabText
+
+    def t_add(self, page, *a):
+        a = list(a)
+        src = a[-1] if a and isinstance(a[-1], str) else None
+        if src is not None:
+            a[-1] = tr(src)
+            page.setProperty("_trs_tab", src)
+        return o_tab(self, page, *a)
+
+    def t_ins(self, index, page, *a):
+        a = list(a)
+        src = a[-1] if a and isinstance(a[-1], str) else None
+        if src is not None:
+            a[-1] = tr(src)
+            page.setProperty("_trs_tab", src)
+        return o_itab(self, index, page, *a)
+
+    def t_set(self, index, text):
+        page = self.widget(index)
+        if page is not None:
+            page.setProperty("_trs_tab", text)
+        o_settab(self, index, tr(text))
+
+    def t_text(self, index):
+        page = self.widget(index)
+        cur = o_tabtext(self, index)
+        return _src_get(page, "_trs_tab", cur, tr) if page is not None else cur
+    T.addTab, T.insertTab, T.setTabText, T.tabText = t_add, t_ins, t_set, t_text
+    # tree widgets (report tables): the source in SRC_ROLE of each cell
+    TI = W.QTreeWidgetItem
+    o_ti_init, o_ti_set, o_ti_text = TI.__init__, TI.setText, TI.text
+
+    def ti_init(self, *a, **k):
+        a = list(a)
+        srcs = None
+        for i, x in enumerate(a):
+            if isinstance(x, (list, tuple)) and all(isinstance(s, str) for s in x):
+                srcs, a[i] = list(x), [tr(s) for s in x]
+                break
+        o_ti_init(self, *a, **k)
+        if srcs:
+            for c, s in enumerate(srcs):
+                self.setData(c, SRC_ROLE, s)
+
+    def ti_set(self, col, text):
+        o_ti_set(self, col, tr(text))
+        self.setData(col, SRC_ROLE, text)
+
+    def ti_text(self, col):
+        src = self.data(col, SRC_ROLE)
+        return src if isinstance(src, str) else o_ti_text(self, col)
+    TI.__init__, TI.setText, TI.text = ti_init, ti_set, ti_text
+    TW = W.QTreeWidget
+    o_heads = TW.setHeaderLabels
+
+    def tw_heads(self, labels):
+        labels = [str(x) for x in labels]
+        o_heads(self, [tr(x) for x in labels])
+        hi = self.headerItem()
+        for c, s in enumerate(labels):
+            hi.setData(c, SRC_ROLE, s)
+    TW.setHeaderLabels = tw_heads
+    # rich text views and documents
+    TE = W.QTextEdit
+    o_html, o_plain = TE.setHtml, TE.setPlainText
+
+    def te_html(self, h):
+        if _tr_ok(self):
+            self.setProperty("_trh", h)
+            self.setProperty("_trp", None)
+            o_html(self, tr_html(h))
+        else:
+            o_html(self, h)
+
+    def te_plain(self, t):
+        if _tr_ok(self):
+            self.setProperty("_trp", t)
+            self.setProperty("_trh", None)
+            o_plain(self, tr(t))
+        else:
+            o_plain(self, t)
+    TE.setHtml, TE.setPlainText = te_html, te_plain
+    D = QtGui.QTextDocument
+    o_dhtml = _TR_ORIG["doc_html"] = D.setHtml
+    D.setHtml = lambda self, h: o_dhtml(self, tr_html(h))
+    # painting: the program's own drawing (3D labels, legends, map, printout footer) – text measured and drawn
+    # in the same language
+    for cls, names in ((QtGui.QPainter, ("drawText",)),
+                       (QtGui.QFontMetrics, ("horizontalAdvance", "boundingRect", "elidedText", "size")),
+                       (QtGui.QFontMetricsF, ("horizontalAdvance", "boundingRect", "elidedText", "size"))):
+        for name in names:
+            orig = getattr(cls, name)
+
+            def f(self, *a, _orig=orig, **k):
+                if LANG != "pl":
+                    a = tuple(tr(x) if isinstance(x, str) else x for x in a)
+                return _orig(self, *a, **k)
+            setattr(cls, name, f)
+    # dialogs (static helpers): title and text translated, the chosen item returned as the source text
+    MB = W.QMessageBox
+    for name in ("question", "information", "warning", "critical"):
+        orig = getattr(MB, name)
+
+        def f(parent, title, text, *a, _orig=orig, **k):
+            return _orig(parent, tr(title), tr_any(text), *a, **k)
+        setattr(MB, name, staticmethod(f))
+    setter(MB, "setText", "_trs")
+    setter(MB, "setInformativeText", "_trs_info")
+    o_mb_btn = MB.addButton
+
+    def mb_btn(self, *a):
+        a = list(a)
+        if a and isinstance(a[0], str):
+            a[0] = tr(a[0])
+        return o_mb_btn(self, *a)
+    MB.addButton = mb_btn
+    ID = W.QInputDialog
+    for name in ("getText", "getInt", "getDouble", "getMultiLineText"):
+        orig = getattr(ID, name)
+
+        def f(parent, title, label, *a, _orig=orig, **k):
+            return _orig(parent, tr(title), tr(label), *a, **k)
+        setattr(ID, name, staticmethod(f))
+    o_item = ID.getItem
+
+    def get_item(parent, title, label, items, *a, **k):
+        items = [str(x) for x in items]
+        shown = [tr(x) for x in items]
+        res, ok = o_item(parent, tr(title), tr(label), shown, *a, **k)
+        return (items[shown.index(res)] if res in shown else res), ok
+    ID.getItem = staticmethod(get_item)
+    FD = W.QFileDialog
+    for name in ("getOpenFileName", "getSaveFileName", "getOpenFileNames", "getExistingDirectory"):
+        orig = getattr(FD, name)
+
+        def f(*a, _orig=orig, **k):
+            a = list(a)
+            for i in (1, 3):
+                if len(a) > i and isinstance(a[i], str):
+                    a[i] = tr(a[i])
+            for kk in ("caption", "filter"):
+                if isinstance(k.get(kk), str):
+                    k[kk] = tr(k[kk])
+            return _orig(*a, **k)
+        setattr(FD, name, staticmethod(f))
+    o_tip = W.QToolTip.showText
+    W.QToolTip.showText = staticmethod(lambda pos, text, *a, **k: o_tip(pos, tr_any(text), *a, **k))
+    o_bb = W.QDialogButtonBox.addButton
+
+    def bb_btn(self, *a):
+        a = list(a)
+        if a and isinstance(a[0], str):
+            a[0] = tr(a[0])
+        return o_bb(self, *a)
+    W.QDialogButtonBox.addButton = bb_btn
+
+
+_install_i18n()
+
+
+def _retranslate_widget(w):
+    """Applies the current language to one widget (its stored source texts)."""
+    from PySide6 import QtWidgets as W
+    if not _tr_ok(w):
+        return
+    p = w.property
+    for key, setf in (("_trs_title", w.setWindowTitle), ("_trs_tip", w.setToolTip),
+                      ("_trs_status", w.setStatusTip)):
+        s = p(key)
+        if s is not None:
+            setf(s)
+    s = p("_trs")
+    if s is not None:
+        if isinstance(w, (W.QLabel, W.QAbstractButton)):
+            w.setText(s)
+        elif isinstance(w, (W.QGroupBox, W.QMenu)):
+            w.setTitle(s)
+    if isinstance(w, (W.QLineEdit, W.QTextEdit, W.QPlainTextEdit)):
+        s = p("_trs_ph")
+        if s is not None:
+            w.setPlaceholderText(s)
+    if isinstance(w, W.QMessageBox):
+        s = p("_trs_info")
+        if s is not None:
+            w.setInformativeText(s)
+    for a in w.actions():
+        for key, setf in (("_trs", a.setText), ("_trs_tip", a.setToolTip), ("_trs_status", a.setStatusTip)):
+            s = a.property(key)
+            if s is not None:
+                setf(s)
+    if isinstance(w, W.QComboBox):
+        blocked = w.blockSignals(True)
+        for i in range(w.count()):
+            src = w.itemData(i, SRC_ROLE)
+            if isinstance(src, str):
+                w.setItemText(i, src)
+        w.blockSignals(blocked)
+    elif isinstance(w, W.QTabWidget):
+        for i in range(w.count()):
+            pg = w.widget(i)
+            s = pg.property("_trs_tab") if pg is not None else None
+            if s is not None:
+                w.setTabText(i, s)
+    elif isinstance(w, W.QTreeWidget):
+        hi = w.headerItem()
+        for c in range(hi.columnCount()):
+            s = hi.data(c, SRC_ROLE)
+            if isinstance(s, str):
+                hi.setText(c, s)
+        stack = [w.topLevelItem(i) for i in range(w.topLevelItemCount())]
+        while stack:
+            it = stack.pop()
+            for c in range(it.columnCount()):
+                s = it.data(c, SRC_ROLE)
+                if isinstance(s, str):
+                    it.setText(c, s)
+            stack.extend(it.child(i) for i in range(it.childCount()))
+    elif isinstance(w, W.QTextEdit):
+        h, t = p("_trh"), p("_trp")
+        if h is not None or t is not None:
+            sb = w.verticalScrollBar()
+            pos = sb.value()
+            w.setHtml(h) if h is not None else w.setPlainText(t)
+            sb.setValue(pos)
+
+
+def apply_language(code, save=True):
+    """Switches the interface language at once: every widget and the hooks (reports, 3D, titles)."""
+    global LANG
+    code = code if code in dict(LANGS) else LANG_DEFAULT
+    if code != "pl":
+        _tr_load()
+    changed = code != LANG
+    LANG = code
+    _TR_CACHE.clear()
+    if save:
+        settings_set("language", code)
+    if not changed:
+        return False
+    qapp = QApplication.instance()
+    if qapp is not None:
+        for w in list(qapp.allWidgets()):
+            try:
+                _retranslate_widget(w)
+            except RuntimeError:                   # a widget being deleted
+                pass
+    for h in list(LANG_HOOKS):
+        try:
+            h()
+        except Exception as e:                     # one failing hook must not stop the others
+            print(f"language hook {h}: {e}", file=sys.stderr)
+    return True
 
 AL_R = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 
@@ -4916,7 +5691,8 @@ class CaseCard(QFrame):
         self.num = QLabel("")                        # number by position (1., 2.1, …)
         self.num.setObjectName("caseNum")
         hd.addWidget(self.num)
-        self.name = QLabel(case["name"])
+        self.name = no_tr(QLabel())                   # the user's name of the case – never translated
+        self.name.setText(case["name"])
         self.name.setObjectName("cardTitle")
         self.name.mouseDoubleClickEvent = lambda e: self.rename()
         hd.addWidget(self.name)
@@ -5542,7 +6318,8 @@ def ptree_numbers(tree):
     return out
 
 
-def ptree_new_group(tree, name=CASE_GROUP_NAME, items=(), auto=True):
+def ptree_new_group(tree, name=None, items=(), auto=True):
+    name = tr(CASE_GROUP_NAME) if name is None else name
     gid = max([n["group"] for n, _, _, _ in ptree_walk(tree) if "group" in n] + [0]) + 1
     return {"group": gid, "name": name, "items": list(items), "open": True, "auto": auto}
 
@@ -5608,7 +6385,8 @@ class CaseGroupHeader(QFrame):
         b = group_chevron(node.get("open", True), lambda: pw.toggle_group(node))
         h.addWidget(b)
         self.btn_exp = b
-        self.title = QLabel(f"{num} {node['name']}")
+        self.title = no_tr(QLabel())                  # the user's group name – never translated
+        self.title.setText(f"{num} {node['name']}")
         self.title.setTextFormat(Qt.TextFormat.PlainText)
         self.title.setObjectName("groupTitle")
         self.title.mouseDoubleClickEvent = lambda e: self.start_rename()
@@ -6636,8 +7414,8 @@ class LabWindow(QWidget):
 
     def add_manual(self):
         n = len(self.items) + 1
-        self.app.echo(f"LABADD {cq(f'Obciążenie {n}')}")
-        row = self._append(dict(nazwa=f"Obciążenie {n}", wartosc="", jedn="kN/m²", z_bazy=False, wym={}))
+        self.app.echo(f"LABADD {cq(tr(f'Obciążenie {n}'))}")
+        row = self._append(dict(nazwa=tr(f"Obciążenie {n}"), wartosc="", jedn="kN/m²", z_bazy=False, wym={}))
         row.val.setFocus()
         return row
 
@@ -6653,7 +7431,7 @@ class LabWindow(QWidget):
         i = self.rows.index(row)
         self.app.echo(f"LABDUP {i + 1}")
         it = json.loads(json.dumps(self.items[i]))
-        it["nazwa"] = f"{it.get('nazwa', '')} - kopia"
+        it["nazwa"] = it.get('nazwa', '') + tr(" - kopia")
         return self._insert(it, i + 1)
 
     def remove_row(self, row):
@@ -7271,7 +8049,8 @@ class MaterialTile(QFrame):
         h.addWidget(hd, 0, Qt.AlignmentFlag.AlignTop)
         col = QVBoxLayout()
         col.setSpacing(1)
-        nm = QLabel(html.escape(it["name"]))
+        nm = no_tr(QLabel())                          # database content stays as written
+        nm.setText(html.escape(it["name"]))
         nm.setObjectName("tileName")
         nm.setWordWrap(True)
         nm.mouseDoubleClickEvent = lambda e: self.rename()       # double-click on the name – rename (as in Manager)
@@ -8861,6 +9640,7 @@ class ProjectWindow(QWidget):
         self.edit_menu = edit_menu(mb, app.proj_hist, app.undo_project, app.redo_project)
         app.view_menu(mb)
         self.act_codes, self.act_lab = app.loads_menu(mb)
+        self.lang_actions = app.language_menu(mb)
         app.about_menu(mb)
         lay.setMenuBar(mb)
         self.menu_bar = mb
@@ -9329,7 +10109,7 @@ class ProjectWindow(QWidget):
         n = proj["next"]
         proj["next"] = n + 1
         cp = json.loads(json.dumps({k: case.get(k) for k in ("state", "extra", "report")}, default=str))
-        cp.update(id=n, name=f"{case['name']} - kopia", created=datetime.now().strftime("%Y-%m-%d %H:%M"),
+        cp.update(id=n, name=case['name'] + tr(" - kopia"), created=datetime.now().strftime("%Y-%m-%d %H:%M"),
                   _calc=case.get("_calc"))
         proj["cases"].insert(proj["cases"].index(case) + 1, cp)
         self.insert_case(cp)
@@ -9915,6 +10695,8 @@ def cmd_html(kind, text):
             out.append(span(m.group(), col))
             pos = m.end()
         return "".join(out) + span(t[pos:], base)
+    if kind not in ("cmd", "ans"):
+        text = tr(text)
     if kind == "cmd":
         name, _, rest = text.partition(" ")
         return span(name, CON_COL["cmd"], True) + (span(" ", base) + paint(rest) if rest else "")
@@ -10336,7 +11118,7 @@ class CommandTicker(QWidget):
 
     def add(self, kind, text):
         from PySide6.QtWidgets import QGraphicsOpacityEffect
-        lb = QLabel()
+        lb = no_tr(QLabel())                          # cmd_html translates the message itself (a log entry)
         lb.setTextFormat(Qt.TextFormat.RichText)
         lb.setStyleSheet("QLabel { background: transparent; border: none; padding: 0px 5px; }")
         lb.setText(f'<span style="white-space:pre;">{cmd_html(kind, text)}</span>')
@@ -10692,16 +11474,17 @@ def _pick(text, options, what):
     """The option named by the text: exactly, else by the beginning or a part (when unambiguous), without
     diacritics and case."""
     f = _fold(text)
-    exact = [o for o in options if _fold(o) == f]
+    names = lambda o: {_fold(o), _fold(tr(o))}        # the source value or its translation (interface language)
+    exact = [o for o in options if f in names(o)]
     if exact:
         return exact[0]
-    for test in (lambda o: _fold(o).startswith(f), lambda o: f in _fold(o)):
+    for test in (lambda o: any(x.startswith(f) for x in names(o)), lambda o: any(f in x for x in names(o))):
         m = [o for o in options if test(o)]
         if len(m) == 1:
             return m[0]
         if len(m) > 1:
-            raise CmdError(f"„{text}” pasuje do kilku wartości ({what}): " + "; ".join(m[:8]))
-    raise CmdError(f"Niepoprawna wartość „{text}” ({what}). Dozwolone: " + "; ".join(options))
+            raise CmdError(f"„{text}” pasuje do kilku wartości ({what}): " + "; ".join(tr(x) for x in m[:8]))
+    raise CmdError(f"Niepoprawna wartość „{text}” ({what}). Dozwolone: " + "; ".join(tr(x) for x in options))
 
 
 def _flag(text):
@@ -10886,9 +11669,9 @@ TAB_NAMES = {"USE": TAB_USE, "SNOW": TAB_SNOW, "WIND": TAB_WIND}
 def command_help(c):
     """The instruction of a command (shown by „COMMAND HELP”): usage, description, the questions it asks, shortcuts."""
     keys = [k for k, line in SHORTCUTS.keys.items() if cmd_name(line.split()[0]) == c.name]
-    out = [f"{c.name} {c.usage}".rstrip(), "  " + c.doc]
+    out = [f"{c.name} {tr(c.usage)}".rstrip(), "  " + tr(c.doc)]      # parts translated one by one
     if c.params:
-        out.append("  Bez argumentów pyta o: " + "; ".join(q[0].rstrip(":") for q in c.params))
+        out.append("  " + tr("Bez argumentów pyta o:") + " " + "; ".join(tr(q[0]).rstrip(":") for q in c.params))
     if keys:
         out.append("  Skróty: " + ", ".join(keys))
     return out
@@ -10908,8 +11691,8 @@ def _c_help(app, a):
     for c in COMMANDS.values():
         if c.group != grp:
             grp = c.group
-            out.append(f"\n{grp}:")
-        out.append(f"  {c.name:<20}{c.doc}")
+            out.append(f"\n{tr(grp)}:")
+        out.append(f"  {c.name:<20}{tr(c.doc)}")
     return out + ["\n<polecenie> HELP (albo HELP <polecenie>) pokazuje instrukcję polecenia. Tab uzupełnia nazwę, "
                   "↑ przywołuje ostatnie polecenia, pusty Enter powtarza ostatnie polecenie."]
 
@@ -11009,6 +11792,19 @@ def _c_update(app, a):
     chk.done.connect(done)
     chk.start()
     return "Sprawdzam dostępność nowej wersji…"
+
+
+@command("LANGUAGE", "[EN|PL]", "Język interfejsu (menu Język); bez argumentu – bieżący język. Zmiana działa od razu "
+         "we wszystkich oknach.", group="Konsola i opcje")
+def _c_language(app, a):
+    names = dict(LANGS)
+    if not a:
+        return f"Język interfejsu: {names[LANG]} ({LANG.upper()})."
+    code = a[0].lower()
+    if code not in names:
+        raise CmdError("Język: EN albo PL.")
+    app.set_language(code)
+    return f"Język interfejsu: {names[code]} ({code.upper()})."
 
 
 @command("ASSUMPTIONS", "", "Okno „Założenia do obliczeń”.", group="Konsola i opcje")
@@ -11655,6 +12451,7 @@ _ask_params("CONSOLE", ("Opcja [ON/OFF/LINES/TIME] (Enter – przełącz okno ko
             ("Wartość: liczba wierszy albo sekundy (Enter – pokaż bieżącą):", False, "one",
              lambda a: cmd_name(a[0]) in ("LINES", "TIME")))
 _ask_params("SHORTCUTSRESET", ("Zastąpić plik skrótów domyślnym? [YES]:", True, "one"))
+_ask_params("LANGUAGE", ("Język [EN/PL] (Enter – pokaż bieżący):", False, "one"))
 _ask_params("UPDATES", ("Opcja [AUTO] (Enter – sprawdź teraz):", False, "one"),
             ("Sprawdzanie przy starcie [ON/OFF]:", True, "one"))
 _ask_params("OPEN", ("Plik projektu (Enter – okno wyboru pliku):", False, "one"))
@@ -11722,6 +12519,8 @@ class App:
         """host=None – main object: main window + case adding panel. host=App – case editing panel
         (separate form, the same project)."""
         self.host = host or self
+        if host is None:                           # interface language (settings.json; a new installation – English)
+            apply_language(settings_get("language", LANG_DEFAULT), save=False)
         self.editor = None                         # editing panel (main object only)
         self.qapp = qapp
         self._pending = False
@@ -11950,8 +12749,8 @@ class App:
         cb = QComboBox()
         cb._var, cb._sync, cb._items = var, False, []
         self._set_items(cb, values)
-        cb.currentTextChanged.connect(lambda t, cb=cb: None if cb._sync else (
-            cb._var.set(t), self._user_field(self._var_name(cb._var), cb._var.get, now=True)))
+        cb.currentTextChanged.connect(lambda t, cb=cb: None if cb._sync else (     # the source value, not the
+            cb._var.set(cb.currentText()), self._user_field(self._var_name(cb._var), cb._var.get, now=True)))
         var.trace(lambda cb=cb: self._sync_combo(cb))
         if width:
             fm = QFontMetrics(cb.font())
@@ -12457,6 +13256,56 @@ class App:
         self._upd.done.connect(done)
         self._upd.start()
 
+    def language_menu(self, mb):
+        """Język / Language menu: the interface languages, each named in its own language (check mark – the current
+        one). The change works at once in every window."""
+        from PySide6.QtGui import QActionGroup
+        m = mb.addMenu("Język")
+        grp = QActionGroup(m)
+        grp.setExclusive(True)
+        acts = {}
+        for code, name in LANGS:
+            act = m.addAction(name)
+            act.setCheckable(True)
+            act.setChecked(code == LANG)
+            grp.addAction(act)
+            SHORTCUTS.bind(act, "LANGUAGE", echo=False, scope="app")
+            act.triggered.connect(lambda checked=False, c=code: (self.echo(f"LANGUAGE {c.upper()}"),
+                                                                 self.set_language(c)))
+            acts[code] = act
+        return acts
+
+    def set_language(self, code):
+        """Interface language (menu Język / Language, the command LANGUAGE): saved in settings.json, applied at
+        once to every window."""
+        host = self.host
+        changed = apply_language(code)
+        pw = getattr(host, "pw", None)
+        for c, act in (getattr(pw, "lang_actions", None) or {}).items():
+            act.setChecked(c == LANG)
+        if changed:
+            host._lang_refresh()
+        return changed
+
+    def _lang_refresh(self):
+        """After a language change: what is built from texts at drawing time (titles, 3D models, card previews,
+        the assumptions window)."""
+        for a in (self, self.editor):
+            if a is None:
+                continue
+            a.update_title()
+            a._scene_key = None
+            if getattr(a, "win3d", None) is not None and a.win3d.isVisible():
+                a._draw3d_now()
+            if getattr(a, "win_ass", None) is not None:
+                a._fill_assumptions()
+        pw = getattr(self, "pw", None)
+        if pw is not None:
+            pw.refresh_cases()
+            pw.update()
+            for w in pw.findChildren(QWidget):
+                w.update()
+
     def about_menu(self, mb):
         """O programie – an item right on the menu bar (opens the window; no drop-down menu)."""
         act = mb.addAction("O programie")
@@ -12738,29 +13587,10 @@ class App:
             d.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
             d.resize(820, 640)
             lay = QVBoxLayout(d)
-            t = QTextBrowser()
+            t = no_tr(QTextBrowser())                 # its own text in every language (ASSUMPTIONS_EN)
             t.setOpenLinks(False)
-            lines = []
-            for ln in ASSUMPTIONS.split("\n"):        # continuation lines joined – wrapping follows the window
-                if ln.startswith("  ") and lines:
-                    lines[-1] += " " + ln.strip()
-                else:
-                    lines.append(ln)
-            out = []
-            for i, ln in enumerate(lines):
-                nxt = lines[i + 1] if i + 1 < len(lines) else ""
-                e = html.escape(ln)
-                if set(nxt.strip()) == {"="}:
-                    out.append(f'<h2 style="margin:4px 0 6px 0;">{e}</h2>')
-                elif set(ln.strip()) == {"="} or not ln.strip():
-                    continue
-                elif ln.isupper() or ln[:5].isupper() and " – " in ln and not ln.startswith(("•", " ")):
-                    out.append(f'<h3 style="margin:14px 0 4px 0;">{e}</h3>')
-                elif ln.startswith("•"):
-                    out.append(f'<p style="margin:2px 0 3px 18px; text-indent:-12px;">{e}</p>')
-                else:
-                    out.append(f'<p style="margin:12px 0 2px 0;">{e}</p>')
-            t.setHtml("".join(out))
+            self._ass_view = t
+            self._fill_assumptions()
             lay.addWidget(t, 1)
             b = QPushButton("Zamknij")
             b.clicked.connect(lambda checked=False: d.close())
@@ -12772,6 +13602,34 @@ class App:
         d.show()
         d.raise_()
         d.activateWindow()
+
+    def _fill_assumptions(self):
+        """The assumptions text of the current language as HTML (continuation lines joined – wrapping follows
+        the window)."""
+        t = getattr(self, "_ass_view", None)
+        if t is None:
+            return
+        lines = []
+        for ln in (ASSUMPTIONS_EN if LANG == "en" else ASSUMPTIONS).split("\n"):
+            if ln.startswith("  ") and lines:
+                lines[-1] += " " + ln.strip()
+            else:
+                lines.append(ln)
+        out = []
+        for i, ln in enumerate(lines):
+            nxt = lines[i + 1] if i + 1 < len(lines) else ""
+            e = html.escape(ln)
+            if set(nxt.strip()) == {"="}:
+                out.append(f'<h2 style="margin:4px 0 6px 0;">{e}</h2>')
+            elif set(ln.strip()) == {"="} or not ln.strip():
+                continue
+            elif ln.isupper() or ln[:5].isupper() and " – " in ln and not ln.startswith(("•", " ")):
+                out.append(f'<h3 style="margin:14px 0 4px 0;">{e}</h3>')
+            elif ln.startswith("•"):
+                out.append(f'<p style="margin:2px 0 3px 18px; text-indent:-12px;">{e}</p>')
+            else:
+                out.append(f'<p style="margin:12px 0 2px 0;">{e}</p>')
+        t.setHtml("".join(out))
 
     def _tab_changed(self, i):
         use = i == TAB_USE
@@ -13805,7 +14663,7 @@ class App:
                     err=self.status.text(), state=self.get_state(),
                     calc=dict(sgeo=self.sgeo, snow=self.snow, wgeo=self.wgeo, wind=self.wind, mode=mode,
                               snow_case=self.snow_case.get()),
-                    report=(self.wind_text if mode == "wiatr" else self.snow_text).toHtml())
+                    report=source_html(self.wind_text if mode == "wiatr" else self.snow_text))
 
     def _compute(self, case):
         mode = case["extra"].get("mode", "śnieg")
@@ -13997,7 +14855,7 @@ class App:
         host = self.host
         n = host.project["next"]
         host.project["next"] = n + 1
-        case = {"id": n, "name": f"Przypadek {n}", "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        case = {"id": n, "name": tr(f"Przypadek {n}"), "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "extra": {"mode": "własne"}, "state": {"wlasne": data}}
         host.project["cases"].insert(0, case)
         host._apply_result(case, host._compute(case))
@@ -14118,7 +14976,7 @@ class App:
             from datetime import datetime
             n = self.project["next"]
             self.project["next"] = n + 1
-            case = {"id": n, "name": f"Przypadek {n}", "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            case = {"id": n, "name": tr(f"Przypadek {n}"), "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "extra": extra}
             self.project["cases"].insert(0, case)                    # newest on top
             msg = f"Dodano do projektu: „{case['name']}”."

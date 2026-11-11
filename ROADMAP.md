@@ -84,7 +84,8 @@ Own loads are available; further tools will be added as users need them.
 
 ## Stage 6. Languages and foreign codes
 
-- Several interface and report languages (Polish as the base language, English first).
+- Further interface and report languages (English and Polish are available; Polish is the source language of the
+  texts, translations in `kayenn_lang_<code>.json`).
 - Extension to countries using Eurocode EN 1991-1 – by supporting their National Annexes (nationally determined
   parameters, load zone maps). The common code basis makes this a fairly natural direction.
 - Codes outside the Eurocode system – a long-term direction, depending on interest and help from the community.

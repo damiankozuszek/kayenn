@@ -143,8 +143,10 @@ def package_macos(app):
 DESKTOP = """[Desktop Entry]
 Type=Application
 Name=KAYENN
-GenericName=Obciążenia budowlane
-Comment=Obciążenia śniegiem, wiatrem, użytkowe i własne
+GenericName=Building loads
+GenericName[pl]=Obciążenia budowlane
+Comment=Snow, wind, imposed and own loads
+Comment[pl]=Obciążenia śniegiem, wiatrem, użytkowe i własne
 Exec=/opt/kayenn/KAYENN %f
 Icon=kayenn
 Terminal=false
@@ -155,7 +157,8 @@ StartupWMClass=KAYENN
 MIME = """<?xml version="1.0" encoding="UTF-8"?>
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="application/x-kayenn">
-    <comment>Projekt KAYENN</comment>
+    <comment>KAYENN project</comment>
+    <comment xml:lang="pl">Projekt KAYENN</comment>
     <sub-class-of type="application/json"/>
     <icon name="application-x-kayenn"/>
     <glob pattern="*.kayenn"/>

@@ -10,6 +10,7 @@ VERSION = re.search(r'^APP_VERSION = "([^"]+)"', open(os.path.join(ROOT, "kayenn
                     re.M).group(1)
 
 datas = [(os.path.join(ROOT, "kayenn_materials_pl.txt"), "."),
+         (os.path.join(ROOT, "kayenn_lang_en.json"), "."),
          (os.path.join(ROOT, "fonts"), "fonts"),
          (os.path.join(ROOT, "LICENSE"), "."),
          (os.path.join(ROOT, "THIRD_PARTY_NOTICES.md"), ".")]
@@ -100,7 +101,7 @@ if sys.platform == "darwin":
             "LSMinimumSystemVersion": "12.0",
             "CFBundleDevelopmentRegion": "pl",
             "CFBundleDocumentTypes": [{
-                "CFBundleTypeName": "Projekt KAYENN",
+                "CFBundleTypeName": "KAYENN project",
                 "CFBundleTypeRole": "Editor",
                 "LSHandlerRank": "Owner",
                 "CFBundleTypeIconFile": "kayenn.icns",
@@ -108,7 +109,7 @@ if sys.platform == "darwin":
             }],
             "UTExportedTypeDeclarations": [{
                 "UTTypeIdentifier": "pl.kayenn.projekt",
-                "UTTypeDescription": "Projekt KAYENN",
+                "UTTypeDescription": "KAYENN project",
                 "UTTypeConformsTo": ["public.json", "public.data"],
                 "UTTypeIconFile": "kayenn.icns",
                 "UTTypeTagSpecification": {"public.filename-extension": ["kayenn"]},

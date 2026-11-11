@@ -14,8 +14,9 @@ and what you got. Attach the `.kayenn` project file if you can (remove confident
 
 ## Code contributions
 
-- The project language is **English** (code, comments, documentation, commit messages). The **program interface
-  stays Polish**. Keys of the `.kayenn` file format are Polish and must not be renamed (compatibility).
+- The project language is **English** (code, comments, documentation, commit messages). The program
+  interface is English and Polish: texts are written in Polish in the code and translated in `kayenn_lang_en.json`
+  (add an entry for every new text). Keys of the `.kayenn` file format are Polish and must not be renamed (compatibility).
 - Before you start, read [DEVELOPMENT.md](DEVELOPMENT.md) (running from source, packages). For a bigger
   change open an issue first.
 - Every change must work on **Windows, macOS and Linux**.

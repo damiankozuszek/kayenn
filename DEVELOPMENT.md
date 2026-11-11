@@ -1,8 +1,12 @@
 # KAYENN – information for developers
 
 The project language (code, comments, documentation, commit messages) is **English**. The program interface,
-reports, printouts and the material database are in **Polish** – keep them that way unless a new interface
-language is being added.
+reports and printouts are available in **English** (the default after installation) and **Polish** (menu
+Language / the command `LANGUAGE`, the change works at once). The texts in the code are written in Polish – the
+source language; the English translations are in `kayenn_lang_en.json` (Polish text → English; a key with `{}` is a
+pattern). They are applied where the texts reach Qt, so the program logic and the `.kayenn` files always keep the
+Polish texts. **A new interface text needs its English entry in `kayenn_lang_en.json`** – `test_language` in the
+tests looks for Polish texts left in the English interface. The material database stays in Polish.
 
 ## Running from source
 

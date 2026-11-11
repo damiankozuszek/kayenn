@@ -14,7 +14,7 @@ DefaultDirName={autopf}\KAYENN
 DefaultGroupName=KAYENN
 DisableProgramGroupPage=yes
 ; install for the current user (no administrator rights) or for all users – chosen in the installer
-; (the installer texts stay in Polish – they are part of the program interface)
+; the installer is in English (default) or Polish – chosen at its start; the program starts in English
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
@@ -32,11 +32,20 @@ ChangesAssociations=yes
 CloseApplications=yes
 
 [Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "polish"; MessagesFile: "compiler:Languages\Polish.isl"
+
+[CustomMessages]
+english.AssocTask=Open .kayenn project files with KAYENN
+english.AssocGroup=File associations:
+english.FileTypeName=KAYENN project
+polish.AssocTask=Otwieraj pliki projektu .kayenn programem KAYENN
+polish.AssocGroup=Skojarzenia plików:
+polish.FileTypeName=Projekt KAYENN
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
-Name: "assoc"; Description: "Otwieraj pliki projektu .kayenn programem KAYENN"; GroupDescription: "Skojarzenia plików:"
+Name: "assoc"; Description: "{cm:AssocTask}"; GroupDescription: "{cm:AssocGroup}"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -47,7 +56,7 @@ Name: "{autodesktop}\KAYENN"; Filename: "{app}\KAYENN.exe"; Tasks: desktopicon
 
 [Registry]
 Root: HKA; Subkey: "Software\Classes\.kayenn"; ValueType: string; ValueName: ""; ValueData: "KAYENN.Projekt"; Flags: uninsdeletevalue; Tasks: assoc
-Root: HKA; Subkey: "Software\Classes\KAYENN.Projekt"; ValueType: string; ValueName: ""; ValueData: "Projekt KAYENN"; Flags: uninsdeletekey; Tasks: assoc
+Root: HKA; Subkey: "Software\Classes\KAYENN.Projekt"; ValueType: string; ValueName: ""; ValueData: "{cm:FileTypeName}"; Flags: uninsdeletekey; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\KAYENN.Projekt\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\_internal\branding\kayenn.ico"",0"; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\KAYENN.Projekt\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\KAYENN.exe"" ""%1"""; Tasks: assoc
 
