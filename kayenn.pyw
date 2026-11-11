@@ -6025,13 +6025,9 @@ class CaseCard(QFrame):
         self.name_edit.returnPressed.connect(self._rename_done)
         self.name_edit.editingFinished.connect(self._rename_done)
         hd.addWidget(self.name_edit)
-        self.np_badge = QLabel("nie drukowany")       # left out of the printout (Drukuj in the menu)
-        self.np_badge.setObjectName("muted")
-        self.np_badge.setStyleSheet(css_pt("QLabel { color: #b45309; border: 1px solid #f0c48a; border-radius: 4px; "
-                                           "padding: 0px 5px; font-size: 8pt; }"))
-        self.np_badge.setToolTip("Przypadek roboczy – nie trafia na wydruk ani do numeracji (Drukuj w menu karty)")
-        self.np_badge.setVisible(not case_printed(case))
-        hd.addWidget(self.np_badge)
+        self.ck_print = print_check(lambda on: self.pw.set_printed({self.case["id"]}, on))
+        self._group_off = False                      # inside a non-printed group (relayout)
+        hd.addWidget(self.ck_print)
         self.info = QLabel("")
         self.info.setObjectName("muted")
         hd.addWidget(self.info, 1)
@@ -6053,9 +6049,17 @@ class CaseCard(QFrame):
         self._update_info()
 
     # --- header
+    def set_print_state(self, group_off=None):
+        """The Drukowany checkbox: the case's own flag; inside a non-printed group – unchecked and greyed."""
+        if group_off is not None:
+            self._group_off = bool(group_off)
+        set_print_check(self.ck_print, case_printed(self.case) and not self._group_off, not self._group_off,
+                        "Grupa nie jest drukowana – zaznacz „drukowany” przy grupie" if self._group_off else
+                        "Na wydruku i w numeracji (odznaczony – przypadek roboczy: bez wydruku, numer z literą)")
+
     def _update_info(self):
         ex = self.case["extra"]
-        self.np_badge.setVisible(not case_printed(self.case))
+        self.set_print_state()
         if ex.get("mode") == "własne":
             self.info.setText(f"  Własne · {lab_info(self.case['state'].get('wlasne'))} · "
                               f"dodano {self.case.get('created', '')}")
@@ -6096,6 +6100,7 @@ class CaseCard(QFrame):
         a6 = m.addAction("Drukuj" if len(ids) == 1 else f"Drukuj zaznaczone ({len(ids)})")
         a6.setCheckable(True)
         a6.setChecked(case_printed(self.case))
+        a6.setEnabled(not self._group_off)
         act = m.exec(self.mapToGlobal(pos))
         if act is a6:
             self.pw.set_printed(ids, a6.isChecked())
@@ -6657,25 +6662,43 @@ def case_printed(case):
 
 
 def ptree_numbers(tree, skip=()):
-    """Numbers by position: top level 1, 2, …; inside a group 2.1, 2.2, … → {id(node): "2.1"}. The cases in `skip`
-    (left out of the printout) are not counted: they take the number of the printed one before them plus a letter –
-    2.1, 2.1A, 2.1B, 2.2 (before the first printed one: 2.0A)."""
+    """Numbers by position: top level 1, 2, …; inside a group 2.1, 2.2, … → {id(node): "2.1"}. Items left out of the
+    printout – the cases in `skip` and the groups with node["noprint"] – are not counted: they take the number of the
+    printed item before them plus a letter (2.1, 2.1A, 2.1B, 2.2; before the first printed one: 2.0A). Everything inside
+    a non-printed group is numbered by position and ends with the group's letter: group 1A → 1.1A, 1.2A."""
     out = {}
 
-    def walk(items, prefix):
+    def label(num, sfx):
+        return ".".join(str(x) for x in num) + sfx + ("." if len(num) == 1 else "")
+
+    def walk(items, prefix, sfx):
         i = k = 0
         for n in items:
-            if "case" in n and n["case"] in skip:
+            off = not sfx and (("case" in n and n["case"] in skip) or ("group" in n and n.get("noprint")))
+            if off:
                 k += 1
-                num = prefix + (i,)
-                out[id(n)] = ".".join(str(x) for x in num) + _letters(k) + ("." if len(num) == 1 else "")
-                continue
-            i, k = i + 1, 0
-            num = prefix + (i,)
-            out[id(n)] = ".".join(str(x) for x in num) + ("." if len(num) == 1 else "")
+                num, s_ = prefix + (i,), _letters(k)
+            else:
+                i, k = i + 1, 0
+                num, s_ = prefix + (i,), sfx
+            out[id(n)] = label(num, s_)
             if "group" in n:
-                walk(n["items"], num)
-    walk(tree, ())
+                walk(n["items"], num, s_)
+    walk(tree, (), "")
+    return out
+
+
+def noprint_ids(project):
+    """Ids of the cases left out of the printout: their own Drukowany unchecked or inside a non-printed group."""
+    out = {c["id"] for c in project["cases"] if not case_printed(c)}
+
+    def walk(items, off):
+        for n in items:
+            if "group" in n:
+                walk(n["items"], off or bool(n.get("noprint")))
+            elif off:
+                out.add(n["case"])
+    walk(project.get("tree") or [], False)
     return out
 
 
@@ -6693,8 +6716,9 @@ def ptree_new_group(tree, name=None, items=(), auto=True):
 def ptree_dump(items):
     """Tree for the .kayenn file (Polish keys like the rest of the format): case – its id, group – a dict."""
     return [n["case"] if "case" in n else
-            {"grupa": n["name"], "id": n["group"], "otwarta": bool(n.get("open", True)),
-             "auto": bool(n.get("auto")), "elementy": ptree_dump(n["items"])} for n in items]
+            dict({"grupa": n["name"], "id": n["group"], "otwarta": bool(n.get("open", True)),
+                  "auto": bool(n.get("auto")), "elementy": ptree_dump(n["items"])},
+                 **({"drukuj": False} if n.get("noprint") else {})) for n in items]
 
 
 def ptree_load(data):
@@ -6705,7 +6729,7 @@ def ptree_load(data):
         elif isinstance(n, dict) and "elementy" in n:
             out.append({"group": int(n.get("id") or 0), "name": str(n.get("grupa") or CASE_GROUP_NAME),
                         "items": ptree_load(n.get("elementy")), "open": bool(n.get("otwarta", True)),
-                        "auto": bool(n.get("auto"))})
+                        "auto": bool(n.get("auto")), **({"noprint": True} if n.get("drukuj") is False else {})})
     used = set()
     for g, _, _, _ in ptree_walk(out):                   # group ids unique
         if "group" in g:
@@ -6725,6 +6749,27 @@ def group_chevron(opened, on_click):
     b.setIcon(QIcon(chevron_pixmap("down" if opened else "right", ACCENT if opened else "#374151", 16, 2.0)))
     b.clicked.connect(lambda checked=False: on_click())
     return b
+
+
+def print_check(on_toggle):
+    """The Drukowany checkbox of a case card / group header (green „drukowany”, orange „nie drukowany”)."""
+    ck = QCheckBox("drukowany")
+    ck.setChecked(True)
+    ck.setCursor(Qt.CursorShape.PointingHandCursor)
+    ck.toggled.connect(lambda on: None if getattr(ck, "_sync", False) else on_toggle(bool(on)))
+    return ck
+
+
+def set_print_check(ck, on, enabled, tip):
+    ck._sync = True
+    ck.setChecked(bool(on))
+    ck._sync = False
+    ck.setEnabled(bool(enabled))
+    ck.setText("drukowany" if on else "nie drukowany")
+    col = "#15803d" if on else "#b45309"
+    ck.setStyleSheet(css_pt(f"QCheckBox {{ color: {col}; font-size: 8pt; padding: 0px 6px; }}"
+                            "QCheckBox:disabled { color: #9ca3af; }"))
+    ck.setToolTip(tip)
 
 
 class CaseGroupHeader(QFrame):
@@ -6764,9 +6809,20 @@ class CaseGroupHeader(QFrame):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)      # Enter on the group – expand / collapse
         self.count = QLabel(f"({count})")
         self.count.setObjectName("muted")
-        h.addWidget(self.count, 1)
+        h.addWidget(self.count)
+        self.ck_print = print_check(lambda on: pw.set_group_printed(node, on))
+        h.addWidget(self.ck_print)
+        h.addStretch(1)
+        self.set_print_state(False)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(lambda pos: pw.group_menu(self, self.mapToGlobal(pos)))
+
+    def set_print_state(self, parent_off):
+        """Drukowany of the group: unchecked – everything in it is left out of the printout (numbers with letters);
+        inside a non-printed group – greyed."""
+        set_print_check(self.ck_print, not self.node.get("noprint") and not parent_off, not parent_off,
+                        "Grupa nadrzędna nie jest drukowana" if parent_off else
+                        "Na wydruku (odznaczona – cała grupa robocza: bez wydruku, numery z literą)")
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
@@ -10409,10 +10465,11 @@ class ProjectWindow(QWidget):
         self.heads, self.rows = [], []
         count = lambda n: sum(1 if "case" in c else count(c) for c in n["items"])
 
-        def add(items, depth, visible, parent):
+        def add(items, depth, visible, parent, off=False):
             for n in items:
                 if "group" in n:
                     w = CaseGroupHeader(self, n, nums[id(n)], count(n))
+                    w.set_print_state(off)
                     if depth:
                         w.setStyleSheet(f"QFrame#caseGroup {{ margin-left: {depth * CASE_INDENT}px; }}")
                     self.heads.append(w)
@@ -10423,13 +10480,14 @@ class ProjectWindow(QWidget):
                         continue
                     w.set_number(nums[id(n)])
                     w.set_level(depth)
+                    w.set_print_state(off)
                     opened = False
                 lay.insertWidget(lay.count() - 1, w)
                 w.setVisible(visible)
                 if visible:
                     self.rows.append(dict(w=w, node=n, level=depth, open=opened, parent=parent))
                 if "group" in n:
-                    add(n["items"], depth + 1, visible and opened, n)
+                    add(n["items"], depth + 1, visible and opened, n, off or bool(n.get("noprint")))
         add(proj["tree"], 0, True, None)
         self.empty.setVisible(not self.cards)
         self.list_bar.setVisible(bool(self.cards))
@@ -10754,12 +10812,23 @@ class ProjectWindow(QWidget):
                 c["extra"].pop("noprint", None)
             else:
                 c["extra"]["noprint"] = True
-        for card in self.cards:
-            if card.case in ch:
-                card._update_info()
         self.relayout()
         self.app.project_changed()
         return len(ch)
+
+    def set_group_printed(self, node, on):
+        """Drukowany of a group: unchecked – everything in it is left out of the printout (numbers with the group's
+        letter: 1A → 1.1A, 1.2A); the cases keep their own flags for when the group is printed again."""
+        if bool(on) == (not node.get("noprint")):
+            return 0
+        self.app.echo(f"PRINTCASE {node_no(self.app, node)} {'ON' if on else 'OFF'}")
+        if on:
+            node.pop("noprint", None)
+        else:
+            node["noprint"] = True
+        self.relayout()
+        self.app.project_changed()
+        return 1
 
     def duplicate_case(self, case):
         """Duplikuj – copy of the case right below it, name with the suffix „ - kopia”."""
@@ -12721,19 +12790,16 @@ def _c_delete(app, a):
     return f"Usunięto przypadków: {len(cases)}."
 
 
-@command("PRINTCASE", "numer… ON|OFF", "Przypadki na wydruku (ON) albo robocze – bez wydruku i poza numeracją "
-         "(OFF; numer z literą: 2.1A). Jak „Drukuj” w menu karty.", group="Lista przypadków")
+@command("PRINTCASE", "numer… ON|OFF", "Przypadki lub grupy na wydruku (ON) albo robocze – bez wydruku i poza "
+         "numeracją (OFF; numer z literą: 2.1A, grupa 2A i jej przypadki 2.1A). Jak pole „drukowany”.",
+         group="Lista przypadków")
 def _c_printcase(app, a):
     if len(a) < 2:
         raise CmdError("Użycie: PRINTCASE numer… ON|OFF")
     on = _flag(a[-1])
-    ids = []
-    for tok in a[:-1]:
-        n = _node_ref(app, tok)
-        if "case" not in n:
-            raise CmdError(f"„{tok}” to grupa – to polecenie dotyczy przypadku.")
-        ids.append(n["case"])
-    k = app.pw.set_printed(set(ids), on)
+    nodes = [_node_ref(app, tok) for tok in a[:-1]]
+    k = sum(app.pw.set_group_printed(n, on) for n in nodes if "group" in n)
+    k += app.pw.set_printed({n["case"] for n in nodes if "case" in n}, on)
     return (f"Na wydruku: {k} przyp." if on else f"Bez wydruku (robocze): {k} przyp.") if k else "Bez zmian."
 
 
@@ -13940,9 +14006,9 @@ class App:
         if not self.project["cases"]:
             QMessageBox.information(self.pw or self.win, "Otwórz w edytorze tekstu", "Projekt nie zawiera przypadków.")
             return None
-        if not any(case_printed(c) for c in self.project["cases"]):
+        if len(noprint_ids(self.project)) >= len(self.project["cases"]):
             QMessageBox.information(self.pw or self.win, "Otwórz w edytorze tekstu", "Żaden przypadek nie jest "
-                                    "przeznaczony do druku (Drukuj w menu karty przypadku).")
+                                    "przeznaczony do druku (pole „drukowany” przy przypadku lub grupie).")
             return None
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices, QTextDocumentWriter
@@ -15829,7 +15895,8 @@ class App:
                 else:
                     num_of[n["case"]], path_of[n["case"]] = nums[id(n)], path
         walk(self.project["tree"], [])
-        for i, case in enumerate([c for c in self.project["cases"] if case_printed(c)]):
+        skip_ = noprint_ids(self.project)
+        for i, case in enumerate([c for c in self.project["cases"] if c["id"] not in skip_]):
             grp = " › ".join(path_of.get(case["id"], []))
             title = f"{num_of.get(case['id'], '')} {case['name']}".strip()
             head_i = esc(grp)
@@ -15867,9 +15934,9 @@ class App:
         if not self.project["cases"]:
             QMessageBox.information(self.pw or self.win, "Drukuj", "Projekt nie zawiera przypadków.")
             return
-        if not any(case_printed(c) for c in self.project["cases"]):
+        if len(noprint_ids(self.project)) >= len(self.project["cases"]):
             QMessageBox.information(self.pw or self.win, "Drukuj", "Żaden przypadek nie jest przeznaczony do druku "
-                                    "(Drukuj w menu karty przypadku).")
+                                    "(pole „drukowany” przy przypadku lub grupie).")
             return
         try:
             from PySide6.QtPrintSupport import QPrinter
