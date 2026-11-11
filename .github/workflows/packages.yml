@@ -1,27 +1,62 @@
-# Tests and installation packages of KAYENN for Windows, macOS and Linux.
-# Run: Actions tab → „Installation packages” → Run workflow, or push a v* tag (e.g. v0.1.0) –
-# then the packages also go to a draft release (Releases).
+# Installation packages of KAYENN for Windows, macOS (Apple Silicon and Intel) and Linux.
+# - push a v* tag (e.g. v0.3.0): the release is published at once (text .github/RELEASE_BODY.md) and every system
+#   adds its packages as soon as its build is finished – a system that fails or waits (e.g. GitHub has no free
+#   macOS runner) does not hold the others;
+# - every 6 hours: the latest release is checked and the packages missing in it are built and added;
+# - Actions → „Installation packages” → Run workflow: tag empty – a test build of the branch (artifacts only);
+#   with a tag – the packages of that release (the systems given, else the missing ones).
+# Which systems and which release: .github/release_plan.py.
 name: Installation packages
 
 on:
-  workflow_dispatch:
   push:
     tags: ["v*"]
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.2.0); empty – a test build of the branch, no release"
+        required: false
+        default: ""
+      systems:
+        description: "Systems: Windows, macOS, macOS-Intel, Linux (comma separated); empty – the missing ones / all"
+        required: false
+        default: ""
 
 permissions:
   contents: write
 
+concurrency:                          # scheduled checks one after another (no double uploads)
+  group: packages-${{ github.event_name == 'schedule' && 'schedule' || github.run_id }}
+  cancel-in-progress: false
+
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.p.outputs.tag }}
+      matrix: ${{ steps.p.outputs.matrix }}
+      any: ${{ steps.p.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: p
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          IN_TAG: ${{ inputs.tag }}
+          IN_SYSTEMS: ${{ inputs.systems }}
+        run: python .github/release_plan.py
+
   package:
+    needs: plan
+    if: needs.plan.outputs.any == 'true'
     name: ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { name: Windows, os: windows-latest }
-          - { name: macOS, os: macos-15 }
-          - { name: macOS-Intel, os: macos-15-intel }
-          - { name: Linux, os: ubuntu-22.04 }
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
@@ -29,6 +64,8 @@ jobs:
       PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.tag || github.ref }}
 
       - uses: actions/setup-python@v5
         with:
@@ -68,20 +105,12 @@ jobs:
           name: screenshots-${{ matrix.name }}
           path: dist/screenshots-*
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: package
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          path: release
-          pattern: KAYENN-*
-          merge-multiple: true
-      - uses: softprops/action-gh-release@v2
-        with:
-          body_path: .github/RELEASE_BODY.md   # release text (update it before tagging a new version)
-          files: release/*              # the artifacts are downloaded to release/ (not packaging/)
-          fail_on_unmatched_files: true # without this a wrong path silently gave a release with only the source code
-          draft: true
+      - name: Add the packages to the release
+        if: needs.plan.outputs.tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=$(find dist -maxdepth 1 -type f)
+          echo "$files"
+          gh release upload "${{ needs.plan.outputs.tag }}" $files --clobber --repo "${{ github.repository }}"

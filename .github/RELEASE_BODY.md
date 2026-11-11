@@ -48,6 +48,9 @@ clause of the code), crashes, unclear behaviour and awkward English wording are 
 | macOS 12+ | `KAYENN-0.2.0-macos-arm64.dmg` (Apple Silicon) or `…-macos-x64.dmg` (Intel) |
 | Linux | `kayenn_0.2.0_amd64.deb` or `KAYENN-0.2.0-linux-x86_64.tar.gz` |
 
+The packages are added here as soon as the build for each system is finished – if the file for your system is
+missing, check again in a few hours. On Macs with Apple Silicon the Intel package works too (through Rosetta 2).
+
 The program is not digitally signed yet – on the first start the system may warn about an unknown publisher
 (Windows: “More info” → “Run anyway”; macOS: right click → “Open”).
 
