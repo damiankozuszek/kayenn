@@ -1,0 +1,17 @@
+# The page behind Nginx Proxy Manager (NPM): no ports are published, NPM reaches the container
+# by its name over a shared Docker network.
+services:
+  web:
+    image: nginx:alpine
+    container_name: kayenn-web
+    restart: unless-stopped
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./site:/usr/share/nginx/html:ro
+    networks:
+      - npm
+
+networks:
+  npm:
+    external: true
+    name: ${NPM_NETWORK:-npm_default}   # the network of the NPM container: docker network ls
