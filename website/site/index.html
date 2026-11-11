@@ -45,7 +45,7 @@ try { if (localStorage.getItem("kayenn-lang") === "pl") location.replace("/pl/")
       <a class="btn" href="https://github.com/damiankozuszek/kayenn/releases/latest" id="dl">Download KAYENN</a>
       <a class="btn ghost" href="https://github.com/damiankozuszek/kayenn">Source code</a>
     </div>
-    <div class="sub" id="ver">MIT licence · user interface in Polish</div>
+    <div class="sub" id="ver">MIT licence · English and Polish interface</div>
     <div class="shot"><img src="/img/wiatr-3d.png" width="798" height="720"
       alt="3D model of a building with the wind load distribution in KAYENN"></div>
   </div>
@@ -118,8 +118,8 @@ try { if (localStorage.getItem("kayenn-lang") === "pl") location.replace("/pl/")
 
   <section id="help">
     <div class="help">
-      <h2>The first community release</h2>
-      <p>This is version 0.1.0 – many bugs have already been fixed, but one person cannot catch everything.
+      <h2>A testing release</h2>
+      <p>This is version 0.2.0 – many bugs have already been fixed, but one person cannot catch everything.
         Test the program and report a problem, especially a wrong calculation result (with the clause of the code).</p>
       <div class="btns">
         <a class="btn" href="https://github.com/damiankozuszek/kayenn/issues/new/choose">Report a problem</a>
@@ -148,7 +148,7 @@ fetch("https://api.github.com/repos/damiankozuszek/kayenn/releases/latest")
   .then(function(j){
     if(!j||!j.tag_name) return;
     document.getElementById("dl").textContent="Download KAYENN "+j.tag_name.replace(/^v/,"");
-    document.getElementById("ver").textContent="Latest version: "+j.tag_name+" · MIT licence · user interface in Polish";
+    document.getElementById("ver").textContent="Latest version: "+j.tag_name+" · MIT licence · English and Polish interface";
   }).catch(function(){});
 </script>
 </body>

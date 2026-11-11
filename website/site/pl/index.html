@@ -41,7 +41,7 @@
       <a class="btn" href="https://github.com/damiankozuszek/kayenn/releases/latest" id="dl">Pobierz KAYENN</a>
       <a class="btn ghost" href="https://github.com/damiankozuszek/kayenn">Kod źródłowy</a>
     </div>
-    <div class="sub" id="ver">Licencja MIT · interfejs w języku polskim</div>
+    <div class="sub" id="ver">Licencja MIT · interfejs po angielsku i po polsku</div>
     <div class="shot"><img src="/img/wiatr-3d.png" width="798" height="720"
       alt="Model 3D budynku z rozkładem obciążenia wiatrem w KAYENN"></div>
   </div>
@@ -113,8 +113,8 @@
 
   <section id="pomoc">
     <div class="help">
-      <h2>Pierwsza wersja dla społeczności</h2>
-      <p>To wersja 0.1.0 – wiele błędów już wyeliminowano, ale jedna osoba nie wyłapie wszystkiego.
+      <h2>Wersja do testowania</h2>
+      <p>To wersja 0.2.0 – wiele błędów już wyeliminowano, ale jedna osoba nie wyłapie wszystkiego.
         Przetestuj program i zgłoś problem, zwłaszcza błędny wynik obliczeń (z punktem normy).</p>
       <div class="btns">
         <a class="btn" href="https://github.com/damiankozuszek/kayenn/issues/new/choose">Zgłoś problem</a>
@@ -143,7 +143,7 @@ fetch("https://api.github.com/repos/damiankozuszek/kayenn/releases/latest")
   .then(function(j){
     if(!j||!j.tag_name) return;
     document.getElementById("dl").textContent="Pobierz KAYENN "+j.tag_name.replace(/^v/,"");
-    document.getElementById("ver").textContent="Najnowsza wersja: "+j.tag_name+" · licencja MIT · interfejs w języku polskim";
+    document.getElementById("ver").textContent="Najnowsza wersja: "+j.tag_name+" · licencja MIT · interfejs po angielsku i po polsku";
   }).catch(function(){});
 </script>
 </body>
