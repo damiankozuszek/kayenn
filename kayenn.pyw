@@ -6752,7 +6752,7 @@ def group_chevron(opened, on_click):
 
 
 def print_check(on_toggle):
-    """The Drukowany checkbox of a case card / group header (green „drukowany”, orange „nie drukowany”)."""
+    """The Drukowany checkbox of a case card / group header (green „drukowany”, orange „niedrukowany”)."""
     ck = QCheckBox("drukowany")
     ck.setChecked(True)
     ck.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -6765,7 +6765,7 @@ def set_print_check(ck, on, enabled, tip):
     ck.setChecked(bool(on))
     ck._sync = False
     ck.setEnabled(bool(enabled))
-    ck.setText("drukowany" if on else "nie drukowany")
+    ck.setText("drukowany" if on else "niedrukowany")
     col = "#15803d" if on else "#b45309"
     ck.setStyleSheet(css_pt(f"QCheckBox {{ color: {col}; font-size: 8pt; padding: 0px 6px; }}"
                             "QCheckBox:disabled { color: #9ca3af; }"))
