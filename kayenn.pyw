@@ -6025,6 +6025,13 @@ class CaseCard(QFrame):
         self.name_edit.returnPressed.connect(self._rename_done)
         self.name_edit.editingFinished.connect(self._rename_done)
         hd.addWidget(self.name_edit)
+        self.np_badge = QLabel("nie drukowany")       # left out of the printout (Drukuj in the menu)
+        self.np_badge.setObjectName("muted")
+        self.np_badge.setStyleSheet(css_pt("QLabel { color: #b45309; border: 1px solid #f0c48a; border-radius: 4px; "
+                                           "padding: 0px 5px; font-size: 8pt; }"))
+        self.np_badge.setToolTip("Przypadek roboczy – nie trafia na wydruk ani do numeracji (Drukuj w menu karty)")
+        self.np_badge.setVisible(not case_printed(case))
+        hd.addWidget(self.np_badge)
         self.info = QLabel("")
         self.info.setObjectName("muted")
         hd.addWidget(self.info, 1)
@@ -6048,6 +6055,7 @@ class CaseCard(QFrame):
     # --- header
     def _update_info(self):
         ex = self.case["extra"]
+        self.np_badge.setVisible(not case_printed(self.case))
         if ex.get("mode") == "własne":
             self.info.setText(f"  Własne · {lab_info(self.case['state'].get('wlasne'))} · "
                               f"dodano {self.case.get('created', '')}")
@@ -6084,7 +6092,13 @@ class CaseCard(QFrame):
         m.addSeparator()
         ids = self.pw.menu_ids(self.case)
         a5 = m.addAction("Utwórz grupę" if len(ids) == 1 else f"Utwórz grupę z zaznaczonych ({len(ids)})")
+        m.addSeparator()
+        a6 = m.addAction("Drukuj" if len(ids) == 1 else f"Drukuj zaznaczone ({len(ids)})")
+        a6.setCheckable(True)
+        a6.setChecked(case_printed(self.case))
         act = m.exec(self.mapToGlobal(pos))
+        if act is a6:
+            self.pw.set_printed(ids, a6.isChecked())
         if act is a5:
             self.pw.group_cases(ids)
         elif act is a4:
@@ -6628,18 +6642,46 @@ def ptree_sync(project):
     cases[:] = [by_id[n["case"]] for n, _, _, _ in ptree_walk(tree) if "case" in n]
 
 
-def ptree_numbers(tree):
-    """Numbers by position: top level 1, 2, …; inside a group 2.1, 2.2, … → {id(node): "2.1"}."""
+def _letters(k):
+    """1 → A, 26 → Z, 27 → AA (the suffix of the cases left out of the printout)."""
+    out = ""
+    while k > 0:
+        k, r = divmod(k - 1, 26)
+        out = chr(65 + r) + out
+    return out
+
+
+def case_printed(case):
+    """The case goes to the printout (Drukuj on its card; extra["noprint"] – left out)."""
+    return not (case.get("extra") or {}).get("noprint")
+
+
+def ptree_numbers(tree, skip=()):
+    """Numbers by position: top level 1, 2, …; inside a group 2.1, 2.2, … → {id(node): "2.1"}. The cases in `skip`
+    (left out of the printout) are not counted: they take the number of the printed one before them plus a letter –
+    2.1, 2.1A, 2.1B, 2.2 (before the first printed one: 2.0A)."""
     out = {}
 
     def walk(items, prefix):
-        for i, n in enumerate(items, 1):
+        i = k = 0
+        for n in items:
+            if "case" in n and n["case"] in skip:
+                k += 1
+                num = prefix + (i,)
+                out[id(n)] = ".".join(str(x) for x in num) + _letters(k) + ("." if len(num) == 1 else "")
+                continue
+            i, k = i + 1, 0
             num = prefix + (i,)
             out[id(n)] = ".".join(str(x) for x in num) + ("." if len(num) == 1 else "")
             if "group" in n:
                 walk(n["items"], num)
     walk(tree, ())
     return out
+
+
+def project_numbers(project):
+    """ptree_numbers of the project – the cases left out of the printout with letters."""
+    return ptree_numbers(project["tree"], {c["id"] for c in project["cases"] if not case_printed(c)})
 
 
 def ptree_new_group(tree, name=None, items=(), auto=True):
@@ -10355,7 +10397,7 @@ class ProjectWindow(QWidget):
         (1., 2., 2.1 …); contents of collapsed groups hidden. Cards are not rebuilt (expanded ones stay)."""
         proj = self.app.project
         ptree_sync(proj)
-        nums = ptree_numbers(proj["tree"])
+        nums = project_numbers(proj)
         by_id = {c.case["id"]: c for c in self.cards}
         self.cards = [by_id[c["id"]] for c in proj["cases"] if c["id"] in by_id]
         lay = self.list.lay
@@ -10698,6 +10740,26 @@ class ProjectWindow(QWidget):
             self.keep_view(lambda: self.app.editor.close_codes())
         else:
             self.keep_view(lambda: self.app.edit_case(case))
+
+    def set_printed(self, ids, on):
+        """Drukuj (the card menu, PRINTCASE): the cases go to the printout or not (a working case – kept in the
+        project, left out of the printout and the numbering: 2.1, 2.1A, 2.2)."""
+        cases = [c for c in self.app.project["cases"] if c["id"] in ids]
+        ch = [c for c in cases if case_printed(c) != bool(on)]
+        if not ch:
+            return 0
+        self.app.echo(f"PRINTCASE {' '.join(case_no(self.app, c) for c in ch)} {'ON' if on else 'OFF'}")
+        for c in ch:
+            if on:
+                c["extra"].pop("noprint", None)
+            else:
+                c["extra"]["noprint"] = True
+        for card in self.cards:
+            if card.case in ch:
+                card._update_info()
+        self.relayout()
+        self.app.project_changed()
+        return len(ch)
 
     def duplicate_case(self, case):
         """Duplikuj – copy of the case right below it, name with the suffix „ - kopia”."""
@@ -12131,7 +12193,7 @@ def _need(args, n, usage):
 def _tree_nodes(app):
     """Case list: {"2.1": node, …} by the numbers shown in the list (the trailing dot is dropped)."""
     ptree_sync(app.project)
-    nums = ptree_numbers(app.project["tree"])
+    nums = project_numbers(app.project)
     return {nums[id(n)].rstrip("."): n for n, _, _, _ in ptree_walk(app.project["tree"])}
 
 
@@ -12139,8 +12201,8 @@ def _node_ref(app, tok):
     """Case or group by its number („3”, „2.1”) or by its name (the whole or a unique part)."""
     by_num = _tree_nodes(app)
     key = tok.strip().rstrip(".")
-    if key in by_num:
-        return by_num[key]
+    if key in by_num or key.upper() in by_num:      # „2.1a” = „2.1A” (a case left out of the printout)
+        return by_num.get(key) or by_num[key.upper()]
     cases = {c["id"]: c for c in app.project["cases"]}
     f = _fold(tok)
     hits = [n for n in by_num.values()
@@ -12601,7 +12663,7 @@ def _c_redo(app, a):
 def _c_cases(app, a):
     tree = app.project["tree"]
     ptree_sync(app.project)
-    nums = ptree_numbers(tree)
+    nums = project_numbers(app.project)
     cases = {c["id"]: c for c in app.project["cases"]}
     edited = app.edited_cases()
     out = []
@@ -12657,6 +12719,22 @@ def _c_delete(app, a):
     app.pw.sel = set()
     app.pw.remove_cases(cases)
     return f"Usunięto przypadków: {len(cases)}."
+
+
+@command("PRINTCASE", "numer… ON|OFF", "Przypadki na wydruku (ON) albo robocze – bez wydruku i poza numeracją "
+         "(OFF; numer z literą: 2.1A). Jak „Drukuj” w menu karty.", group="Lista przypadków")
+def _c_printcase(app, a):
+    if len(a) < 2:
+        raise CmdError("Użycie: PRINTCASE numer… ON|OFF")
+    on = _flag(a[-1])
+    ids = []
+    for tok in a[:-1]:
+        n = _node_ref(app, tok)
+        if "case" not in n:
+            raise CmdError(f"„{tok}” to grupa – to polecenie dotyczy przypadku.")
+        ids.append(n["case"])
+    k = app.pw.set_printed(set(ids), on)
+    return (f"Na wydruku: {k} przyp." if on else f"Bez wydruku (robocze): {k} przyp.") if k else "Bez zmian."
 
 
 @command("DUPLICATE", "numer", "Kopia przypadku tuż pod nim (nazwa „… - kopia”).", group="Lista przypadków")
@@ -12734,7 +12812,7 @@ def _c_collapse(app, a):
 
 
 def _group_info(app, g):
-    return f"{ptree_numbers(app.project['tree'])[id(g)].rstrip('.')} {g['name']}"
+    return f"{project_numbers(app.project)[id(g)].rstrip('.')} {g['name']}"
 
 
 @command("GROUP", "[numer…]", "Tworzy grupę z przypadków (bez argumentów – z zaznaczonych).", group="Lista przypadków")
@@ -13096,6 +13174,7 @@ _ask_params("CONSOLE", ("Opcja [ON/OFF/LINES/TIME] (Enter – przełącz okno ko
              lambda a: cmd_name(a[0]) in ("LINES", "TIME")))
 _ask_params("SHORTCUTSRESET", ("Zastąpić plik skrótów domyślnym? [YES]:", True, "one"))
 _ask_params("LANGUAGE", ("Język [EN/PL] (Enter – pokaż bieżący):", False, "one"))
+_ask_params("PRINTCASE", ("Numery przypadków:", True, "rest"), ("Na wydruku [ON/OFF]:", True, "one"))
 _ask_params("RENDERER", ("Silnik [VTK/BASIC] (Enter – pokaż bieżący):", False, "one"))
 _ask_params("UPDATES", ("Opcja [AUTO/INSTALL] (Enter – sprawdź teraz):", False, "one"),
             ("Sprawdzanie przy starcie [ON/OFF]:", True, "one"))
@@ -13860,6 +13939,10 @@ class App:
         can add the office data and correct the printout."""
         if not self.project["cases"]:
             QMessageBox.information(self.pw or self.win, "Otwórz w edytorze tekstu", "Projekt nie zawiera przypadków.")
+            return None
+        if not any(case_printed(c) for c in self.project["cases"]):
+            QMessageBox.information(self.pw or self.win, "Otwórz w edytorze tekstu", "Żaden przypadek nie jest "
+                                    "przeznaczony do druku (Drukuj w menu karty przypadku).")
             return None
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices, QTextDocumentWriter
@@ -15588,6 +15671,8 @@ class App:
                 if old != new:
                     if case["extra"].get("viewports"):
                         extra["viewports"] = case["extra"]["viewports"]      # other viewports of the case stay
+                    if case["extra"].get("noprint"):
+                        extra["noprint"] = True                              # left out of the printout – stays
                     case["extra"] = extra
                     self.info_msg(self._store_case(case, r, f"Zaktualizowano: „{case['name']}”."))
                     self.project_changed()
@@ -15640,6 +15725,8 @@ class App:
         else:
             if case["extra"].get("viewports"):
                 extra["viewports"] = case["extra"]["viewports"]              # other viewports of the case stay
+            if case["extra"].get("noprint"):
+                extra["noprint"] = True                                      # left out of the printout – stays
             case["extra"] = extra
             msg = f"Zaktualizowano: „{case['name']}”."
         msg = self._store_case(case, r, msg)
@@ -15732,7 +15819,7 @@ class App:
         parts = ([f'<p style="font-size:9pt;">Projekt: <b>{esc(self.project_title())}</b></p>'] if title else [])
         head = ""                                         # the project name is in the page header (print_document)
         ptree_sync(self.project)
-        nums = ptree_numbers(self.project["tree"])
+        nums = project_numbers(self.project)
         num_of, path_of = {}, {}                          # case number and the groups it is in (as in the list)
 
         def walk(items, path):
@@ -15742,7 +15829,7 @@ class App:
                 else:
                     num_of[n["case"]], path_of[n["case"]] = nums[id(n)], path
         walk(self.project["tree"], [])
-        for i, case in enumerate(self.project["cases"]):
+        for i, case in enumerate([c for c in self.project["cases"] if case_printed(c)]):
             grp = " › ".join(path_of.get(case["id"], []))
             title = f"{num_of.get(case['id'], '')} {case['name']}".strip()
             head_i = esc(grp)
@@ -15779,6 +15866,10 @@ class App:
         """Drukuj… (print preview); pdf – the console: straight to a PDF file, no window."""
         if not self.project["cases"]:
             QMessageBox.information(self.pw or self.win, "Drukuj", "Projekt nie zawiera przypadków.")
+            return
+        if not any(case_printed(c) for c in self.project["cases"]):
+            QMessageBox.information(self.pw or self.win, "Drukuj", "Żaden przypadek nie jest przeznaczony do druku "
+                                    "(Drukuj w menu karty przypadku).")
             return
         try:
             from PySide6.QtPrintSupport import QPrinter
