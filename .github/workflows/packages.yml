@@ -1,22 +1,24 @@
 # Installation packages of KAYENN for Windows, macOS (Apple Silicon and Intel) and Linux.
-# - push a v* tag (e.g. v0.3.0): the release is published at once (text .github/RELEASE_BODY.md) and every system
-#   adds its packages as soon as its build is finished – a system that fails or waits (e.g. GitHub has no free
-#   macOS runner) does not hold the others;
-# - every 6 hours: the latest release is checked and the packages missing in it are built and added;
+# User's rule: a release is PUBLISHED ONLY WHEN THE PACKAGES OF ALL SYSTEMS ARE READY (no update notice before the
+# file for the user's computer exists).
+# - push a v* tag (e.g. v0.3.0): a draft release is created (text .github/RELEASE_BODY.md), every system builds and
+#   adds its packages to it; when the last one is in, the release is published;
+# - every hour: the systems still missing in the newest draft are built again – GitHub cancels a job that got no
+#   runner (e.g. no free macOS arm64 machine), so the draft simply waits, hour after hour, until it gets one;
 # - Actions → „Installation packages” → Run workflow: tag empty – a test build of the branch (artifacts only);
 #   with a tag – the packages of that release (the systems given, else the missing ones).
-# Which systems and which release: .github/release_plan.py.
+# Which release and which systems: .github/release_plan.py.
 name: Installation packages
 
 on:
   push:
     tags: ["v*"]
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "23 * * * *"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v0.2.0); empty – a test build of the branch, no release"
+        description: "Release tag (e.g. v0.3.0); empty – a test build of the branch, no release"
         required: false
         default: ""
       systems:
@@ -27,8 +29,8 @@ on:
 permissions:
   contents: write
 
-concurrency:                          # scheduled checks one after another (no double uploads)
-  group: packages-${{ github.event_name == 'schedule' && 'schedule' || github.run_id }}
+concurrency:                          # one release run at a time – the next waits (no double builds / uploads)
+  group: packages-release
   cancel-in-progress: false
 
 jobs:
@@ -53,6 +55,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.any == 'true'
     name: ${{ matrix.name }}
+    continue-on-error: true           # a system without a runner is retried by the hourly run
     strategy:
       fail-fast: false
       matrix:
@@ -114,3 +117,14 @@ jobs:
           files=$(find dist -maxdepth 1 -type f)
           echo "$files"
           gh release upload "${{ needs.plan.outputs.tag }}" $files --clobber --repo "${{ github.repository }}"
+
+  publish:
+    needs: [plan, package]
+    if: always() && needs.plan.outputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish the release when all the packages are in it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/release_plan.py finalize "${{ needs.plan.outputs.tag }}"

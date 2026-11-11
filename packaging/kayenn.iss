@@ -62,3 +62,11 @@ Root: HKA; Subkey: "Software\Classes\KAYENN.Projekt\shell\open\command"; ValueTy
 
 [Run]
 Filename: "{app}\KAYENN.exe"; Description: "{cm:LaunchProgram,KAYENN}"; Flags: nowait postinstall skipifsilent
+; automatic update from the program (/SILENT /relaunch=1): the new version starts by itself, as the user
+Filename: "{app}\KAYENN.exe"; Flags: nowait runasoriginaluser; Check: Relaunch
+
+[Code]
+function Relaunch: Boolean;
+begin
+  Result := ExpandConstant('{param:relaunch|0}') = '1';
+end;

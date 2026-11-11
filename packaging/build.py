@@ -133,7 +133,7 @@ def package_macos(app):
     shutil.rmtree(stage, ignore_errors=True)
     os.makedirs(stage)
     run(["ditto", app, os.path.join(stage, "KAYENN.app")])
-    os.symlink("/Applications", os.path.join(stage, "Programy"))          # Polish name in the DMG window
+    os.symlink("/Applications", os.path.join(stage, "Applications"))      # drag KAYENN.app here
     dmg = os.path.join(DIST, f"KAYENN-{VERSION}-macos-{arch()}.dmg")
     if os.path.exists(dmg):
         os.remove(dmg)

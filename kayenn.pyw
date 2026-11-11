@@ -6603,7 +6603,10 @@ def check_update(timeout=10):
         new, cur = version_tuple(tag), version_tuple(APP_VERSION)
         if not new:
             return dict(ok=False, msg="Nie udało się odczytać numeru najnowszej wersji.")
-        return dict(ok=True, newer=new > cur, version=tag.lstrip("vV"), url=d.get("html_url") or RELEASES_URL)
+        assets = [dict(name=x.get("name", ""), url=x.get("browser_download_url", ""), size=x.get("size") or 0,
+                       digest=x.get("digest") or "") for x in d.get("assets") or []]
+        return dict(ok=True, newer=new > cur, version=tag.lstrip("vV"), url=d.get("html_url") or RELEASES_URL,
+                    assets=assets)
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return dict(ok=True, newer=False, version=APP_VERSION, url=RELEASES_URL, none=True)
@@ -6619,6 +6622,244 @@ class UpdateChecker(QObject):
     def start(self):
         import threading
         threading.Thread(target=lambda: self.done.emit(check_update()), daemon=True).start()
+
+
+# --- automatic installation of a new version (O programie → Instaluj, the start notice, UPDATES INSTALL)
+def install_kind():
+    """How this copy can update itself: "win-setup" (installed by the Windows installer), "mac-app" (KAYENN.app),
+    "linux-deb" (/opt/kayenn from the .deb), "linux-tar" (an unpacked .tar.gz); None – from source or a portable
+    Windows copy (then only the download page)."""
+    if not FROZEN:
+        return None
+    exe = os.path.abspath(sys.executable)
+    d = os.path.dirname(exe)
+    if sys.platform == "win32":
+        try:
+            return "win-setup" if any(re.fullmatch(r"unins\d+\.exe", f, re.I) for f in os.listdir(d)) else None
+        except OSError:
+            return None
+    if sys.platform == "darwin":
+        return "mac-app" if ".app/Contents/MacOS/" in exe else None
+    return "linux-deb" if exe.startswith("/opt/kayenn/") else "linux-tar"
+
+
+def mac_arm():
+    """Apple Silicon (also when the Intel build runs through Rosetta 2)."""
+    import platform
+    import subprocess
+    try:
+        return subprocess.run(["sysctl", "-n", "hw.optional.arm64"], capture_output=True, text=True,
+                              timeout=5).stdout.strip() == "1"
+    except (OSError, subprocess.SubprocessError):
+        return platform.machine() == "arm64"
+
+
+def pick_asset(assets, kind, arm=None):
+    """The file of the release for this copy of the program (None – none fits)."""
+    if kind == "mac-app":
+        arm = mac_arm() if arm is None else arm
+        endings = ["-macos-arm64.dmg", "-macos-x64.dmg"] if arm else ["-macos-x64.dmg"]
+    else:
+        endings = {"win-setup": ["-windows-x64-setup.exe"], "linux-deb": ["_amd64.deb"],
+                   "linux-tar": ["-linux-x86_64.tar.gz"]}.get(kind, [])
+    for e in endings:
+        for a in assets or []:
+            if a.get("name", "").endswith(e) and a.get("url"):
+                return a
+    return None
+
+
+def _sh(s):
+    """A word of a shell script in single quotes."""
+    q = chr(39)
+    return q + str(s).replace(q, q + '"' + q + '"' + q) + q
+
+
+def install_command(kind, path, pid, workdir, exe=None):
+    """The command started after the program closes: waits for the process, installs, starts the new version.
+    Returns (argv, script text – written to workdir/update.sh – or None)."""
+    log = os.path.join(workdir, "install.log")
+    exe = exe or os.path.abspath(sys.executable)
+    if kind == "win-setup":
+        q = chr(39)
+        e = lambda x: str(x).replace(q, q + q)                     # noqa: E731 – PowerShell single quotes
+        ps = (f"Wait-Process -Id {pid} -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500; "
+              f"Start-Process -FilePath {q}{e(path)}{q} -ArgumentList {q}/SILENT{q},{q}/SUPPRESSMSGBOXES{q},"
+              f"{q}/NORESTART{q},{q}/CLOSEAPPLICATIONS{q},{q}/relaunch=1{q},{q}/LOG=\"{e(log)}\"{q}")
+        return ["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps], None
+    head = (f"#!/bin/sh\n# KAYENN update\nwhile kill -0 {pid} 2>/dev/null; do sleep 0.5; done\n"
+            f"exec >>{_sh(log)} 2>&1\n")
+    if kind == "mac-app":
+        app = exe[:exe.index(".app/") + 4]
+        body = (f"APP={_sh(app)}\nDMG={_sh(path)}\nMNT=$(mktemp -d)\n"
+                'if hdiutil attach -nobrowse -quiet -mountpoint "$MNT" "$DMG" && [ -d "$MNT/KAYENN.app" ]; then\n'
+                '  rm -rf "$APP.old"\n'
+                '  if mv "$APP" "$APP.old" && ditto "$MNT/KAYENN.app" "$APP"; then rm -rf "$APP.old"\n'
+                '  else rm -rf "$APP"; mv "$APP.old" "$APP"; hdiutil detach -quiet "$MNT"; open "$DMG"; exit 1; fi\n'
+                '  hdiutil detach -quiet "$MNT"\n'
+                '  xattr -dr com.apple.quarantine "$APP" 2>/dev/null\n'
+                '  open "$APP"\n'
+                'else open "$DMG"; fi\n')
+    elif kind == "linux-deb":
+        body = (f"DEB={_sh(path)}\n"
+                'if command -v pkexec >/dev/null && pkexec apt-get install -y "$DEB"; then /opt/kayenn/KAYENN &\n'
+                'else xdg-open "$DEB"; fi\n')
+    else:                                                          # linux-tar: the folder of the program replaced
+        body = (f"DIR={_sh(os.path.dirname(exe))}\nTGZ={_sh(path)}\nTMP=$(mktemp -d)\n"
+                'if tar -xzf "$TGZ" -C "$TMP" && [ -x "$TMP/KAYENN/KAYENN" ]; then\n'
+                '  rm -rf "$DIR.old"\n'
+                '  if mv "$DIR" "$DIR.old" && mv "$TMP/KAYENN" "$DIR"; then rm -rf "$DIR.old"\n'
+                '  else rm -rf "$DIR"; mv "$DIR.old" "$DIR"; exit 1; fi\n'
+                '  "$DIR/KAYENN" &\n'
+                'else xdg-open "$(dirname "$TGZ")"; fi\n')
+    return ["/bin/sh", os.path.join(workdir, "update.sh")], head + body
+
+
+def install_writable(kind):
+    """Can the files of this copy be replaced without administrator rights (macOS app, .tar.gz folder)?"""
+    exe = os.path.abspath(sys.executable)
+    if kind == "mac-app":
+        return os.access(os.path.dirname(exe[:exe.index(".app/") + 4]), os.W_OK)
+    if kind == "linux-tar":
+        return os.access(os.path.dirname(os.path.dirname(exe)), os.W_OK)
+    return True
+
+
+class UpdateInstaller(QDialog):
+    """Instaluj: downloads the file of the new version for this system (with a progress bar), checks its SHA-256,
+    closes the program (the save question as at Zakończ), installs and starts the new version. A copy that
+    cannot update itself (portable, from source, no write access) – the download page."""
+
+    def __init__(self, app, parent, r):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QProgressBar
+        self.app, self.r = app, r
+        self.setWindowTitle("Aktualizacja KAYENN")
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        self.setModal(False)
+        self.setMinimumWidth(460)
+        v = QVBoxLayout(self)
+        self.msg = QLabel(f"Pobieranie wersji {r.get('version', '')}…")
+        self.msg.setWordWrap(True)
+        v.addWidget(self.msg)
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 0)
+        v.addWidget(self.bar)
+        hb = QHBoxLayout()
+        hb.addStretch(1)
+        self.b_go = QPushButton("Instaluj teraz")
+        self.b_go.clicked.connect(lambda checked=False: self.install())
+        self.b_go.hide()
+        hb.addWidget(self.b_go)
+        self.b_cancel = QPushButton("Anuluj")
+        self.b_cancel.clicked.connect(lambda checked=False: self.cancel())
+        hb.addWidget(self.b_cancel)
+        v.addLayout(hb)
+        self.kind = install_kind()
+        self.asset = pick_asset(r.get("assets"), self.kind) if self.kind else None
+        self.path, self._reply, self._file = None, None, None
+        self.workdir = os.path.join(user_data_dir(), "update")
+
+    def start(self):
+        """False – this copy cannot update itself; the download page is opened instead."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        if self.asset is None or not install_writable(self.kind):
+            QDesktopServices.openUrl(QUrl(self.r.get("url") or RELEASES_URL))
+            return False
+        from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
+        os.makedirs(self.workdir, exist_ok=True)
+        self.path = os.path.join(self.workdir, os.path.basename(self.asset["name"]))
+        self._file = open(self.path + ".part", "wb")
+        self._nam = QNetworkAccessManager(self)
+        req = QNetworkRequest(QUrl(self.asset["url"]))
+        req.setRawHeader(b"User-Agent", ("KAYENN/" + APP_VERSION).encode())
+        self._reply = self._nam.get(req)
+        self._reply.readyRead.connect(lambda: self._file.write(bytes(self._reply.readAll())))
+        self._reply.downloadProgress.connect(self._progress)
+        self._reply.finished.connect(self._done)
+        self.show()
+        return True
+
+    def _progress(self, got, total):
+        if total > 0:
+            self.bar.setRange(0, 1000)
+            self.bar.setValue(int(got * 1000 / total))
+            self.msg.setText(f"Pobieranie wersji {self.r.get('version', '')}… {got / 1e6:.1f} / {total / 1e6:.1f} MB")
+
+    def _fail(self, text):
+        self.bar.setRange(0, 1)
+        self.bar.setValue(0)
+        self.msg.setText(text)
+        self.b_cancel.setText("Zamknij")
+
+    def _done(self):
+        import hashlib
+        from PySide6.QtNetwork import QNetworkReply
+        rep, self._reply = self._reply, None
+        if self._file is not None:
+            self._file.write(bytes(rep.readAll()))
+            self._file.close()
+            self._file = None
+        part = self.path + ".part"
+        if rep.error() != QNetworkReply.NetworkError.NoError:
+            self._fail("Nie udało się pobrać nowej wersji: " + rep.errorString())
+            return
+        dg = (self.asset.get("digest") or "").lower()
+        if dg.startswith("sha256:"):
+            h = hashlib.sha256()
+            with open(part, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            if h.hexdigest() != dg[7:]:
+                self._fail("Pobrany plik jest uszkodzony (niezgodna suma kontrolna) – spróbuj ponownie.")
+                return
+        os.replace(part, self.path)
+        self.bar.setRange(0, 1)
+        self.bar.setValue(1)
+        self.install()
+
+    def install(self):
+        """The program closes (the questions as at Zakończ), the installer finishes the job and starts it again."""
+        import subprocess
+        self.msg.setText("Instalowanie – program zamknie się i uruchomi ponownie w nowej wersji.")
+        argv, script = install_command(self.kind, self.path, os.getpid(), self.workdir)
+        dry = os.environ.get("KAYENN_UPDATE_DRYRUN")
+        if dry:                                     # tests: the command instead of installing, the program stays
+            with open(dry, "w", encoding="utf-8") as f:
+                json.dump(dict(argv=argv, script=script, path=self.path), f)
+            return True
+        if not self.app.quit_app():
+            self.msg.setText("Instalacja wstrzymana – program nie został zamknięty.")
+            self.b_go.show()
+            return False
+        if script is not None:
+            with open(argv[-1], "w", encoding="utf-8", newline="\n") as f:
+                f.write(script)
+        kw = dict(close_fds=True)
+        if sys.platform == "win32":
+            kw["creationflags"] = 0x00000008 | 0x08000000 | 0x00000200   # detached, no window, new group
+        else:
+            kw["start_new_session"] = True
+        subprocess.Popen(argv, **kw)
+        return True
+
+    def cancel(self):
+        if self._reply is not None:
+            self._reply.abort()
+        self.close()
+
+
+def start_update_install(app, r):
+    """Instaluj (O programie, the start notice, UPDATES INSTALL). Returns the window or None (download page)."""
+    host = app.host
+    d = getattr(host, "_upd_inst", None)
+    if d is not None and d.isVisible():
+        d.raise_()
+        return d
+    d = UpdateInstaller(host, host.pw, r)
+    host._upd_inst = d
+    return d if d.start() else None
 
 
 def odt_fix_frames(path):
@@ -7706,21 +7947,46 @@ def cmd_tokens(line):
     return [a if (a or not b) else b for a, b in re.findall(r'"([^"]*)"|(\S+)', line)]
 
 
-SHORTCUTS_HEAD = """; KAYENN – skróty klawiaturowe (plik do edycji).
+SHORTCUTS_HEAD = """; KAYENN – keyboard shortcuts (a file to edit).
 ;
-; Każdy wiersz ma postać:    skrót, *POLECENIE [argumenty]
-;   - skrót wpisywany w konsoli (Widok → Konsola), np.:        P, *PRINT
-;   - kombinacja klawiszy (zawiera „+” albo to F1…F12), np.:   Ctrl+P, *PRINT
-;     Kombinację z argumentem można też przypisać:             Ctrl+Shift+K, *CONSOLE
-;   - kilka skrótów do jednego polecenia – kilka wierszy.
-; Wiersze zaczynające się od „;” lub „#” są komentarzem. Listę poleceń pokaże HELP w konsoli.
-; Zmiany działają od razu po zapisaniu pliku. Opcje → Przywróć domyślne skróty klawiaturowe
-; wraca do stanu z instalacji.
+; Every line has the form:    shortcut, *COMMAND [arguments]
+;   - a shortcut typed in the console (View → Console), e.g.:     P, *PRINT
+;   - a key combination (contains "+" or is F1…F12), e.g.:        Ctrl+P, *PRINT
+;     A combination with arguments can be assigned too:           Ctrl+Shift+K, *CONSOLE
+;   - several shortcuts of one command – several lines.
+; Lines starting with ";" or "#" are comments. HELP in the console lists the commands.
+; Changes work as soon as the file is saved. Options → Restore the default keyboard shortcuts
+; goes back to the installed state.
 ;
-; --- skróty wpisywane w konsoli (na razie nie zdefiniowano żadnych) ---
+; --- shortcuts typed in the console (none defined yet) ---
 ;
-; --- kombinacje klawiszy ---
+; --- key combinations ---
 """
+# the file is always in English (whatever the interface language); the header of the first versions (Polish)
+# is replaced with this one when the file is read – the user's lines stay
+SHORTCUTS_HEAD_OLD = (
+    "; KAYENN – skróty klawiaturowe (plik do edycji).", ";",
+    "; Każdy wiersz ma postać:    skrót, *POLECENIE [argumenty]",
+    ";   - skrót wpisywany w konsoli (Widok → Konsola), np.:        P, *PRINT",
+    ";   - kombinacja klawiszy (zawiera „+” albo to F1…F12), np.:   Ctrl+P, *PRINT",
+    ";     Kombinację z argumentem można też przypisać:             Ctrl+Shift+K, *CONSOLE",
+    ";   - kilka skrótów do jednego polecenia – kilka wierszy.",
+    "; Wiersze zaczynające się od „;” lub „#” są komentarzem. Listę poleceń pokaże HELP w konsoli.",
+    "; Zmiany działają od razu po zapisaniu pliku. Opcje → Przywróć domyślne skróty klawiaturowe",
+    "; wraca do stanu z instalacji.",
+    "; --- skróty wpisywane w konsoli (na razie nie zdefiniowano żadnych) ---",
+    "; --- kombinacje klawiszy ---")
+
+
+def shortcuts_migrate(text):
+    """The Polish header of the first versions → the English one (the user's own lines unchanged)."""
+    if not text.startswith(SHORTCUTS_HEAD_OLD[0]):
+        return text
+    old = set(SHORTCUTS_HEAD_OLD)
+    rest = [ln for ln in text.splitlines() if ln.rstrip() not in old]
+    while rest and not rest[0].strip():
+        rest.pop(0)
+    return SHORTCUTS_HEAD + "\n".join(rest) + ("\n" if rest else "")
 
 
 def shortcuts_file():
@@ -7801,6 +8067,14 @@ class Shortcuts:
         except (OSError, UnicodeDecodeError) as e:
             self.errors = [f"nie można odczytać pliku skrótów: {e}"]
             return False
+        new = shortcuts_migrate(text)
+        if new != text:                                  # the Polish header of the first versions → English
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(new)
+                text = new
+            except OSError:
+                pass
         self.parse(text)
         self.refresh()
         if self._host is not None and self._host.cmd is not None:
@@ -10571,6 +10845,11 @@ class AboutDialog(QDialog):
         self.upd_label.setWordWrap(True)
         self.upd_label.setOpenExternalLinks(True)
         v.addWidget(self.upd_label)
+        self.b_install = QPushButton("Instaluj")         # shown when a newer version is found
+        self.b_install.clicked.connect(lambda checked=False: self.install())
+        self.b_install.hide()
+        v.addWidget(self.b_install, 0, Qt.AlignmentFlag.AlignCenter)
+        self._result = None
         self.ck_auto = QCheckBox("Sprawdzaj automatycznie")
         self.ck_auto.setChecked(bool(settings_get("update_auto", True)))
         self.ck_auto.toggled.connect(lambda on: settings_set("update_auto", bool(on)))
@@ -10595,6 +10874,14 @@ class AboutDialog(QDialog):
     def show_result(self, r):
         self.b_update.setEnabled(True)
         self.upd_label.setText(update_text(r))
+        self._result = r
+        self.b_install.setVisible(bool(r.get("ok") and r.get("newer")))
+
+    def install(self):
+        """Instaluj – download, close, install and start the new version."""
+        if self._result:
+            self.app.echo("UPDATES INSTALL")
+            start_update_install(self.app, self._result)
 
 
 def update_text(r):
@@ -10603,7 +10890,7 @@ def update_text(r):
         return html.escape(r.get("msg", "Nie udało się sprawdzić aktualizacji."))
     if r.get("newer"):
         return (f'Dostępna jest nowa wersja <b>{html.escape(r["version"])}</b>. '
-                f'<a href="{html.escape(r["url"])}">Pobierz</a>')
+                f'<a href="{html.escape(r["url"])}">Co nowego</a>')
     if r.get("none"):
         return "Brak opublikowanych wydań – masz najnowszą wersję."
     return "Masz najnowszą wersję programu."
@@ -11771,20 +12058,26 @@ def _c_about(app, a):
     return "Okno „O programie” otwarte." if app.about(toggle=True) is not None else "Okno „O programie” zamknięte."
 
 
-@command("UPDATES", "[AUTO ON|OFF]", "Sprawdza, czy jest nowa wersja; AUTO – sprawdzanie przy starcie.",
-         group="Konsola i opcje")
+@command("UPDATES", "[AUTO ON|OFF | INSTALL]", "Sprawdza, czy jest nowa wersja; INSTALL – pobiera ją, zamyka "
+         "program, instaluje i uruchamia ponownie; AUTO – sprawdzanie przy starcie.", group="Konsola i opcje")
 def _c_update(app, a):
     if a and cmd_name(a[0]) == "AUTO":
         _need(a, 2, "UPDATES AUTO ON|OFF")
         on = _flag(a[1])
         settings_set("update_auto", on)
         return "Sprawdzanie aktualizacji przy starcie: " + ("włączone." if on else "wyłączone.")
+    install = bool(a) and cmd_name(a[0]) == "INSTALL"
     chk = UpdateChecker()
     app.cmd._upd = chk
 
     def done(r):
         if not r.get("ok"):
             app.cmd.say(r.get("msg", "Nie udało się sprawdzić aktualizacji."), "err")
+        elif r.get("newer") and install:
+            if start_update_install(app, r) is None:
+                app.cmd.say(f"Tej kopii programu nie można zaktualizować automatycznie – strona pobierania: {r['url']}")
+            else:
+                app.cmd.say(f"Pobieram wersję {r['version']}…")
         elif r.get("newer"):
             app.cmd.say(f"Dostępna jest nowa wersja {r['version']}: {r['url']}")
         else:
@@ -12452,7 +12745,7 @@ _ask_params("CONSOLE", ("Opcja [ON/OFF/LINES/TIME] (Enter – przełącz okno ko
              lambda a: cmd_name(a[0]) in ("LINES", "TIME")))
 _ask_params("SHORTCUTSRESET", ("Zastąpić plik skrótów domyślnym? [YES]:", True, "one"))
 _ask_params("LANGUAGE", ("Język [EN/PL] (Enter – pokaż bieżący):", False, "one"))
-_ask_params("UPDATES", ("Opcja [AUTO] (Enter – sprawdź teraz):", False, "one"),
+_ask_params("UPDATES", ("Opcja [AUTO/INSTALL] (Enter – sprawdź teraz):", False, "one"),
             ("Sprawdzanie przy starcie [ON/OFF]:", True, "one"))
 _ask_params("OPEN", ("Plik projektu (Enter – okno wyboru pliku):", False, "one"))
 _ask_params("SAVEAS", ("Plik projektu (Enter – okno wyboru pliku):", False, "one"))
@@ -13248,8 +13541,12 @@ class App:
                 settings_set("update_checked", time.time())
             if r.get("ok") and r.get("newer"):
                 mb = QMessageBox(QMessageBox.Icon.Information, "KAYENN", "Dostępna jest nowa wersja programu "
-                                 + r["version"] + ".", QMessageBox.StandardButton.Ok, self.host.pw)
-                mb.setInformativeText(f'<a href="{html.escape(r["url"])}">Otwórz stronę pobierania</a>')
+                                 + r["version"] + ".", QMessageBox.StandardButton.NoButton, self.host.pw)
+                mb.setInformativeText(f'<a href="{html.escape(r["url"])}">Co nowego</a>')
+                b_inst = mb.addButton("Instaluj", QMessageBox.ButtonRole.AcceptRole)
+                mb.addButton("Później", QMessageBox.ButtonRole.RejectRole)
+                mb.buttonClicked.connect(lambda b: (self.echo("UPDATES INSTALL"), start_update_install(self, r))
+                                         if b is b_inst else None)
                 mb.setModal(False)
                 mb.show()
                 self._upd_msg = mb
