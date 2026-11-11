@@ -21,8 +21,8 @@ them in one list, with drawings, calculations and a printout. KAYENN is intended
 structural analysis program based on the finite element method (FEM).
 
 > [!NOTE]
-> From the next release the program interface is available in **English** (the default) and **Polish** – menu
-> *Language*, the change works at once (version 0.1.0 is in Polish only). The load calculations follow the Polish
+> The program interface is available in **English** (the default) and **Polish** – menu *Language*, the change
+> works at once (since version 0.2.0). The load calculations follow the Polish
 > editions of the Eurocodes with the Polish National Annexes (PN-EN); the material database stays in Polish.
 
 ## What it can do

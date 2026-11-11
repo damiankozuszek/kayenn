@@ -1,7 +1,25 @@
-# KAYENN 0.1.0 – the first community release
+# KAYENN 0.2.0 – English interface
 
-This is the first version of KAYENN ready to be shared with the community. KAYENN is a program for structural
-engineers for determining building loads, released under the open source **MIT** licence.
+KAYENN is a program for structural engineers for determining building loads, released under the open source
+**MIT** licence. This version adds an **English user interface**.
+
+## What's new
+
+- **English and Polish interface.** The program now starts in **English**; switch the language in the
+  **Language** menu (English / Polski) – the change works at once in every window, without a restart. The choice is
+  remembered. The console command `LANGUAGE EN|PL` does the same.
+- Everything follows the chosen language: menus, forms, calculation reports, 3D model labels, the printout and the
+  `.odt` report, messages and the help of the console commands.
+- Projects (`.kayenn`) are language-independent – a project saved in one language opens in the other, and the reports
+  of its cases are shown in the current language.
+- The Windows installer is available in English and Polish; the Linux menu entry has an English and a Polish description.
+- The load calculations still follow the Polish editions of the Eurocodes with the Polish National Annexes (PN-EN).
+  The material database stays in Polish.
+
+> [!NOTE]
+> **Updating from 0.1.0:** after the update the program starts in English. To keep working in Polish choose
+> **Language → Polski** once – the choice is remembered. Your other settings, keyboard shortcuts and material
+> databases are kept.
 
 ## What it does
 
@@ -9,14 +27,13 @@ engineers for determining building loads, released under the open source **MIT**
   with a zone map and a 3D model showing the load distribution.
 - **Own loads** with a material database (Annex A of PN-EN 1991-1-1, over two thousand steel sections).
 - **A project** in a single `.kayenn` file: load cases, groups, undo / redo, printout with preview, command console.
-- Windows, macOS and Linux. The user interface is in Polish; the calculations follow the Polish National Annexes.
+- Windows, macOS and Linux.
 
 ## A testing release – your help is needed
 
-Many bugs have already been fixed, but **one person cannot catch everything**. That is why I am asking the
-community to help improve the project: **test the program and report problems**
-in [Issues](https://github.com/damiankozuszek/kayenn/issues/new/choose). Reports of wrong calculation results
-(with the clause of the code), crashes and unclear behaviour are especially valuable.
+**One person cannot catch everything** – please **test the program and report problems** in
+[Issues](https://github.com/damiankozuszek/kayenn/issues/new/choose). Reports of wrong calculation results (with the
+clause of the code), crashes, unclear behaviour and awkward English wording are especially valuable.
 
 > [!WARNING]
 > The program is an auxiliary tool. All loads are **characteristic values**, and the results must be verified
@@ -27,9 +44,9 @@ in [Issues](https://github.com/damiankozuszek/kayenn/issues/new/choose). Reports
 
 | System | File |
 |---|---|
-| Windows 10 / 11 | `KAYENN-0.1.0-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
-| macOS 12+ | `KAYENN-0.1.0-macos-arm64.dmg` (Apple Silicon) or `…-macos-x64.dmg` (Intel) |
-| Linux | `kayenn_0.1.0_amd64.deb` or `KAYENN-0.1.0-linux-x86_64.tar.gz` |
+| Windows 10 / 11 | `KAYENN-0.2.0-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
+| macOS 12+ | `KAYENN-0.2.0-macos-arm64.dmg` (Apple Silicon) or `…-macos-x64.dmg` (Intel) |
+| Linux | `kayenn_0.2.0_amd64.deb` or `KAYENN-0.2.0-linux-x86_64.tar.gz` |
 
 The program is not digitally signed yet – on the first start the system may warn about an unknown publisher
 (Windows: “More info” → “Run anyway”; macOS: right click → “Open”).

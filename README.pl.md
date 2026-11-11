@@ -20,8 +20,8 @@ zbiera je na jednej liście, z rysunkami, obliczeniami i wydrukiem. KAYENN ma w 
 programem do obliczeń konstrukcji metodą elementów skończonych (MES).
 
 > [!NOTE]
-> Od następnego wydania interfejs programu jest dostępny po **angielsku** (domyślnie) i po **polsku** – menu
-> *Język*, zmiana działa od razu (wersja 0.1.0 jest tylko po polsku). Obliczenia obciążeń opierają się na polskich
+> Interfejs programu jest dostępny po **angielsku** (domyślnie) i po **polsku** – menu *Język*, zmiana działa od
+> razu (od wersji 0.2.0). Obliczenia obciążeń opierają się na polskich
 > wydaniach Eurokodów z Załącznikami Krajowymi (PN-EN); baza materiałów pozostaje po polsku.
 
 ## Co potrafi
