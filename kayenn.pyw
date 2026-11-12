@@ -8401,14 +8401,23 @@ SHORTCUTS_HEAD_OLD = (
 
 
 def shortcuts_migrate(text):
-    """The Polish header of the first versions → the English one (the user's own lines unchanged)."""
-    if not text.startswith(SHORTCUTS_HEAD_OLD[0]):
-        return text
-    old = set(SHORTCUTS_HEAD_OLD)
-    rest = [ln for ln in text.splitlines() if ln.rstrip() not in old]
-    while rest and not rest[0].strip():
-        rest.pop(0)
-    return SHORTCUTS_HEAD + "\n".join(rest) + ("\n" if rest else "")
+    """The file of the first versions → English: a Polish header (any of the early variants, recognised by its
+    first line) is replaced with the English one and the Polish command names of the lines become the English
+    ones (LEGACY_COMMANDS); the user's own lines (shortcuts, comments below the header) stay."""
+    lines = text.splitlines()
+    if lines and lines[0].startswith("; KAYENN – skróty klawiaturowe"):
+        i = 0
+        while i < len(lines) and (not lines[i].strip() or lines[i].lstrip().startswith((";", "#"))):
+            i += 1                                       # the whole leading comment block was written by the program
+        lines = SHORTCUTS_HEAD.splitlines() + lines[i:]
+    out = []
+    for ln in lines:
+        m = re.match(r"^(\s*[^;#].*?\s*,\s*\*\s*)(\S+)(.*)$", ln)
+        if m and cmd_name(m.group(2)) in LEGACY_COMMANDS:
+            ln = m.group(1) + LEGACY_COMMANDS[cmd_name(m.group(2))] + m.group(3)
+        out.append(ln)
+    new = "\n".join(out) + ("\n" if out else "")
+    return new if new.strip() != text.strip() else text
 
 
 def shortcuts_file():

@@ -60,7 +60,17 @@ def missing(names):
     return [s for s in SYSTEMS if not all(any(n.endswith(e) for n in names) for e in s[2])]
 
 
-def ensure_draft(tag):
+def ensure_draft(tag, fresh=False):
+    """fresh (a pushed tag): a draft of this tag left from an earlier push (the tag deleted and pushed again at
+    another commit) is removed first – its packages were built from the old commit and would otherwise count as
+    „ready” (0.2.1: three systems shipped the build of the first tag)."""
+    old = find(tag)
+    if fresh and old is not None and old["draft"]:
+        code, out, err = gh("release", "delete", tag, "--yes")
+        print(f"old draft {tag} removed (packages of an earlier build)" if code == 0 else
+              f"old draft {tag} NOT removed: {err}")
+        if code != 0:
+            raise SystemExit(1)
     if find(tag) is None:
         code, out, err = gh("release", "create", tag, "--draft", "--verify-tag", "--title", tag,
                             "--notes-file", ".github/RELEASE_BODY.md")
@@ -92,7 +102,7 @@ def plan():
     tag = ""
     if event == "push" and os.environ.get("REF_NAME", "").startswith("v"):
         tag = os.environ["REF_NAME"]
-        ensure_draft(tag)
+        ensure_draft(tag, fresh=True)
         todo = list(SYSTEMS)
     elif event == "schedule":
         rel = releases()
