@@ -10,6 +10,7 @@ CLAUDE.md
 tests.py
 Zmiany_zgodnosc_z_normami.md
 autotest.json
+promo/
 
 # website: server-local settings
 website/.env
