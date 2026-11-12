@@ -1,9 +1,14 @@
-# KAYENN 0.2.1 – automatic updates, 3D on the graphics card, working cases
+# KAYENN 0.2.2 – 3D on the graphics card, working cases, automatic updates
 
 KAYENN is a program for structural engineers for determining building loads, released under the open source
 **MIT** licence.
 
 ## What's new
+
+> [!IMPORTANT]
+> **Why 0.2.2 so soon:** the Windows, Linux and macOS Intel packages of 0.2.1 were by mistake built from an earlier
+> state of the code – they did not contain the VTK 3D engine or the printed / working cases described below. Version
+> 0.2.2 contains everything on every system. If you have 0.2.1, use **About → Check for updates → Install**.
 
 - **3D models drawn on the graphics card (VTK).** Every 3D view – the 3D model window, the previews in the case
   cards and the printout images – now uses one engine: lighting, real depth and correctly blended translucent load
@@ -21,12 +26,13 @@ KAYENN is a program for structural engineers for determining building loads, rel
     package is used); Linux: the `.deb` is installed after the system asks for your password, an unpacked
     `.tar.gz` folder is replaced. The portable Windows version opens the download page.
 - **The keyboard shortcut file is always in English**, whatever the interface language. An existing file gets the
-  English header; your own shortcuts are kept.
+  English header and the English command names (also a file from the very first versions, which 0.2.1 left in
+  Polish); your own shortcuts are kept.
 - The macOS disk image shows an **Applications** link to drag the program to.
 
 > [!NOTE]
-> **Updating from 0.2.0 or 0.1.0:** download and install this version as before – automatic installation works
-> from 0.2.1 onwards. Your settings, keyboard shortcuts and material databases are kept.
+> **Updating from 0.2.1:** automatic (**Install**). **From 0.2.0 or 0.1.0:** download and install this version as
+> before – automatic installation works from 0.2.1 onwards. Your settings, keyboard shortcuts and material databases are kept.
 
 ## What it does
 
@@ -53,9 +59,9 @@ clause of the code), crashes, unclear behaviour and awkward English wording are 
 
 | System | File |
 |---|---|
-| Windows 10 / 11 | `KAYENN-0.2.1-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
-| macOS 12+ | `KAYENN-0.2.1-macos-arm64.dmg` (Apple Silicon) or `…-macos-x64.dmg` (Intel) |
-| Linux | `kayenn_0.2.1_amd64.deb` or `KAYENN-0.2.1-linux-x86_64.tar.gz` |
+| Windows 10 / 11 | `KAYENN-0.2.2-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
+| macOS 12+ | `KAYENN-0.2.2-macos-arm64.dmg` (Apple Silicon) or `…-macos-x64.dmg` (Intel) |
+| Linux | `kayenn_0.2.2_amd64.deb` or `KAYENN-0.2.2-linux-x86_64.tar.gz` |
 
 The program is not digitally signed yet – on the first start the system may warn about an unknown publisher
 (Windows: “More info” → “Run anyway”; macOS: right click → “Open”).

@@ -29,7 +29,7 @@ import re
 import sys
 import time
 
-APP_VERSION = "0.2.1"
+APP_VERSION = "0.2.2"
 # program resources folder (fonts, icons, material database) – also inside the PyInstaller bundle (sys._MEIPASS)
 BASE_DIR = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
 FROZEN = bool(getattr(sys, "frozen", False))
