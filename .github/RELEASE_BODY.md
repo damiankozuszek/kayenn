@@ -1,14 +1,21 @@
-# KAYENN 0.2.2 – 3D on the graphics card, working cases, automatic updates
+# KAYENN 0.2.3 – automatic update fixed on Windows
 
 KAYENN is a program for structural engineers for determining building loads, released under the open source
 **MIT** licence.
 
-## What's new
+## What's new in 0.2.3
 
 > [!IMPORTANT]
-> **Why 0.2.2 so soon:** the Windows, Linux and macOS Intel packages of 0.2.1 were by mistake built from an earlier
-> state of the code – they did not contain the VTK 3D engine or the printed / working cases described below. Version
-> 0.2.2 contains everything on every system. If you have 0.2.1, use **About → Check for updates → Install**.
+> **Windows: the one-click update did not install anything.** In 0.2.1 and 0.2.2, **About → Check for updates →
+> Install** downloaded the new version and closed the program, but the installer was never started – after the next
+> start the old version was still there. Fixed in 0.2.3. **Because the bug is in the version you have, install
+> 0.2.3 on Windows once by hand** (download the installer below); from 0.2.3 on, updates install with one click.
+> If KAYENN is installed for all users (in *Program Files*), Windows asks for administrator permission during the
+> update – the request may appear as a flashing button on the taskbar.
+>
+> macOS and Linux were not affected.
+
+## Since 0.2.0
 
 - **3D models drawn on the graphics card (VTK).** Every 3D view – the 3D model window, the previews in the case
   cards and the printout images – now uses one engine: lighting, real depth and correctly blended translucent load
@@ -31,8 +38,9 @@ KAYENN is a program for structural engineers for determining building loads, rel
 - The macOS disk image shows an **Applications** link to drag the program to.
 
 > [!NOTE]
-> **Updating from 0.2.1:** automatic (**Install**). **From 0.2.0 or 0.1.0:** download and install this version as
-> before – automatic installation works from 0.2.1 onwards. Your settings, keyboard shortcuts and material databases are kept.
+> **Updating:** on Windows download and install 0.2.3 by hand (see above); on macOS and Linux from 0.2.1 or 0.2.2
+> use **Install**, from 0.2.0 or 0.1.0 download it by hand. Your settings, keyboard shortcuts and material
+> databases are kept.
 
 ## What it does
 
@@ -59,9 +67,9 @@ clause of the code), crashes, unclear behaviour and awkward English wording are 
 
 | System | File |
 |---|---|
-| Windows 10 / 11 | `KAYENN-0.2.2-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
-| macOS 12+ | `KAYENN-0.2.2-macos-arm64.dmg` (Apple Silicon) or `…-macos-x64.dmg` (Intel) |
-| Linux | `kayenn_0.2.2_amd64.deb` or `KAYENN-0.2.2-linux-x86_64.tar.gz` |
+| Windows 10 / 11 | `KAYENN-0.2.3-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
+| macOS 12+ | `KAYENN-0.2.3-macos-arm64.dmg` (Apple Silicon) or `…-macos-x64.dmg` (Intel) |
+| Linux | `kayenn_0.2.3_amd64.deb` or `KAYENN-0.2.3-linux-x86_64.tar.gz` |
 
 The program is not digitally signed yet – on the first start the system may warn about an unknown publisher
 (Windows: “More info” → “Run anyway”; macOS: right click → “Open”).

@@ -6,7 +6,7 @@ notice before the file for their computer exists.
   packages to it;
 - every hour (schedule): the newest draft release – the systems whose packages are still missing are built again
   (GitHub sometimes has no free runner for a system, e.g. macOS arm64, and cancels the waiting job – the next hour
-  tries again, for as long as it takes); without a draft – the latest published release, if a package is missing;
+  tries again – every hour, until the package is there; user's rule 2026-11-13); without a draft – the latest published release, if a package is missing;
 - by hand: with a tag – that release (the systems given, else the missing ones, else all); without a tag – a test
   build of the branch (no release);
 - `release_plan.py finalize TAG`: the draft with all the packages is published (and becomes the latest).
@@ -37,19 +37,6 @@ def releases():
         raise SystemExit(f"cannot list the releases: {err}")
     return [dict(tag=r["tag_name"], draft=r["draft"], assets=[a["name"] for a in r.get("assets", [])],
                  created=r.get("created_at") or "") for r in json.loads(out)]
-
-
-def retry_now(created):
-    """Scheduled retries of the missing systems: every hour for the first 3 hours after the release was created,
-    then every 6 hours. A job that gets no runner makes the whole run „failed” (and GitHub e-mails it) – fewer
-    attempts while GitHub has no machines means fewer such e-mails; an hour with nothing to build is a success."""
-    import datetime
-    try:
-        t = datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))
-    except ValueError:
-        return True
-    age = int((datetime.datetime.now(datetime.timezone.utc) - t).total_seconds() // 3600)
-    return age <= 3 or age % 6 == 0
 
 
 def find(tag):
@@ -111,9 +98,6 @@ def plan():
         target = draft or pub
         tag = target["tag"] if target else ""
         todo = missing(target["assets"]) if target else []
-        if todo and not retry_now(target["created"]):
-            print(f"{tag}: missing {[s[0] for s in todo]} – not this hour (retries: hourly for 3 h, then every 6 h)")
-            todo = []
     else:                                                                              # by hand
         tag = os.environ.get("IN_TAG", "").strip()
         if tag:

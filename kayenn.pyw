@@ -29,7 +29,7 @@ import re
 import sys
 import time
 
-APP_VERSION = "0.2.2"
+APP_VERSION = "0.2.3"
 # program resources folder (fonts, icons, material database) – also inside the PyInstaller bundle (sys._MEIPASS)
 BASE_DIR = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
 FROZEN = bool(getattr(sys, "frozen", False))
@@ -7137,6 +7137,12 @@ def install_command(kind, path, pid, workdir, exe=None):
     return ["/bin/sh", os.path.join(workdir, "update.sh")], head + body
 
 
+# Windows flags of the process that installs the update: CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP.
+# DETACHED_PROCESS (0x8) must not be used: powershell.exe started without a console ends at once with code 0
+# and runs nothing (0.2.1 → 0.2.2: the program closed and the setup never started).
+UPDATE_CREATIONFLAGS = 0x08000000 | 0x00000200
+
+
 def install_writable(kind):
     """Can the files of this copy be replaced without administrator rights (macOS app, .tar.gz folder)?"""
     exe = os.path.abspath(sys.executable)
@@ -7260,7 +7266,8 @@ class UpdateInstaller(QDialog):
                 f.write(script)
         kw = dict(close_fds=True)
         if sys.platform == "win32":
-            kw["creationflags"] = 0x00000008 | 0x08000000 | 0x00000200   # detached, no window, new group
+            # no window, new group; NOT DETACHED_PROCESS – PowerShell without a console exits at once, doing nothing
+            kw["creationflags"] = UPDATE_CREATIONFLAGS
         else:
             kw["start_new_session"] = True
         subprocess.Popen(argv, **kw)
