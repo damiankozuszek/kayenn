@@ -38,17 +38,24 @@ programem do obliczeń konstrukcji metodą elementów skończonych (MES).
 - **Wiatr** wg PN-EN 1991-1-4 z Załącznikiem Krajowym – budynki z różnymi dachami (płaskie, jednospadowe,
   dwuspadowe, czterospadowe, wielospadowe, łukowe, kopuły) oraz wiaty; wszystkie kierunki wiatru i warianty
   parcie/ssanie.
+- **Wiatr na inne konstrukcje** (zakładka Wiatr, lista Budowla – razem z kształtami budynków) – ściany wolno stojące i ogrodzenia, tablice, elementy
+  konstrukcyjne (przekroje prostokątne, o ostrych krawędziach, wielokątne, walce kołowe), kule, kratownice i flagi,
+  ze współczynnikiem konstrukcyjnym cₛcd (procedura 1).
+- **Teren** – teren niższej kategorii od strony nawietrznej (NA.16), budynek ponad dwa razy wyższy w sąsiedztwie
+  (A.4) i wysokość przemieszczenia w zabudowie (A.5).
 - **Obciążenia użytkowe** wg PN-EN 1991-1-1 – kategorie powierzchni A–K i obciążenia poziome ścian, z zakresami
   normowymi i wartościami zalecanymi.
 - **Mapa stref** śniegu i wiatru – wskazujesz lokalizację na mapie (także po numerze działki ewidencyjnej),
   a program ustawia strefę i wysokość nad poziomem morza.
-- **Model 3D** budynku z rozkładem obciążeń – obracanie i powiększanie, z wymiarami, które możesz zmieniać
-  kliknięciem.
+- **Model 3D** budynku lub budowli z rozkładem obciążeń – obracanie i powiększanie, kostka widoków (z góry, z boku,
+  z narożnika), z wymiarami, które możesz zmieniać kliknięciem.
 
 ### Obciążenia własne
 
 - **Obciążenia powierzchniowe, liniowe i skupione** wpisywane ręcznie lub tworzone z **bazy materiałów**
   (ciężar objętościowy × grubość, szerokość, długość), z mnożnikiem, np. liczbą sztuk.
+- **Formuły z jednostkami** w polu wartości, np. `0,12[m]*25[kN/m3]` albo `78,5[kN/m3]*8[mm]/cos(30)`: program
+  sprawdza jednostki (dodanie metrów do kiloniutonów jest błędem) i sam ustala jednostkę wyniku.
 - Baza zawiera wszystkie materiały z Załącznika A do PN-EN 1991-1-1, ciężary ponad dwóch tysięcy kształtowników
   stalowych (z „Tablic do projektowania konstrukcji metalowych”) i wiele materiałów wykończeniowych. Możesz ją
   dowolnie rozbudowywać i zmieniać, a każda pozycja pokazuje swoje źródło.
@@ -57,6 +64,8 @@ programem do obliczeń konstrukcji metodą elementów skończonych (MES).
 ### Projekt i wydruk
 
 - Wszystkie przypadki w jednym pliku projektu `.kayenn` – można je edytować, duplikować i zmieniać ich kolejność.
+- **Ostatnio dodane** – okno z ostatnio dodanymi przypadkami (z dowolnego projektu), z podglądem jak w projekcie
+  (model 3D, raport) i dodawaniem jednym kliknięciem.
 - Wydruk z podglądem: obliczenia, rysunki 3D i źródła wartości.
 
 ## Instalacja

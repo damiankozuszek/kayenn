@@ -67,9 +67,10 @@ KAYENN Manager (the main window) is the core module from which the other parts o
 
 Buildings and canopies are covered completely (orography, cscd, friction, parapets, multi-skin walls, multispan
 configuration c, cylindrical walls of domes; snow guards, B3(2), B4(5); forklifts, transport vehicles, barriers).
-Still outside the scope – structures other than buildings:
-- wind: free-standing walls and signboards (7.4.1, 7.4.3), structural elements and sections (7.6–7.13: rectangular,
-  polygonal, circular cylinders, spheres, lattice structures, flags), bridges (8).
+Structures other than buildings – on the Wind tab, chosen in the Budowla (Structure) list together with the building shapes, with a 3D model of the load: free-standing walls and fences, signboards
+(7.4), structural elements of rectangular, sharp-edged and polygonal sections, circular cylinders, spheres, lattice
+structures, flags (7.6–7.13); the terrain options of Annex A: NA.16 (A.2), A.4, A.5. Still outside the scope:
+- wind: scaffolding (PN-EN 12811-1, NA.13), bridges (8), vortex shedding and aeroelastic instability (Annex E).
 
 ---
 

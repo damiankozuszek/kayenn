@@ -38,17 +38,24 @@ structural analysis program based on the finite element method (FEM).
   drifts.
 - **Wind** per PN-EN 1991-1-4 with the National Annex – buildings with various roofs (flat, monopitch, duopitch,
   hipped, multispan, vaulted, domes) and canopies; all wind directions and pressure/suction variants.
+- **Wind on other structures** (Wind tab, the Structure list – together with the building shapes) – free-standing walls and fences, signboards, structural elements
+  (rectangular, sharp-edged and polygonal sections, circular cylinders), spheres, lattice structures and flags,
+  with the structural factor cₛcd (procedure 1).
+- **Terrain** – a smoother terrain upwind (NA.16), a building more than twice as high nearby (A.4) and the
+  displacement height in towns (A.5).
 - **Imposed loads** per PN-EN 1991-1-1 – area categories A–K and horizontal loads on walls, with the code ranges
   and recommended values.
 - **Zone map** for snow and wind – you pick the location on a map (also by cadastral parcel number) and the
   program sets the zone and the altitude above sea level.
-- **3D model** of the building with the load distribution – rotate and zoom, with dimensions you can change by
-  clicking them.
+- **3D model** of the building or structure with the load distribution – rotate and zoom, a view cube for the
+  views from above, from a side or from a corner, with dimensions you can change by clicking them.
 
 ### Own loads
 
 - **Area, line and point loads** entered by hand or derived from the **material database** (unit weight ×
   thickness, width, length), with a multiplier, e.g. a number of pieces.
+- **Formulas with units** in the value field, e.g. `0,12[m]*25[kN/m3]` or `78,5[kN/m3]*8[mm]/cos(30)`: the program
+  checks the units (adding metres to kilonewtons is an error) and sets the unit of the result itself.
 - The database contains all materials from Annex A of PN-EN 1991-1-1, the weights of over two thousand steel
   sections (from “Tablice do projektowania konstrukcji metalowych”) and many finishing materials. You can extend
   and change it freely, and every item shows its source.
@@ -57,6 +64,8 @@ structural analysis program based on the finite element method (FEM).
 ### Project and printout
 
 - All cases in a single `.kayenn` project file – edit, duplicate and reorder them.
+- **Recently added** – a window with the cases added recently (in any project), previewed like in the project
+  (3D model, report) and added again with one click.
 - Printout with preview: calculations, 3D drawings and the sources of values.
 
 ## Installation

@@ -29,7 +29,7 @@ import re
 import sys
 import time
 
-APP_VERSION = "0.2.3"
+APP_VERSION = "0.2.4"
 # program resources folder (fonts, icons, material database) – also inside the PyInstaller bundle (sys._MEIPASS)
 BASE_DIR = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
 FROZEN = bool(getattr(sys, "frozen", False))
@@ -1898,29 +1898,9 @@ def cscd_building(cat, h, b, d, vb, c0f, delta):
     if h < 15.0:
         out.update(value=1.0, rule="a")
         return out
-    zmin = TERRAIN[cat][2]
-    zs = max(0.6 * h, zmin)
-    c0 = c0f(zs)
-    vm = c0 * wind_cr(cat, zs) * vb
-    Iv = wind_iv(cat, zs, c0)
-    alpha = 0.67 + 0.05 * math.log(TERRAIN_Z0[cat])      # (B.1)
-    Lz = 300.0 * (zs / 200.0) ** alpha
-    n1 = 46.0 / h
-    fL = n1 * Lz / vm                                       # (B.2)
-    SL = 6.8 * fL / (1 + 10.2 * fL) ** (5.0 / 3.0)
-    B2 = 1.0 / (1.0 + 0.9 * ((b + h) / Lz) ** 0.63)        # (B.3)
-
-    def Rl(eta):                                            # (B.7), (B.8)
-        return 1.0 if eta <= 1e-9 else 1.0 / eta - (1.0 - math.exp(-2.0 * eta)) / (2.0 * eta * eta)
-    eh, eb = 4.6 * h / Lz * fL, 4.6 * b / Lz * fL
-    R2 = math.pi ** 2 / (2.0 * delta) * SL * Rl(eh) * Rl(eb)   # (B.6)
-    nu = max(n1 * math.sqrt(R2 / (B2 + R2)), 0.08)         # (B.5)
-    lt = math.sqrt(2.0 * math.log(nu * 600.0))
-    kp = max(lt + 0.6 / lt, 3.0)                            # (B.4)
-    val = (1.0 + 2.0 * kp * Iv * math.sqrt(B2 + R2)) / (1.0 + 7.0 * Iv)    # (6.1)
-    out.update(value=val, rule="calc", zs=zs, vm=vm, Iv=Iv, Lz=Lz, n1=n1, fL=fL, SL=SL, B2=B2, R2=R2, nu=nu, kp=kp,
-               c_rule=h < 100.0 and h < 4.0 * d)
-    return out
+    c = cscd_proc1(cat, 0.6 * h, h, b, 46.0 / h, delta, vb, c0f)
+    c.update(h=h, b=b, d=d, delta=delta, c_rule=h < 100.0 and h < 4.0 * d)
+    return c
 
 
 # Fig. 7.27 / Table 7.12 – pressure distribution on a circular cylinder: Re → (αmin, cp0,min, αA, cp0,h)
@@ -2218,6 +2198,35 @@ class WindGeo:
         return self.shape.walls()
 
 
+def flat_edge_rings(g):
+    """Flat roof with rounded or mansard eaves (Table 7.2, Fig. 7.6) – the building edge for the 3D model: rings
+    (inset from the walls, z) from the top of the walls to the roof plane; [] – a sharp edge or a parapet.
+    Rounded – a quarter circle of radius r; mansard – a bevel at the angle α to the horizontal (its size is not
+    given by the code – drawn small, without a dimension)."""
+    if getattr(g, "kind", None) != "flat" or not isinstance(getattr(g, "p", None), dict):
+        return []
+    et = g.p.get("edge", EDGE_TYPES[0])
+    H, lim = g.H, 0.45 * min(g.L, g.B)
+    if et == EDGE_TYPES[1]:
+        r = min(g.p.get("r", 0.0), H, lim)
+        if r <= 1e-6:
+            return []
+        n = 8
+        return [(r - r * math.cos(math.pi / 2 * i / n), H - r + r * math.sin(math.pi / 2 * i / n))
+                for i in range(n + 1)]
+    if et == EDGE_TYPES[2]:
+        a = g.p.get("am", 45.0)
+        if a >= 89.9 or a <= 0.1:
+            return []
+        hm = min(0.15 * H, 0.08 * min(g.L, g.B))
+        run = hm / math.tan(math.radians(a))
+        if run > lim:
+            run = lim
+            hm = run * math.tan(math.radians(a))
+        return [(0.0, H - hm), (run, H)]
+    return []
+
+
 def wind_frame(g, theta):
     L, B = g.L, g.B
     if theta == 0:
@@ -2277,28 +2286,13 @@ def d_bands(h, b):
 
 
 def calc_wind(g, wp, theta, var):
-    # Table NA.1: vb,0 and qb,0 (the table gives qb,0 = 0.30 and 0.42 kN/m², i.e. ρ = 1.25 kg/m³ is built in)
-    if wp["zone"] == "2":
-        vb0, qb0 = 26.0, 0.42
-    else:
-        k300 = 1.0 if g.A <= 300 else 1 + 0.0006 * (g.A - 300)
-        vb0, qb0 = 22.0 * k300, 0.30 * k300 ** 2
-    cc = wp["cdir"] * wp["cseason"]
-    vb = cc * vb0
-    dens = (20000 - g.A) / (20000 + g.A) if (wp["zone"] == "3" and g.A > 300) else 1.0
-    qb = qb0 * cc ** 2 * dens                    # qb = ½ρvb², vb = c_dir·c_season·vb,0
-    oro = wp.get("oro")                          # orography (Annex A.3) – None: c0 = 1
-
-    def c0(z):
-        return oro_c0(oro, z)[0] if oro else 1.0
-
-    def ce(z):                                   # Table NA.3 (z > zmax – as for zmax); with c0 – expression (4.8), NA.8
-        return wind_ce(wp["cat"], z, c0(z))
-
-    def qp(z):
-        return ce(z) * qb
-
+    # Table NA.1: vb,0 and qb,0 (the table gives qb,0 = 0.30 and 0.42 kN/m², i.e. ρ = 1.25 kg/m³ is built in);
+    # terrain (NA.16), orography (A.3), a tall neighbour (A.4), displacement height (A.5) – wind_site
     h = g.h_top
+    site = wind_site(wp, g.A, h)
+    vb0, qb0, vb, dens, qb, oro = site["vb0"], site["qb0"], site["vb"], site["dens"], site["qb"], site["oro"]
+    c0, ce, qp = site["c0"], site["ce"], site["qp"]
+
     fr = wind_frame(g, theta)
     b, d = fr["b"], fr["d"]
     e = min(b, 2 * h)
@@ -2461,7 +2455,8 @@ def calc_wind(g, wp, theta, var):
         info["friction"] = dict(cfr=cfr, apar=apar, aperp=aperp, slim=slim, afr=afr, ze=h, qp=qp(h),
                                 F=cfr * qp(h) * afr, negl=apar <= 4 * aperp)
     # ---------- structural factor (6.2, 6.3.1, Annex B)
-    info["cscd"] = cscd_building(wp["cat"], h, b, d, vb, c0, wp.get("delta", 0.10))
+    info["cscd"] = cscd_building(site["cat"], h, b, d, vb, c0, wp.get("delta", 0.10))
+    info["site"] = site
     # ---------- parapet on a flat roof (7.4.1, Table 7.9, Fig. 7.19; ze = h + hp)
     if g.kind == "flat" and g.hp > 0 and g.p.get("edge", EDGE_TYPES[0]) == EDGE_TYPES[0]:
         zep = g.H + g.hp
@@ -2948,9 +2943,875 @@ EXC_SECTIONS = {
 }
 EXC_SEC_DEFAULT = dict(fobst=True, canopy=False, annex=True, epar=True, gpar=False, pobst=False, gap=False)
 EXC_FIELDS = {k: [f for _, _, fl in secs for f in fl] for k, secs in EXC_SECTIONS.items()}
-FIELD_DEFS = {f[0]: f for t in (SNOW_TYPES, WIND_TYPES) for _, fl in t.values() for f in fl
+# ===================================================================
+#  WIND – the site (Table NA.1, terrain with NA.16, orography A.3, tall neighbour A.4, displacement height A.5)
+#  and structures other than buildings (7.4.1–7.4.3, 7.6–7.13)
+# ===================================================================
+RHO_AIR = 1.25              # kg/m³ – 4.5(1) Note 2 (AC:2009); Table NA.1 gives qb,0 for this density
+NU_AIR = 15e-6              # m²/s – kinematic viscosity of air (7.15)
+TERRAIN_ORDER = ("0", "I", "II", "III", "IV")
+
+
+def a4_zn(h_low, h_high, d_large, x):
+    """Annex A.4, expression (A.14): height zn at which qp is taken for a structure next to a building more than
+    twice as high. r = h_high (h_high ≤ 2·d_large) or 2·d_large. h_low > h_high/2 – no increase (zn = h_low)."""
+    r = h_high if h_high <= 2.0 * d_large else 2.0 * d_large
+    if h_low > h_high / 2.0:
+        return dict(zn=h_low, r=r, neglect=True)
+    if x <= r:
+        zn = r / 2.0
+    elif x < 2.0 * r:
+        zn = 0.5 * (r - (1.0 - 2.0 * h_low / r) * (x - r))
+    else:
+        zn = h_low
+    return dict(zn=zn, r=r, neglect=False)
+
+
+def a5_hdis(h_ave, x, h):
+    """Annex A.5, expression (A.15): displacement height in terrain category IV."""
+    if x <= 2.0 * h_ave:
+        return min(0.8 * h_ave, 0.6 * h)
+    if x < 6.0 * h_ave:
+        return max(min(1.2 * h_ave - 0.2 * x, 0.6 * h), 0.0)
+    return 0.0
+
+
+def wind_site(wp, A, h):
+    """Velocity pressure of the site for a building / structure of height h: Table NA.1 (vb,0, qb,0, zone 3 –
+    density factor), c_dir · c_season, terrain category (NA.16: within 30·h of a smoother category upwind – that
+    category), orography c0 (A.3), a building more than twice as high nearby (A.4: qp at zn) and the displacement
+    height in category IV (A.5: the profile raised by hdis)."""
+    if wp["zone"] == "2":
+        vb0, qb0 = 26.0, 0.42
+    else:
+        k300 = 1.0 if A <= 300 else 1 + 0.0006 * (A - 300)
+        vb0, qb0 = 22.0 * k300, 0.30 * k300 ** 2
+    cc = wp["cdir"] * wp["cseason"]
+    vb = cc * vb0
+    dens = (20000 - A) / (20000 + A) if (wp["zone"] == "3" and A > 300) else 1.0
+    qb = qb0 * cc ** 2 * dens                    # qb = ½ρvb², vb = c_dir·c_season·vb,0
+    cat0 = cat = wp["cat"]
+    na16 = None
+    n = wp.get("na16")
+    if n:
+        lower = TERRAIN_ORDER.index(n["cat2"]) < TERRAIN_ORDER.index(cat0)
+        applies = lower and n["x"] < 30.0 * h
+        if applies:
+            cat = n["cat2"]
+        na16 = dict(n, h=h, lim=30.0 * h, lower=lower, applies=applies)
+    a4 = None
+    zn = None
+    if wp.get("a4"):
+        p = wp["a4"]
+        a4 = dict(p, h_low=h, **a4_zn(h, p["hh"], p["dl"], p["x"]))
+        if not a4["neglect"] and a4["zn"] > 0:
+            zn = a4["zn"]
+    a5 = None
+    hdis = 0.0
+    if wp.get("a5"):
+        p = wp["a5"]
+        active = cat == "IV"
+        hdis = a5_hdis(p["have"], p["x"], h) if active else 0.0
+        a5 = dict(p, h=h, hdis=hdis, active=active)
+    oro = wp.get("oro")
+
+    def c0(z):
+        return oro_c0(oro, z)[0] if oro else 1.0
+
+    def zq(z):                                   # the height the profile is entered with
+        z1 = max(z, zn) if zn is not None else z
+        return max(z1 - hdis, 0.0)
+
+    def ce(z):                                   # Table NA.3 (z > zmax – as for zmax); with c0 – (4.8), NA.8
+        zz = zq(z)
+        return wind_ce(cat, zz, c0(zz))
+
+    def qp(z):
+        return ce(z) * qb
+
+    def vm(z):                                   # mean wind velocity (4.3): vm = cr·c0·vb
+        zz = zq(z)
+        return wind_cr(cat, zz) * c0(zz) * vb
+
+    return dict(vb0=vb0, qb0=qb0, cc=cc, vb=vb, dens=dens, qb=qb, cat=cat, cat0=cat0, na16=na16, a4=a4, a5=a5,
+                hdis=hdis, zn=zn, oro=oro, c0=c0, zq=zq, ce=ce, qp=qp, vm=vm)
+
+
+def site_items(site, wp, P4="PN-EN 1991-1-4"):
+    """Report lines of NA.16, A.4 and A.5 (after the basic velocity pressure lines)."""
+    it = []
+    n = site["na16"]
+    if n:
+        if n["applies"]:
+            it.append(("v", f"kategoria terenu {n['cat2']} (zamiast {site['cat0']})",
+                       f"teren kategorii niższej w odległości x = {f2(n['x'])} m < 30·h = {f2(n['lim'])} m od strony "
+                       "nawietrznej", f"{P4}, Załącznik krajowy, NA.16 (A.2(1)), NA.7"))
+        else:
+            it.append(("n", f"Teren kategorii {n['cat2']}: " + (
+                f"x = {f2(n['x'])} m ≥ 30·h = {f2(n['lim'])} m – przyjęto kategorię {site['cat0']} (NA.16)."
+                if n["lower"] else f"kategoria {n['cat2']} nie jest niższa od {site['cat0']} – bez zmiany (NA.16).")))
+    a4 = site["a4"]
+    if a4:
+        if a4["neglect"]:
+            it.append(("n", f"Wysoki budynek w sąsiedztwie: h = {f2(a4['h_low'])} m > h_high/2 = "
+                            f"{f2(a4['hh'] / 2)} m – zwiększenie prędkości wiatru pominięto (A.4(1))."))
+        else:
+            it.append(("v", f"zn = {f2(a4['zn'])} m (r = {f2(a4['r'])} m, x = {f2(a4['x'])} m)",
+                       f"wysokość, na której przyjęto qp – budynek o wysokości h_high = {f2(a4['hh'])} m "
+                       f"(d_large = {f2(a4['dl'])} m) w sąsiedztwie; ze = max(ze; zn)",
+                       f"{P4}, Załącznik A.4, wzór (A.14)"))
+    a5 = site["a5"]
+    if a5:
+        if a5["active"]:
+            it.append(("v", f"h_dis = {f2(a5['hdis'])} m (h_ave = {f2(a5['have'])} m, x = {f2(a5['x'])} m)",
+                       "wysokość przemieszczenia – profil qp(z) podniesiony o h_dis (qp liczone dla z − h_dis)",
+                       f"{P4}, Załącznik A.5, wzór (A.15)"))
+        else:
+            it.append(("n", "Wysokość przemieszczenia h_dis dotyczy tylko terenu kategorii IV (A.5) – pominięto."))
+    return it
+
+
+# ---------------------------------------------------------------- structural factor (6.3.1, Annex B)
+# Table F.2 – logarithmic decrement of structural damping δs (rows that are not bridges; steel chimneys with a
+# liner: the value depends on h/b – linear interpolation for intermediate h/b, footnote a)
+DELTA_TYPES = (("budynki żelbetowe", 0.10), ("budynki stalowe", 0.05), ("konstrukcje mieszane beton + stal", 0.08),
+               ("żelbetowe wieże i kominy", 0.03),
+               ("stalowe kominy spawane bez wykładziny i bez zewnętrznej izolacji cieplnej", 0.012),
+               ("stalowe kominy spawane bez wykładziny, z zewnętrzną izolacją cieplną", 0.020),
+               ("komin stalowy z pojedynczą wykładziną i z zewnętrzną izolacją cieplną", "liner1"),
+               ("komin stalowy z podwójną lub liczniejszą wykładziną i z zewnętrzną izolacją cieplną", "liner2"),
+               ("komin stalowy z wewnętrzną wykładziną murowaną", 0.070),
+               ("komin stalowy z wewnętrzną wykładziną torkretową", 0.030),
+               ("kominy stalowe połączone ze sobą, bez wykładziny", 0.015),
+               ("stalowe wieże kratowe – spawane", 0.02),
+               ("stalowe wieże kratowe – łączone na śruby o wysokiej wytrzymałości", 0.03),
+               ("stalowe wieże kratowe – łączone na śruby zwykłe", 0.05),
+               ("kable o drutach równoległych", 0.006), ("kable o drutach zwijanych spiralnie", 0.020))
+DELTA_NAMES = tuple(n for n, _ in DELTA_TYPES)
+
+
+def delta_s(name, hb):
+    """δs of Table F.2 for the chosen structure (h/b – for steel chimneys with a liner)."""
+    v = dict(DELTA_TYPES).get(name, 0.05)
+    if v in ("liner1", "liner2"):
+        last = 0.014 if v == "liner1" else 0.025
+        return interp(hb, [18.0, 20.0, 24.0, 26.0], [0.020, 0.040, 0.040, last])
+    return v
+
+
+def cscd_proc1(cat, zs, h, b, n1, delta, vb, c0f):
+    """Structural factor (6.1) – procedure 1, Annex B (NA.10): turbulence at zs (B.1), (B.2), background B² (B.3),
+    resonance R² (B.6)–(B.8), up-crossing frequency ν ≥ 0,08 Hz (B.5, Ap3:2011), peak factor (B.4), T = 600 s.
+    h, b – the dimensions of Fig. 6.1, δ = δs (δa omitted – on the safe side)."""
+    zmin = TERRAIN[cat][2]
+    zs = max(zs, zmin)
+    c0 = c0f(zs)
+    vm = c0 * wind_cr(cat, zs) * vb
+    Iv = wind_iv(cat, zs, c0)
+    alpha = 0.67 + 0.05 * math.log(TERRAIN_Z0[cat])      # (B.1)
+    Lz = 300.0 * (zs / 200.0) ** alpha
+    fL = n1 * Lz / vm                                       # (B.2)
+    SL = 6.8 * fL / (1 + 10.2 * fL) ** (5.0 / 3.0)
+    B2 = 1.0 / (1.0 + 0.9 * ((b + h) / Lz) ** 0.63)        # (B.3)
+
+    def Rl(eta):                                            # (B.7), (B.8)
+        return 1.0 if eta <= 1e-9 else 1.0 / eta - (1.0 - math.exp(-2.0 * eta)) / (2.0 * eta * eta)
+    eh, eb = 4.6 * h / Lz * fL, 4.6 * b / Lz * fL
+    R2 = math.pi ** 2 / (2.0 * delta) * SL * Rl(eh) * Rl(eb)   # (B.6)
+    nu = max(n1 * math.sqrt(R2 / (B2 + R2)), 0.08)         # (B.5) with Ap3:2011
+    lt = math.sqrt(2.0 * math.log(nu * 600.0))
+    kp = max(lt + 0.6 / lt, 3.0)                            # (B.4)
+    val = (1.0 + 2.0 * kp * Iv * math.sqrt(B2 + R2)) / (1.0 + 7.0 * Iv)    # (6.1)
+    return dict(value=val, rule="calc", zs=zs, vm=vm, Iv=Iv, Lz=Lz, n1=n1, fL=fL, SL=SL, B2=B2, R2=R2, nu=nu,
+                kp=kp, h=h, b=b, delta=delta)
+
+
+# ---------------------------------------------------------------- data of the code (figures read from the drawings)
+# Fig. 7.20 (Ap3:2011): shelter factor ψs(x/h) for the sheltering wall φ = 1,0 and φ = 0,8 (piecewise linear)
+SHELTER_X = (0.0, 5.0, 10.0, 15.0, 20.0)
+SHELTER_PSI = {1.0: (0.30, 0.30, 0.65, 0.85, 1.00), 0.8: (0.30, 0.30, 0.45, 0.65, 1.00)}
+# Table 7.9: cp,net of free-standing walls – φ = 1 without a return corner (l/h ≤ 3, 5, ≥ 10), with a return corner
+# of length ≥ h, φ = 0,8; zones A, B, C, D
+WALL_CP = {3.0: (2.3, 1.4, 1.2, 1.2), 5.0: (2.9, 1.8, 1.4, 1.2), 10.0: (3.4, 2.1, 1.7, 1.2)}
+WALL_CP_CORNER = (2.1, 1.8, 1.4, 1.2)
+WALL_CP_08 = (1.2, 1.2, 1.2, 1.2)
+# Fig. 7.23: cf,0 of rectangular sections – the points marked on the drawing (2,35 at 0,6; 2,1 at 1; 1,65 at 2),
+# straight lines in log(d/b) between them
+RECT_CF0 = ((0.1, 2.0), (0.2, 2.0), (0.6, 2.35), (0.7, 2.4), (1.0, 2.1), (2.0, 1.65), (5.0, 1.0), (10.0, 0.9),
+            (50.0, 0.9))
+# Fig. 7.36: ψλ – curves for φ at λ = 1, 10, 70 (straight lines in log λ, dashed to ψλ = 1 at λ = 200)
+PSI_LAMBDA = ((0.1, (0.988, 0.990, 0.998)), (0.5, (0.884, 0.911, 0.970)), (0.9, (0.825, 0.877, 0.957)),
+              (0.95, (0.728, 0.802, 0.937)), (1.0, (0.600, 0.700, 0.912)))
+# Fig. 7.30: cf,x of a sphere – 0,6 up to Re = 3,8·10⁵, a straight line in log Re down to 0,2 at Re = 8,2·10⁵,
+# limited from below by the level of k/b: 10⁻³ – 0,4, 10⁻⁴ – 0,3, 10⁻⁵ (smooth) – 0,2
+SPHERE_RE = (3.8e5, 8.2e5)
+# Table 7.13: equivalent surface roughness k [mm]
+ROUGHNESS = (("szkło", 0.0015), ("metal polerowany", 0.002), ("malowanie gładkie", 0.006),
+             ("malowanie natryskowe", 0.02), ("stal polerowana", 0.05), ("żelazo lane", 0.2),
+             ("stal galwanizowana", 0.2), ("beton gładki", 0.2), ("drewno heblowane", 0.5), ("beton surowy", 1.0),
+             ("drewno piłowane", 2.0), ("rdza", 2.0), ("mur ceglany", 3.0))
+ROUGH_NAMES = tuple(f"{n} (k = {k:g} mm)".replace(".", ",") for n, k in ROUGHNESS)
+ROUGH_CABLE = "kabel spleciony (cf,0 = 1,2 – 7.9.2(3))"
+# Fig. 7.33: plane lattice of angle sections – 2,0 − 1,8·φ down to 1,6, then 1,6 up to φ = 0,9, then up to 2,0
+LAT_ANGLE_PLANE = ((0.0, 2.0), (0.4 / 1.8, 1.6), (0.9, 1.6), (1.0, 2.0))
+# Fig. 7.34: spatial lattice of angle sections – φ 0,1…1,0 (straight lines in log φ)
+LAT_ANGLE_SPACE = {
+    "naroże": ((0.1, 2.7), (0.5, 1.67), (0.8, 1.67), (1.0, 1.93)),
+    "ścianę trójkąta": ((0.1, 3.0), (0.5, 1.67), (0.8, 1.67), (1.0, 1.93)),
+    "ścianę kwadratu": ((0.1, 3.4), (0.5, 2.0), (0.8, 1.67), (1.0, 1.93)),
+    "przekątną kwadratu": ((0.1, 3.7), (0.5, 2.5), (0.8, 2.6), (1.0, 3.05)),
+}
+# Fig. 7.35: lattices of circular members – panels (0,2 ≤ φ ≤ 0,6): subcritical level for φ, drop D (from Re = 2·10⁵)
+# and supercritical straight lines (log Re, up to 10⁶): cf,0 = max(sup(Re), min(level, D(Re)))
+LAT_TUBE = {
+    "płaska – wiatr w płaszczyźnie": dict(level=((0.2, 0.70), (0.3, 0.60), (0.4, 0.60), (0.5, 0.50), (0.6, 0.50)),
+                                         D=((2e5, 0.70), (3.12e5, 0.30)),
+                                         sup=((0.3, ((3.1e5, 0.385), (1e6, 0.50))), (0.4, ((3.1e5, 0.315), (1e6, 0.41))))),
+    "płaska – wiatr prostopadły do płaszczyzny": dict(level=((0.2, 1.10), (0.6, 1.10)), D=((2e5, 1.10), (5e5, 0.57)),
+                                                      sup=((0.2, ((5e5, 0.57), (1e6, 0.63))),)),
+    "trójkątna – ściana równoległa do wiatru": dict(level=((0.2, 1.28), (0.6, 1.28)), D=((2e5, 1.28), (3e5, 0.855)),
+                                                   sup=((0.2, ((3e5, 0.855), (1e6, 0.985))),)),
+    "trójkątna – wiatr na naroże": dict(level=((0.2, 1.457), (0.6, 1.457)), D=((2e5, 1.457), (2.5e5, 0.892)),
+                                       sup=((0.2, ((2.5e5, 0.892), (1e6, 1.044))),)),
+    "kwadratowa – wiatr na przekątną": dict(level=((0.2, 2.0), (0.3, 2.0), (0.4, 1.89), (0.6, 1.89)),
+                                           D=((2e5, 2.0), (2.5e5, 1.10)),
+                                           sup=((0.3, ((2.5e5, 1.10), (1e6, 1.455))), (0.4, ((2.5e5, 1.27), (1e6, 1.65))))),
+    "kwadratowa – wiatr na ścianę": dict(level=((0.2, 1.83), (0.3, 1.60), (0.4, 1.60), (0.5, 1.40), (0.6, 1.40)),
+                                        D=((2e5, 1.83), (2.5e5, 0.85)),
+                                        sup=((0.4, ((2.5e5, 0.92), (1e6, 1.40))), (0.5, ((2.5e5, 0.85), (1e6, 1.20))))),
+}
+LATTICE_TYPES = (("płaska z kątowników (Rys. 7.33)", "plane", None),) + tuple(
+    (f"przestrzenna z kątowników – wiatr na {k} (Rys. 7.34)", "angle", k) for k in LAT_ANGLE_SPACE) + tuple(
+    (f"z prętów okrągłych: {k} (Rys. 7.35)", "tube", k) for k in LAT_TUBE)
+LATTICE_NAMES = tuple(n for n, _, _ in LATTICE_TYPES)
+POLY_SIDES = ("5 – pięciokąt", "6 – sześciokąt", "8 – ośmiokąt", "10 – dziesięciokąt", "12 – dwunastokąt",
+              "16 i więcej")
+POLY_SURF = ("powierzchnia gładka, krawędzie zaokrąglone", "inna")
+FLAG_TYPES = ("napięta (transparent)", "swobodna – a) prostokątna", "swobodna – b) zwężająca się")
+END_TYPES = ("ψλ = 1 (efekt swobodnego końca pominięty – bezpiecznie)",
+             "Tabl. 7.16 poz. 1–2: element ze swobodnym końcem",
+             "Tabl. 7.16 poz. 3: element przy płaszczyźnie (l = 2 × długość)",
+             "Tabl. 7.16 poz. 4: element bez swobodnych końców")
+ORIENT_TYPES = ("pionowy (słup, maszt, komin)", "poziomy (belka, rura pozioma)")
+# circular cylinder – two ways of the code, shown on the 3D model one at a time (the report has both)
+CYL_VARIANTS = ("rozkład ciśnienia cpe na obwodzie (7.9.1)", "siła na jednostkę długości fw (7.9.2)")
+CSCD_MODES = ("wg 6.3.1 – Załącznik B, procedura 1", "cₛcd = 1 – komin kołowy h < 60 m i h < 6,5·b (6.2(1)d)")
+
+
+def rough_k(name):
+    """k [mm] of Table 7.13 for the shown name „beton gładki (k = 0,2 mm)” (unknown – galvanised steel 0,2 mm)."""
+    return dict(ROUGHNESS).get(str(name or "").split(" (")[0], 0.2)
+
+
+def lin_log(x, pts):
+    """Piecewise linear in log x through pts ((x, y), …); outside – the end values."""
+    xs = [math.log10(p[0]) for p in pts]
+    return interp(math.log10(max(x, 1e-12)), xs, [p[1] for p in pts])
+
+
+def rect_cf0(db):
+    return lin_log(db, RECT_CF0)
+
+
+def psi_r(rb):
+    """Fig. 7.24: square section with rounded corners – 1,0 at r/b = 0, 0,5 from r/b = 0,2."""
+    return interp(rb, [0.0, 0.2], [1.0, 0.5])
+
+
+def psi_lambda(lam, phi):
+    """Fig. 7.36 (orientacyjne wartości): ψλ for λ (log scale, ψλ = 1 at λ = 200) and φ (linear between curves)."""
+    lam = clamp(lam, 1.0, 200.0)
+
+    def curve(vals):
+        return lin_log(lam, ((1.0, vals[0]), (10.0, vals[1]), (70.0, vals[2]), (200.0, 1.0)))
+    phis = [p for p, _ in PSI_LAMBDA]
+    return interp(clamp(phi, phis[0], phis[-1]), phis, [curve(v) for _, v in PSI_LAMBDA])
+
+
+def slenderness(l_, b, cyl, pos):
+    """Table 7.16: λ for l < 15 m (2·l/b, cylinders l/b) and l ≥ 50 m (1,4·l/b, cylinders 0,7·l/b), linear
+    interpolation in between; positions 1–3: the smaller of λ and 70, position 4: the larger (0,7·l/b or l/b)."""
+    if pos == 4:
+        lo, hi = max(1.0 * l_ / b, 70.0), max(0.7 * l_ / b, 70.0)
+    else:
+        k15, k50 = (1.0, 0.7) if cyl else (2.0, 1.4)
+        lo, hi = min(k15 * l_ / b, 70.0), min(k50 * l_ / b, 70.0)
+    if l_ < 15.0:
+        return lo
+    if l_ >= 50.0:
+        return hi
+    return lo + (hi - lo) * (l_ - 15.0) / 35.0
+
+
+def cyl_row(re):
+    """Table 7.12 (Re → αmin, cp0,min, αA, cp0,h): linear interpolation in Re, outside – the end rows."""
+    rows = CYL_RE
+    if re <= rows[0][0]:
+        return rows[0][1:]
+    if re >= rows[-1][0]:
+        return rows[-1][1:]
+    for r0, r1 in zip(rows, rows[1:]):
+        if r0[0] <= re <= r1[0]:
+            t = (re - r0[0]) / (r1[0] - r0[0])
+            return tuple(a + (b_ - a) * t for a, b_ in zip(r0[1:], r1[1:]))
+    return rows[-1][1:]
+
+
+def psi_lambda_alpha(alpha, psil, amin, aA):
+    """(7.17): end-effect factor of the pressure distribution on a cylinder."""
+    if alpha <= amin:
+        return 1.0
+    if alpha >= aA:
+        return psil
+    return psil + (1.0 - psil) * math.cos(math.pi / 2.0 * (alpha - amin) / (aA - amin))
+
+
+def cyl_cf0(re, kb):
+    """Fig. 7.28: cf,0 = 0,11/(Re/10⁶)^1,4 (≤ 1,2) and 1,2 + 0,18·log(10·k/b)/(1 + 0,4·log(Re/10⁶)), not below 0,4;
+    k/b below 10⁻⁵ – as 10⁻⁵ (the lowest curve)."""
+    left = 0.11 / (re / 1e6) ** 1.4
+    if left >= 1.2:
+        return 1.2
+    right = 1.2 + 0.18 * math.log10(10.0 * max(kb, 1e-5)) / (1.0 + 0.4 * math.log10(re / 1e6))
+    return max(left, right, 0.4)
+
+
+def sphere_cfx(re, kb):
+    """Fig. 7.30: 0,6 up to Re = 3,8·10⁵, a straight line in log Re to 0,2 at 8,2·10⁵, not below the level of k/b
+    (10⁻³ – 0,4, 10⁻⁴ – 0,3, ≤ 10⁻⁵ – 0,2; log interpolation between the curves). k/b > 10⁻³ – beyond the drawing:
+    the subcritical value 0,6 (the largest one)."""
+    if kb > 1e-3:
+        return 0.6
+    level = 0.2 + 0.1 * (clamp(math.log10(max(kb, 1e-5)), -5.0, -3.0) + 5.0)
+    fall = lin_log(re, ((SPHERE_RE[0], 0.6), (SPHERE_RE[1], 0.2)))
+    return clamp(max(fall, level), 0.2, 0.6)
+
+
+def lattice_cf0(kind, key, phi, re):
+    """cf,0 of a lattice: Fig. 7.33 (plane, angles), 7.34 (spatial, angles; φ 0,1…1,0), 7.35 (circular members,
+    0,2 ≤ φ ≤ 0,6; φ between the classes and Re between the lines – linear interpolation). None – out of range."""
+    if kind == "plane":
+        return interp(phi, [p[0] for p in LAT_ANGLE_PLANE], [p[1] for p in LAT_ANGLE_PLANE])
+    if kind == "angle":
+        if not 0.1 - 1e-9 <= phi <= 1.0 + 1e-9:
+            return None
+        return lin_log(phi, LAT_ANGLE_SPACE[key])
+    if not 0.2 - 1e-9 <= phi <= 0.6 + 1e-9:
+        return None
+    t = LAT_TUBE[key]
+    level = interp(phi, [p for p, _ in t["level"]], [v for _, v in t["level"]])
+    sups = t["sup"]
+
+    def supv(line):                                      # Re > 10⁶ – as for 10⁶ (the end of the drawing)
+        return lin_log(min(re, 1e6), line)
+    if len(sups) == 1:
+        sup = supv(sups[0][1])
+    else:
+        sup = interp(phi, [sups[0][0], sups[1][0]], [supv(sups[0][1]), supv(sups[1][1])])
+    if re <= t["D"][0][0]:
+        return level
+    d = lin_log(re, t["D"]) if re <= t["D"][1][0] else -1.0
+    return max(sup, min(level, d))
+
+
+def poly_cf0(sides, surf, rb, re):
+    """Table 7.11 (AC:2009): cf,0 of regular polygons; Re for v = vm. None – treat as a circular cylinder (7.9)."""
+    if sides == 5:
+        return 1.80
+    if sides == 6:
+        return 1.60
+    if sides == 10:
+        return 1.30
+    if sides == 8:
+        if rb < 0.075:
+            return 1.45 if re <= 2.4e5 else (1.30 if re >= 3e5 else interp(re, [2.4e5, 3e5], [1.45, 1.30]))
+        return 1.30 if re <= 2e5 else (1.10 if re >= 7e5 else interp(re, [2e5, 7e5], [1.30, 1.10]))
+    if sides == 12:
+        if surf == 0 and 2e5 < re < 1.2e6:
+            return 0.90
+        return 1.30 if re <= 4e5 else 1.10
+    if surf == 0 and 2e5 <= re < 1.2e6:              # 16 sides and more
+        return 0.70
+    return None
+
+
+# ---------------------------------------------------------------- the structure types of the form
+STRUCT_TYPES = {
+    "Ściana wolno stojąca, ogrodzenie": ("wall", [FL("t_l", "Długość ściany l"), FL("t_h", "Wysokość ściany h", hi=100),
+                                                  FL("t_phi", "Współczynnik wypełnienia φ", "–", 0, 1),
+                                                  FL("t_lc", "Długość narożnika (0 – brak)", "m", 0, 500, False),
+                                                  FL("t_x", "Odstęp od ściany osłaniającej x", "m", 0, 10000),
+                                                  FL("t_phis", "φ ściany osłaniającej", "–", 0.8, 1, False)]),
+    "Tablica wolno stojąca": ("sign", [FL("t_b", "Szerokość tablicy b", hi=200), FL("t_h", "Wysokość tablicy h", hi=100),
+                                       FL("t_zg", "Prześwit pod tablicą z_g", "m", 0, 300, False)]),
+    "Element o przekroju prostokątnym": ("rect", [FL("t_l", "Długość elementu l"),
+                                                  FL("t_ze", "Wysokość odniesienia z_e", hi=300),
+                                                  FL("t_b", "Wymiar b (prostopadły do wiatru)", hi=100),
+                                                  FL("t_d", "Wymiar d (równoległy do wiatru)", hi=100),
+                                                  FL("t_r", "Promień zaokrąglenia naroży r", "m", 0, 50, False)]),
+    "Element o ostrych krawędziach": ("sharp", [FL("t_l", "Długość elementu l"),
+                                                FL("t_ze", "Wysokość odniesienia z_e", hi=300),
+                                                FL("t_b", "Wymiar b (prostopadły do wiatru)", hi=100)]),
+    "Element o przekroju wielokąta foremnego": ("poly", [FL("t_l", "Długość elementu l"),
+                                                         FL("t_ze", "Wysokość odniesienia z_e", hi=300),
+                                                         FL("t_b", "Średnica koła opisanego b", hi=100),
+                                                         FL("t_r", "Promień zaokrąglenia naroży r", "m", 0, 50, False)]),
+    "Walec kołowy (komin, rura, słup)": ("cyl", [FL("t_l", "Długość elementu l"),
+                                                FL("t_ze", "Wysokość odniesienia z_e", hi=300),
+                                                FL("t_b", "Średnica b", hi=100),
+                                                FL("t_a", "Odstęp osi walców a", "m", 0, 1000),
+                                                FL("t_zg", "Odległość od płaskiej powierzchni z_g", "m", 0, 1000, False)]),
+    "Kula": ("sphere", [FL("t_b", "Średnica kuli b", hi=100),
+                        FL("t_zg", "Odległość od płaskiej powierzchni z_g", "m", 0, 1000, False)]),
+    "Konstrukcja kratowa": ("lattice", [FL("t_l", "Długość kratownicy l"), FL("t_ze", "Wysokość odniesienia z_e", hi=300),
+                                       FL("t_d", "Szerokość kratownicy d", hi=100),
+                                       FL("t_A", "Pole rzutu prętów i blach A", "m²", 0, 1e5),
+                                       FL("t_bi", "Średnia średnica prętów b_i", "m", 0, 5)]),
+    "Flaga": ("flag", [FL("t_h", "Wysokość flagi h", hi=50), FL("t_l", "Długość flagi l", hi=100),
+                       FL("t_ze", "Wysokość flagi nad terenem z_e", hi=300),
+                       FL("t_mf", "Masa flagi na jednostkę pola m_f", "kg/m²", 0, 50)]),
+}
+STRUCT_N1 = FL("t_n1", "Częstotliwość drgań własnych n₁", "Hz", 0, 100)
+STRUCT_FORCE = ("sign", "rect", "sharp", "poly", "cyl", "sphere", "lattice", "flag")
+STRUCT_LINE = ("rect", "sharp", "poly", "cyl", "lattice")            # elements with λ, ψλ and an orientation
+
+
+def struct_fields(kind, o):
+    """The number fields of a structure type for the options o (shown in the form)."""
+    fl = [f for f in STRUCT_TYPES_BY_KIND[kind] if not (
+        (f[0] in ("t_x", "t_phis") and not o.get("shelter")) or
+        (f[0] == "t_a" and not o.get("row")) or (f[0] == "t_zg" and kind == "cyl" and not o.get("near")) or
+        (f[0] == "t_r" and kind == "poly" and o.get("sides") != 8) or
+        (f[0] == "t_bi" and o.get("lat_kind") != "tube"))]
+    if kind in STRUCT_FORCE and o.get("cscd", 0) == 0:
+        fl.append(STRUCT_N1)
+    return fl
+
+
+STRUCT_TYPES_BY_KIND = {k: fl for k, fl in STRUCT_TYPES.values()}
+
+
+def wall_cpnet(lh, phi, lc, h):
+    """Table 7.9: cp,net (A, B, C, D) – φ = 1: interpolation in l/h (3, 5, 10) without a return corner, with
+    a corner of length lc between 0 and h – interpolation to the „corner” row; φ between 0,8 and 1 – interpolation."""
+    xs = sorted(WALL_CP)
+    free = [interp(lh, xs, [WALL_CP[x][i] for x in xs]) for i in range(4)]
+    t = clamp(lc / h, 0.0, 1.0) if h > 0 else 0.0
+    one = [a + (c - a) * t for a, c in zip(free, WALL_CP_CORNER)]
+    s = clamp((phi - 0.8) / 0.2, 0.0, 1.0)
+    return [b_ + (a - b_) * s for a, b_ in zip(one, WALL_CP_08)]
+
+
+def shelter_psi(xh, phis):
+    """Fig. 7.20 (Ap3:2011): ψs(x/h) for the sheltering wall φ (0,8…1,0, linear between the curves); x/h > 20 → 1."""
+    a = interp(xh, list(SHELTER_X), list(SHELTER_PSI[1.0]))
+    b_ = interp(xh, list(SHELTER_X), list(SHELTER_PSI[0.8]))
+    s = clamp((phis - 0.8) / 0.2, 0.0, 1.0)
+    return b_ + (a - b_) * s
+
+
+def calc_struct(kind, p, o, site):
+    """Wind on a structure other than a building. p – the numbers of the form, o – the options; site – wind_site().
+    Returns dict(ok, err, items – report lines for fill_text, table, res – the main results)."""
+    P4 = "PN-EN 1991-1-4"
+    it, tbl, res, warn = [], TableData(("Wielkość", "Wartość", "Jedn."), (0,)), {}, []
+    qp, f3 = site["qp"], (lambda v: f2(v, 3))
+
+    def v_of(z):                                           # peak velocity (Note 2 to Fig. 7.27)
+        return math.sqrt(2.0 * qp(z) * 1000.0 / RHO_AIR)
+
+    def row(name, val, unit=""):
+        tbl.insert("", "end", values=(name, val, unit))
+
+    def qp_lines(ze, why):
+        it.append(("v", f"ze = {f2(ze)} m", why[0], why[1]))
+        it.append(("v", f"cₑ(ze) = {f2(site['ce'](ze), 4)}, qp(ze) = {f2(qp(ze), 4)} kN/m²",
+                   f"wartość szczytowa ciśnienia prędkości (kategoria terenu {site['cat']})",
+                   f"{P4}, 4.5(1), wzór (4.8); Załącznik krajowy, NA.8, Tabl. NA.3"))
+
+    def cscd_of(shape, h_, b_, zs):
+        """cscd for the shape of Fig. 6.1 (a – vertical, b – horizontal, c – point-like)."""
+        if o.get("cscd", 0) == 1:
+            if not (kind == "cyl" and o.get("orient", 0) == 0 and h_ < 60.0 and h_ < 6.5 * b_):
+                return None, "cₛcd = 1 wg 6.2(1)d tylko dla pionowego walca (komina) o h < 60 m i h < 6,5·b."
+            it.append(("v", "cₛcd = 1,0", f"komin kołowy: h = {f2(h_)} m < 60 m i h < 6,5·b = {f2(6.5 * b_)} m",
+                       f"{P4}, 6.2(1)d"))
+            return 1.0, ""
+        n1 = p["n1"]
+        dl = delta_s(o.get("delta"), h_ / b_ if b_ > 0 else 0.0)
+        c = cscd_proc1(site["cat"], zs, h_, b_, n1, dl, site["vb"], site["c0"])
+        it.append(("v", f"cₛcd = {f2(c['value'], 3)}",
+                   f"współczynnik konstrukcyjny – kształt Rys. 6.1{shape}, zs = {f2(c['zs'])} m, h = {f2(h_)} m, "
+                   f"b = {f2(b_)} m, n₁ = {f2(n1, 3)} Hz, δs = {f2(dl, 3)} ({o.get('delta')}; δa pominięto – "
+                   f"bezpiecznie), Iv = {f2(c['Iv'], 3)}, B² = {f2(c['B2'], 3)}, R² = {f2(c['R2'], 3)}, "
+                   f"kp = {f2(c['kp'], 3)}",
+                   f"{P4}, 6.2(1)f, 6.3.1, wzór (6.1), Rys. 6.1; Załącznik B (procedura 1 – Załącznik krajowy NA.10), "
+                   "wzory (B.1)–(B.8), (B.5) wg Ap3:2011; Tabl. F.2"))
+        return c["value"], ""
+
+    def end_factor(l_, b_, phi, cyl):
+        e = o.get("end", 0)
+        if e == 0:
+            it.append(("v", "ψλ = 1,0", "współczynnik wpływu swobodnego końca pominięty (bezpiecznie)",
+                       f"{P4}, 7.13(1)"))
+            return 1.0
+        pos = {1: 1, 2: 3, 3: 4}[e]
+        le = 2.0 * l_ if e == 2 else l_
+        lam = slenderness(le, b_, cyl, pos)
+        ps = psi_lambda(lam, phi)
+        it.append(("v", f"λ = {f2(lam, 2)}, ψλ = {f2(ps, 3)}",
+                   f"smukłość efektywna (l = {f2(le)} m, b = {f2(b_)} m, Tabl. 7.16 poz. {pos if pos != 1 else '1–2'}) "
+                   f"i współczynnik wpływu swobodnego końca dla φ = {f2(phi, 2)}",
+                   f"{P4}, 7.13, Tabl. 7.16, Rys. 7.36 (wartości orientacyjne odczytane z rysunku)"))
+        return ps
+
+    def force(cf, cs, aref, ze, unit_len=None):
+        F = cs * cf * qp(ze) * aref
+        it.append(("v", f"Fw = cₛcd·cf·qp(ze)·Aref = {f3(cs)}·{f3(cf)}·{f2(qp(ze), 4)}·{f2(aref, 3)} = {f2(F, 3)} kN",
+                   "siła wypadkowa oddziaływania wiatru", f"{P4}, 5.3(2), wzór (5.3)"))
+        res.update(F=F, cf=cf, cscd=cs, Aref=aref, ze=ze, qp=qp(ze))
+        row("cf", f3(cf))
+        row("cₛcd", f3(cs))
+        row("Aref", f2(aref, 3), "m²")
+        row("qp(ze)", f2(qp(ze), 4), "kN/m²")
+        row("Fw", f2(F, 3), "kN")
+        if unit_len:
+            fl = F / unit_len
+            it.append(("v", f"fw = Fw/l = {f2(fl, 3)} kN/m", "obciążenie na jednostkę długości elementu", ""))
+            row("fw = Fw/l", f2(fl, 3), "kN/m")
+            res["fw"] = fl
+        return F
+
+    try:
+        if kind == "wall":
+            l_, h_, phi, lc = p["l"], p["h"], p["phi"], p["lc"]
+            if phi < 0.8 - 1e-9:
+                return dict(ok=False, err="Ściana o współczynniku wypełnienia φ < 0,8 – obliczać jak kratownicę "
+                                          "płaską (7.4(1), 7.11).", items=[], table=tbl, res={})
+            qp_lines(h_, ("wysokość odniesienia ściany wolno stojącej ze = h", f"{P4}, 7.4.1(2), Rys. 7.19"))
+            cps = wall_cpnet(l_ / h_, phi, lc, h_)
+            it.append(("v", f"l/h = {f2(l_ / h_, 2)}, φ = {f2(phi, 2)}"
+                            + (f", narożnik {f2(lc)} m" if lc > 0 else ", bez narożnika"),
+                       "wypadkowe współczynniki ciśnienia cp,net – pola A, B, C, D",
+                       f"{P4}, 7.4.1(1), Tabl. 7.9 (interpolacja liniowa wg Uwagi i odsyłacza a)"))
+            psi_s = 1.0
+            if o.get("shelter"):
+                psi_s = shelter_psi(p["x"] / h_, p["phis"])
+                it.append(("v", f"ψs = {f2(psi_s, 3)} (x/h = {f2(p['x'] / h_, 2)}, φ = {f2(p['phis'], 2)})",
+                           "współczynnik osłonięcia – nie stosuje się w polu o długości h od swobodnego końca ściany",
+                           f"{P4}, 7.4.2, wzór (7.6), Rys. 7.20 wg Ap3:2011"))
+            q = qp(h_)
+            marks = [("A", 0.0, 0.3 * h_, 0), ("B", 0.3 * h_, 2.0 * h_, 1), ("C", 2.0 * h_, 4.0 * h_, 2),
+                     ("D", 4.0 * h_, max(l_, 4.0 * h_), 3)]
+            tbl = TableData(("Pole", "od [m]", "do [m]", "cp,net", "ψs", "w [kN/m²]"), (0,))
+            zones = []
+            for nm, a, b_, i in marks:
+                b_ = min(b_, l_)
+                if b_ - a < 1e-9:
+                    continue
+                cuts = [(a, b_)]
+                if psi_s < 1.0 and a < h_ < b_:
+                    cuts = [(a, h_), (h_, b_)]
+                for a1, b1 in cuts:
+                    ps = 1.0 if b1 <= h_ + 1e-9 else psi_s
+                    w = cps[i] * ps * q
+                    zones.append((nm, a1, b1, cps[i], ps, w))
+                    tbl.insert("", "end", values=(nm, f2(a1, 2), f2(b1, 2), f2(cps[i], 2), f2(ps, 2), f2(w, 3)),
+                               tags=("pos",))
+            it.append(("n", "Pola liczone od swobodnego końca ściany (wiatr skośny, Rys. 7.19); ciśnienie netto "
+                            "w = cp,net·qp(ze) działa prostopadle do ściany – sprawdzić oba końce ściany."))
+            res.update(zones=zones, qp=q, ze=h_, w_max=max(z[5] for z in zones))
+        elif kind == "sign":
+            b_, h_, zg = p["b"], p["h"], p["zg"]
+            if zg < h_ / 4.0 and b_ / h_ > 1.0:
+                it.append(("n", "z_g < h/4 i b/h > 1 – tablicę należy traktować jak ścianę wolno stojącą bez prześwitu "
+                                "(7.4.3(3)): obliczono ścianę o długości l = b i wysokości z_g + h."))
+                r = calc_struct("wall", dict(l=b_, h=zg + h_, phi=1.0, lc=0.0), dict(o, shelter=False), site)
+                r["items"] = it + r["items"]
+                return r
+            ze = zg + h_ / 2.0
+            qp_lines(ze, ("wysokość odniesienia tablicy ze = z_g + h/2", f"{P4}, 7.4.3, Rys. 7.21, Uwaga 1"))
+            it.append(("v", "cf = 1,80", "współczynnik siły tablicy wolno stojącej", f"{P4}, 7.4.3(1), wzór (7.7)"))
+            cs, err = cscd_of(" c)", h_, b_, ze)
+            if cs is None:
+                return dict(ok=False, err=err, items=it, table=tbl, res={})
+            force(1.8, cs, b_ * h_, ze)
+            e = 0.25 * b_
+            it.append(("v", f"e = ±0,25·b = ±{f2(e, 3)} m",
+                       "mimośród poziomy siły (prostopadłej do tablicy, na wysokości środka tablicy)",
+                       f"{P4}, 7.4.3(2), wzór (7.8)"))
+            row("e", f"±{f2(e, 3)}", "m")
+            it.append(("n", "Sprawdzić podatność tablicy na dywergencję skrętną i flatter z oderwaniem (7.4.3, Rys. 7.21)."))
+            res["e"] = e
+        elif kind in STRUCT_LINE:
+            l_, ze = p["l"], p["ze"]
+            b_ = p["d"] if kind == "lattice" else p["b"]
+            vert = o.get("orient", 0) == 0
+            if kind == "lattice":
+                why = ("największa wysokość elementu ponad poziomem terenu", f"{P4}, 7.11(4)")
+            else:
+                why = ("największa wysokość rozpatrywanego przekroju ponad poziomem terenu",
+                       {"rect": f"{P4}, 7.6(2)", "sharp": f"{P4}, 7.7(3)", "poly": f"{P4}, 7.8(4)",
+                        "cyl": f"{P4}, 7.9.2(5)"}[kind])
+            qp_lines(ze, why)
+            v = v_of(ze)
+            phi = 1.0
+            if kind == "rect":
+                db = p["d"] / b_
+                cf0 = rect_cf0(db)
+                it.append(("v", f"d/b = {f2(db, 3)} → cf,0 = {f2(cf0, 3)}",
+                           "współczynnik oporu przekroju prostokątnego z ostrymi narożami",
+                           f"{P4}, 7.6(1), Rys. 7.23 (między punktami opisanymi na rysunku – interpolacja w skali log d/b)"))
+                pr = 1.0
+                if p["r"] > 0:
+                    if abs(p["d"] - b_) <= 1e-6 * b_:
+                        pr = psi_r(p["r"] / b_)
+                        it.append(("v", f"r/b = {f2(p['r'] / b_, 3)} → ψr = {f2(pr, 3)}",
+                                   "współczynnik redukcyjny przekroju kwadratowego z zaokrąglonymi narożami",
+                                   f"{P4}, 7.6(1), Rys. 7.24"))
+                    else:
+                        it.append(("n", "ψr (Rys. 7.24) podano dla przekroju kwadratowego – dla d ≠ b przyjęto "
+                                        "ψr = 1,0 (bezpiecznie)."))
+                if db < 0.2:
+                    it.append(("n", "d/b < 0,2 (przekrój podobny do płytki) – przy pewnych kątach natarcia wiatru "
+                                    "cf może wzrosnąć aż o 25 % (7.6(3))."))
+                cf0 *= pr
+            elif kind == "sharp":
+                cf0 = 2.0
+                it.append(("v", "cf,0 = 2,0", "współczynnik oporu elementu o ostrych krawędziach (wartość zalecana)",
+                           f"{P4}, 7.7(1), Uwaga 1, Rys. 7.25"))
+            elif kind == "poly":
+                sides = o.get("sides", 8)
+                vm = site["vm"](ze)
+                re = b_ * vm / NU_AIR
+                cf0 = poly_cf0(sides, o.get("psurf", 0), p.get("r", 0.0) / b_, re)
+                it.append(("v", f"Re = b·vm(ze)/ν = {re:.3g}".replace("e+0", "·10^").replace("e+", "·10^"),
+                           f"liczba Reynoldsa dla v = vm(ze) = {f2(vm, 2)} m/s",
+                           f"{P4}, Tabl. 7.11, odsyłacz a; 4.3.1, wzór (4.3); 7.9.1, wzór (7.15)"))
+                if cf0 is None:
+                    it.append(("n", "Tablica 7.11: wielokąt o 16 i więcej bokach – w tym zakresie Re / stanie "
+                                    "powierzchni traktować jak walec kołowy (7.9)."))
+                    re2 = b_ * v / NU_AIR
+                    kb = rough_k(o.get("rough_name")) / 1000.0 / b_
+                    cf0 = cyl_cf0(re2, kb)
+                    it.append(("v", f"cf,0 = {f2(cf0, 3)} (Re = {re2:.3g}, k/b = {kb:.3g})".replace("e-0", "·10^-")
+                               .replace("e+0", "·10^"), "jak walec kołowy", f"{P4}, 7.9.2, Rys. 7.28, Tabl. 7.13"))
+                else:
+                    it.append(("v", f"cf,0 = {f2(cf0, 2)}", f"wielokąt foremny: {POLY_SIDES[[5, 6, 8, 10, 12, 16].index(sides)]}"
+                               + (f"; {POLY_SURF[o.get('psurf', 0)]}" if sides in (12, 16) else "")
+                               + (f"; r/b = {f2(p.get('r', 0.0) / b_, 3)}" if sides == 8 else ""),
+                               f"{P4}, 7.8(1), Tabl. 7.11 wg AC:2009 (interpolacja liniowa między wartościami Re)"))
+            elif kind == "cyl":
+                re = b_ * v / NU_AIR
+                it.append(("v", f"Re = b·v(ze)/ν = {re:.3g}".replace("e+0", "·10^").replace("e+", "·10^"),
+                           f"liczba Reynoldsa, v(ze) = √(2·qp/ρ) = {f2(v, 2)} m/s, ν = 15·10⁻⁶ m²/s",
+                           f"{P4}, 7.9.1, wzór (7.15), Rys. 7.27 Uwaga 2"))
+                if o.get("rough_name") == ROUGH_CABLE:
+                    cf0 = 1.2
+                    it.append(("v", "cf,0 = 1,2", "kabel spleciony – dla wszystkich Re", f"{P4}, 7.9.2(3)"))
+                else:
+                    k_mm = rough_k(o.get("rough_name"))
+                    kb = k_mm / 1000.0 / b_
+                    cf0 = cyl_cf0(re, kb)
+                    it.append(("v", f"k/b = {kb:.3g} → cf,0 = {f2(cf0, 3)}".replace("e-0", "·10^-"),
+                               f"współczynnik oporu walca (chropowatość k = {k_mm:g} mm)".replace(".", ","),
+                               f"{P4}, 7.9.2(1), Rys. 7.28 (wzory z rysunku, dolna granica 0,4), Tabl. 7.13"))
+                    if kb > 1e-2:
+                        warn.append("k/b > 10⁻² – poza zakresem krzywych Rys. 7.28 (zastosowano wzór z rysunku).")
+                if o.get("near") and p["zg"] / b_ < 1.5:
+                    warn.append(f"z_g/b = {f2(p['zg'] / b_, 2)} < 1,5 – walec w pobliżu płaskiej powierzchni: "
+                                "konieczna porada specjalisty (7.9.2(6), Rys. 7.29).")
+            else:                                          # lattice
+                lat = dict((n, (k, key)) for n, k, key in LATTICE_TYPES).get(o.get("lat"), ("plane", None))
+                phi = p["A"] / (p["d"] * l_)
+                it.append(("v", f"φ = A/Ac = {f2(p['A'], 3)}/({f2(p['d'])}·{f2(l_)}) = {f2(phi, 3)}",
+                           "współczynnik wypełnienia ściany kratowej", f"{P4}, 7.11(2), wzór (7.26)"))
+                if phi > 1.0:
+                    return dict(ok=False, err="A nie może być większe niż pole obrysu Ac = d·l.", items=it, table=tbl,
+                                res={})
+                re = p["bi"] / 1.0 * v / NU_AIR if lat[0] == "tube" else None
+                cf0 = lattice_cf0(lat[0], lat[1], phi, re or 0.0)
+                if lat[0] == "tube":
+                    it.append(("v", f"Re = b_i·v(ze)/ν = {re:.3g}".replace("e+0", "·10^").replace("e+", "·10^"),
+                               f"liczba Reynoldsa dla średniej średnicy prętów (v(ze) = {f2(v, 2)} m/s)",
+                               f"{P4}, 7.11(1), Uwaga 1 wg AC:2009"))
+                    if re > 1e6:
+                        warn.append("Re > 10⁶ – poza zakresem Rys. 7.35 (przyjęto wartości dla Re = 10⁶).")
+                if cf0 is None:
+                    return dict(ok=False, err=("Rys. 7.34 obejmuje φ od 0,1 do 1,0." if lat[0] == "angle" else
+                                               "Rys. 7.35 obejmuje φ od 0,2 do 0,6.") + f" (φ = {f2(phi, 3)})",
+                                items=it, table=tbl, res={})
+                it.append(("v", f"cf,0 = {f2(cf0, 3)}", f"kratownica {o.get('lat')}",
+                           f"{P4}, 7.11(1), Rys. " + {"plane": "7.33", "angle": "7.34", "tube": "7.35"}[lat[0]]
+                           + " (wartości odczytane z rysunku)"))
+                it.append(("n", "Rusztowania: wg PN-EN 12811-1 (Załącznik krajowy NA.13) – poza zakresem programu."))
+            ps = end_factor(l_, b_, phi, kind == "cyl")
+            kappa = 1.0
+            if kind == "cyl" and o.get("row"):
+                ab = p["a"] / b_
+                kappa = 1.15 if ab < 3.5 else (1.0 if ab > 30.0 else (210.0 - ab) / 180.0)
+                it.append(("v", f"a/b = {f2(ab, 2)} → κ = {f2(kappa, 3)}",
+                           "walce pionowe w rzędzie – najniekorzystniejszy kierunek wiatru", f"{P4}, 7.9.3, Tabl. 7.14"))
+            cf = cf0 * ps * kappa
+            it.append(("v", f"cf = {f2(cf, 3)}", "współczynnik siły",
+                       f"{P4}, " + {"rect": "7.6, wzór (7.9)", "sharp": "7.7, wzór (7.11)", "poly": "7.8, wzór (7.13)",
+                                    "cyl": "7.9.2, wzór (7.19)" + (", 7.9.3, wzór (7.21)" if kappa != 1.0 else ""),
+                                    "lattice": "7.11, wzór (7.25)"}[kind]))
+            aref = p["A"] if kind == "lattice" else l_ * b_
+            it.append(("v", f"Aref = {f2(aref, 3)} m²", "pole powierzchni odniesienia" + (" – A" if kind == "lattice"
+                                                                                          else " = l·b"),
+                       f"{P4}, " + {"rect": "7.6(2), wzór (7.10)", "sharp": "7.7(2), wzór (7.12)", "poly": "7.8(3), wzór (7.14)",
+                                    "cyl": "7.9.2(4), wzór (7.20)", "lattice": "7.11(3), wzór (7.27)"}[kind]))
+            if vert:
+                cs, err = cscd_of(" a)", ze, b_, 0.6 * ze)
+            else:
+                cs, err = cscd_of(" b)", b_, l_, ze - b_ / 2.0)
+            if cs is None:
+                return dict(ok=False, err=err, items=it, table=tbl, res={})
+            force(cf, cs, aref, ze, unit_len=l_)
+            res.update(psl=ps, kappa=kappa, phi=phi)
+            if kind == "cyl":
+                res.update(re=re, cable=o.get("rough_name") == ROUGH_CABLE)
+            if kind == "cyl" and o.get("rough_name") != ROUGH_CABLE:
+                amin, cpmin, aA, cph = cyl_row(re)
+                tb2 = TableData(("α [°]", "cp,0", "ψλα", "cpe", "we [kN/m²]"), ())
+                for a in sorted(set(list(range(0, 181, 15)) + [round(amin), round(aA)])):
+                    c0_ = cyl_cp0(a, re)
+                    pa = psi_lambda_alpha(a, ps, amin, aA)
+                    tb2.insert("", "end", values=(f"{a}", f2(c0_, 3), f2(pa, 3), f2(c0_ * pa, 3),
+                                                  f2(c0_ * pa * qp(ze), 3)),
+                               tags=("neg",) if c0_ < 0 else ("pos",))
+                it.append(("h", "Rozkład ciśnienia na walcu"))
+                it.append(("v", f"αmin = {f2(amin, 1)}°, cp0,min = {f2(cpmin, 2)}, αA = {f2(aA, 1)}°, cp0,h = {f2(cph, 2)}",
+                           "parametry rozkładu dla Re (interpolacja liniowa)", f"{P4}, 7.9.1, Rys. 7.27, Tabl. 7.12"))
+                it.append(("t", tb2))
+                it.append(("r", f"{P4}, 7.9.1, wzory (7.16), (7.17); Rys. 7.27 – przebieg cp,0 między punktami Tabl. 7.12"))
+        elif kind == "sphere":
+            b_, zg = p["b"], p["zg"]
+            ze = zg + b_ / 2.0
+            qp_lines(ze, ("wysokość odniesienia kuli ze = z_g + b/2", f"{P4}, 7.10(4), wzór (7.24)"))
+            v = v_of(ze)
+            re = b_ * v / NU_AIR
+            k_mm = rough_k(o.get("rough_name"))
+            kb = k_mm / 1000.0 / b_
+            cfx = sphere_cfx(re, kb)
+            it.append(("v", f"Re = {re:.3g}, k/b = {kb:.3g} → cf,x = {f2(cfx, 3)}".replace("e+0", "·10^")
+                       .replace("e+", "·10^").replace("e-0", "·10^-"),
+                       f"współczynnik oporu kuli (v(ze) = {f2(v, 2)} m/s, k = {k_mm:g} mm)".replace(".", ","),
+                       f"{P4}, 7.10(1), Rys. 7.30 (wartości odczytane z rysunku), Tabl. 7.13"))
+            if kb > 1e-3:
+                warn.append("k/b > 10⁻³ – poza zakresem Rys. 7.30: przyjęto wartość podkrytyczną cf,x = 0,6.")
+            near = zg < b_ / 2.0
+            if near:
+                cfx *= 1.6
+                it.append(("v", f"cf,x = 1,6·cf,x = {f2(cfx, 3)}", "kula w pobliżu powierzchni (z_g < b/2)",
+                           f"{P4}, 7.10(1), Uwaga 2, Rys. 7.31"))
+            cfz = 0.6 if near else 0.0
+            it.append(("v", f"cf,z = {f2(cfz, 2)}", "współczynnik siły pionowej", f"{P4}, 7.10(2), wzór (7.22)"))
+            aref = math.pi * b_ * b_ / 4.0
+            it.append(("v", f"Aref = π·b²/4 = {f2(aref, 3)} m²", "pole powierzchni odniesienia",
+                       f"{P4}, 7.10(3), wzór (7.23)"))
+            cs, err = cscd_of(" c)", b_, b_, ze)
+            if cs is None:
+                return dict(ok=False, err=err, items=it, table=tbl, res={})
+            force(cfx, cs, aref, ze)
+            Fz = cs * cfz * qp(ze) * aref
+            if cfz:
+                it.append(("v", f"Fz = cₛcd·cf,z·qp(ze)·Aref = {f2(Fz, 3)} kN", "siła pionowa (do góry)",
+                           f"{P4}, 5.3(2), 7.10(2)"))
+                row("Fz", f2(Fz, 3), "kN")
+            res["Fz"] = Fz
+        elif kind == "flag":
+            h_, l_, ze, mf = p["h"], p["l"], p["ze"], p["mf"]
+            ft = o.get("flag", 0)
+            qp_lines(ze, ("wysokość flagi nad poziomem terenu", f"{P4}, 7.12(2)"))
+            if ft == 0:
+                aref, cf = h_ * l_, 1.8
+                it.append(("v", "cf = 1,8, Aref = h·l", "flaga napięta – siła prostopadła do płaszczyzny",
+                           f"{P4}, 7.12(1), Tabl. 7.15"))
+            else:
+                aref = h_ * l_ if ft == 1 else 0.5 * h_ * l_
+                cf = 0.02 + 0.7 * mf / (RHO_AIR * h_) * (aref / (h_ * h_)) ** -1.25
+                it.append(("v", f"cf = 0,02 + 0,7·m_f/(ρ·h)·(Aref/h²)^−1,25 = {f2(cf, 3)}",
+                           f"flaga swobodna ({FLAG_TYPES[ft]}), m_f = {f2(mf, 3)} kg/m², ρ = 1,25 kg/m³, "
+                           f"Aref = {'h·l' if ft == 1 else '0,5·h·l'} – siła w płaszczyźnie flagi (z łopotaniem)",
+                           f"{P4}, 7.12(1), Tabl. 7.15; ρ wg 4.5(1) Uwaga 2 (AC:2009)"))
+            cs, err = cscd_of(" c)", h_, l_, ze - h_ / 2.0)
+            if cs is None:
+                return dict(ok=False, err=err, items=it, table=tbl, res={})
+            force(cf, cs, aref, ze)
+    except (ValueError, ZeroDivisionError, KeyError) as ex_:
+        return dict(ok=False, err=f"Niepoprawne dane konstrukcji ({ex_}).", items=it, table=tbl, res={})
+    for w in warn:
+        it.append(("n", w))
+    return dict(ok=True, err="", items=it, table=tbl, res=res)
+
+
+def struct_geom(kind, p, o):
+    """Geometry of a structure for the 3D model (wind along +y; the windward side – smaller y). Only what the code
+    defines is drawn with its size; the rest is the smallest needed to show it (thickness of a wall or a board, the
+    section of an element with sharp edges, members of a lattice). Returns dict: vert – a vertical element (axis z),
+    a0, a1 – the range along the axis, zc – the axis height of a horizontal element, b – the size across the wind,
+    secs – section polygons [(s, t)] (s across the wind, t along it), front – t of the windward face, round – a
+    cylinder (the pressure acts on its facets)."""
+    g = dict(kind=kind, p=p, o=o)
+    if kind in STRUCT_LINE:
+        l_, ze = p["l"], p["ze"]
+        b_ = p["d"] if kind == "lattice" else p["b"]
+        vert = o.get("orient", 0) == 0
+        g.update(vert=vert, b=b_, l=l_, ze=ze)
+        if vert:
+            g.update(a0=max(ze - l_, 0.0), a1=ze, zc=0.0)
+        else:
+            g.update(a0=0.0, a1=l_, zc=max(ze - b_ / 2.0, b_ / 2.0))
+        R = b_ / 2.0
+        if kind == "rect":
+            d_, r = p["d"], min(p.get("r", 0.0), b_ / 2.0, p["d"] / 2.0)
+            if r > 1e-6:
+                sec = []
+                for cs_, ct_, a0 in ((R - r, d_ / 2 - r, 0), (-R + r, d_ / 2 - r, 90), (-R + r, -d_ / 2 + r, 180),
+                                     (R - r, -d_ / 2 + r, 270)):
+                    sec += [(cs_ + r * math.cos(math.radians(a0 + 22.5 * k)),
+                             ct_ + r * math.sin(math.radians(a0 + 22.5 * k))) for k in range(5)]
+            else:
+                sec = [(R, -d_ / 2), (R, d_ / 2), (-R, d_ / 2), (-R, -d_ / 2)]
+            g.update(secs=[sec], front=-d_ / 2)
+        elif kind == "sharp":                   # sharp edges (Fig. 7.25) – an I section b wide across the wind
+            dd, tf, tw = 0.6 * b_, 0.1 * b_, 0.08 * b_
+            g.update(secs=[[(R, -dd / 2), (R, -dd / 2 + tf), (-R, -dd / 2 + tf), (-R, -dd / 2)],
+                           [(tw / 2, -dd / 2 + tf), (tw / 2, dd / 2 - tf), (-tw / 2, dd / 2 - tf),
+                            (-tw / 2, -dd / 2 + tf)],
+                           [(R, dd / 2 - tf), (R, dd / 2), (-R, dd / 2), (-R, dd / 2 - tf)]], front=-dd / 2)
+        elif kind in ("poly", "cyl"):
+            n = o.get("sides", 8) if kind == "poly" else 32
+            a0 = -math.pi / 2 + math.pi / n               # a flat side faces the wind
+            g.update(secs=[[(R * math.cos(a0 + 2 * math.pi * k / n), R * math.sin(a0 + 2 * math.pi * k / n))
+                            for k in range(n)]], front=-R * math.cos(math.pi / n), round=kind == "cyl", n=n)
+        else:                                   # lattice: chords and diagonals, the plane across the wind
+            g.update(secs=[], front=0.0, member=min(max(p.get("bi", 0.0), 0.02 * b_), 0.15 * b_))
+        g["row"] = kind == "cyl" and o.get("row") and p.get("a", 0.0) > b_
+        g["near"] = kind == "cyl" and o.get("near") and not vert
+    elif kind == "wall":
+        g.update(l=p["l"], h=p["h"], t=min(0.25, 0.04 * min(p["l"], p["h"])))
+    elif kind == "sign":
+        g.update(b=p["b"], h=p["h"], zg=p["zg"], t=min(0.15, 0.03 * min(p["b"], p["h"])))
+    elif kind == "sphere":
+        g.update(b=p["b"], zg=p["zg"], zc=p["zg"] + p["b"] / 2.0)
+    elif kind == "flag":
+        g.update(h=p["h"], l=p["l"], ze=p["ze"], ft=o.get("flag", 0))
+    return g
+
+
+FIELD_DEFS = {f[0]: f for t in (SNOW_TYPES, WIND_TYPES, STRUCT_TYPES) for _, fl in t.values() for f in fl
               if not isinstance(f, str)}
 FIELD_DEFS.update({f[0]: f for fl in EXC_FIELDS.values() for f in fl})
+FIELD_DEFS.update({f[0]: f for f in (STRUCT_N1,            # structures; terrain: NA.16, Annex A.4, A.5
+    ("w_x16", "Odległość do granicy x", "m", 0, 1e6, False, False),
+    ("w_hh", "Wysokość budynku h_high", "m", 0, 1000, True, False),
+    ("w_dl", "Większy wymiar rzutu d_large", "m", 0, 5000, True, False),
+    ("w_xa4", "Odległość od budynku x", "m", 0, 1e5, False, False),
+    ("w_have", "Średnia wysokość przeszkód h_ave", "m", 0, 500, True, False),
+    ("w_xa5", "Odległość od przeszkód x", "m", 0, 1e5, False, False))})
 FIELD_DEFS.update({f[0]: f for f in (          # orography (Annex A.3) – dimensions edited on the 3D model
     ("oH", "Wysokość wzniesienia H", "m", 0, 2000, True, False),
     ("oLu", "Dł. stoku nawietrznego Lu", "m", 0, 1e5, True, False),
@@ -2962,7 +3823,10 @@ DEFAULTS = dict(A="210", s_L="12", s_B="10", s_H="5", s_alpha="25", s_alpha2="25
                 s_pah="0.6", s_gah="0.6", s_gvh="0.2", s_gd="1.0", s_poh="0.8", s_pol="6", s_poy="2", s_fh="0.8", s_fw="2", s_fd="2",
                 w_L="12", w_B="10", w_H="5", w_hp="0", w_r="0.5", w_am="45", w_alpha="25", w_alpha2="25",
                 w_a90="45", w_n="3", w_f="3", w_D="12", U="2.0", ti="20", nret="50", cseason="1.0", Aload="10",
-                mu="0.5", ndom="3", phi="0", oH="20", oLu="200", oLd="200", ox="0")
+                mu="0.5", ndom="3", phi="0", oH="20", oLu="200", oLd="200", ox="0",
+                w_x16="500", w_hh="60", w_dl="30", w_xa4="20", w_have="15", w_xa5="20",
+                t_l="10", t_h="2", t_phi="1", t_lc="0", t_x="10", t_phis="1", t_b="1", t_zg="3", t_ze="10",
+                t_d="1", t_r="0", t_a="5", t_A="5", t_bi="0.1", t_mf="0.3", t_n1="2")
 
 PROJECT_EXT = ".kayenn"
 
@@ -2989,7 +3853,7 @@ def _dec(x):
 def use_barrier_F(m, dc, db, v=4.5):
     """Annex B(2): F = 0.5·m·v²/(δc + δb) [kN] (m in kg, v in m/s, δ in mm)."""
     return 0.5 * m * v * v / (dc + db)
-REPORT_ONLY = ("użytkowe", "własne")         # cases without a 3D model: only the report on the card and in the printout
+REPORT_ONLY = ("użytkowe", "własne")   # no 3D model: only the report on the card and in the printout
 _C_DESC = "Powierzchnie, na których mogą gromadzić się ludzie (z wyłączeniem powierzchni kategorii A, B i D). "
 USE_GROUPS = [
     ("6.3.1", "6.3.1 – Powierzchnie mieszkalne, socjalne, handlowe i administracyjne", "Tablice 6.1 i 6.2", [
@@ -3212,8 +4076,19 @@ WIATR – PN-EN 1991-1-4:2008 z poprawkami AC:2009, Ap1:2010, Ap2:2010, Ap3:2011
   cp,net A 2,1 / B 1,8 / C 1,4 / D 1,2, pola 0,3hₚ / 2hₚ / 4hₚ od obu końców boku, ze = h + hₚ.
 • Ściany i dachy wielopowłokowe (7.2.10(3), Uwaga 2): cztery układy powłok – cp,net powłoki zewnętrznej
   i wewnętrznej (przestrzeń zamknięta na krańcach, odstęp < 100 mm); jedna powłoka przepuszczalna – we − wi.
-• Poza zakresem (konstrukcje inne niż budynki): ściany wolno stojące i tablice (7.4.1, 7.4.3), elementy
-  o przekrojach prostokątnych, wielobocznych, walce, kule, kratownice, flagi (7.6–7.13), mosty (8).
+• Wiatr – obiekty budowlane inne niż budynki (tylko raport): ściany wolno stojące i ogrodzenia
+  (7.4.1, Tabl. 7.9, osłonięcie 7.4.2 z Rys. 7.20 wg Ap3), tablice (7.4.3), elementy o przekrojach
+  prostokątnych (7.6), o ostrych krawędziach (7.7), wielokąta foremnego (7.8, Tabl. 7.11 wg AC), walce kołowe
+  (7.9: rozkład ciśnienia, cf, walce w rzędzie), kule (7.10), kratownice (7.11), flagi (7.12), efekt
+  swobodnego końca (7.13, Tabl. 7.16, Rys. 7.36). Wartości z wykresów (Rys. 7.23, 7.30, 7.33–7.36) odczytano
+  z rysunków normy (punkty opisane na rysunkach, interpolacja liniowa). cₛcd wg 6.3.1 i Załącznika B
+  (procedura 1, NA.10) z n₁ i δs (Tabl. F.2) podanymi przez użytkownika, δa pominięto (bezpiecznie);
+  cₛcd = 1 tylko dla komina kołowego wg 6.2(1)d. Siła Fw = cₛcd·cf·qp(ze)·Aref (5.3).
+• Teren (budynki i konstrukcje): teren niższej kategorii od strony nawietrznej bliżej niż 30·h – ta
+  kategoria (NA.16 zamiast procedur A.2); budynek ponad dwa razy wyższy w sąsiedztwie – qp na wysokości zn
+  (A.4, wzór (A.14)); wysokość przemieszczenia h_dis w terenie kategorii IV (A.5, wzór (A.15)).
+• Poza zakresem: rusztowania (PN-EN 12811-1, NA.13), mosty (8), cₛcd wg Załącznika C (procedura 2 –
+  NA.10 zaleca procedurę 1) i wykresy Załącznika D (obwiednie; dokładna procedura 6.3 jest dostępna).
 • Ściany: Tablica 7.1, ze wg Rys. 7.4; e = min(b; 2h); h – najwyższy punkt dachu.
 • Dachy płaskie (7.2.3, Tabl. 7.2): ostre krawędzie, z attyką (hₚ/h), krawędzie zaokrąglone (r/h; poniżej
   0,05 – interpolacja do krawędzi ostrych) i mansardowe (α = 30°…60°; powyżej 60° – interpolacja do dachu
@@ -3361,8 +4236,19 @@ WIND – PN-EN 1991-1-4:2008 with corrigenda AC:2009, Ap1:2010, Ap2:2010, Ap3:20
   cp,net A 2.1 / B 1.8 / C 1.4 / D 1.2, zones 0.3hₚ / 2hₚ / 4hₚ from both ends of a side, ze = h + hₚ.
 • Multiskin walls and roofs (7.2.10(3), Note 2): four arrangements of the skins – cp,net of the outer skin
   and of the inner skin (space closed at the edges, gap < 100 mm); one permeable skin – we − wi.
-• Out of scope (structures other than buildings): free-standing walls and signboards (7.4.1, 7.4.3), structural
-  elements with rectangular and polygonal sections, cylinders, spheres, lattice structures, flags (7.6–7.13), bridges (8).
+• Wind – structures other than buildings (report only): free-standing walls and fences (7.4.1,
+  Table 7.9, shelter 7.4.2 with Figure 7.20 to Ap3), signboards (7.4.3), structural elements with rectangular
+  (7.6), sharp-edged (7.7) and regular polygonal sections (7.8, Table 7.11 to AC), circular cylinders (7.9:
+  pressure distribution, cf, cylinders in a row), spheres (7.10), lattice structures (7.11), flags (7.12),
+  end-effect (7.13, Table 7.16, Figure 7.36). Values given as graphs (Figures 7.23, 7.30, 7.33–7.36) were read
+  from the drawings of the code (points marked on the drawings, linear interpolation). cₛcd to 6.3.1 and Annex B
+  (procedure 1, NA.10) with n₁ and δs (Table F.2) given by the user, δa omitted (on the safe side); cₛcd = 1
+  only for a circular chimney to 6.2(1)d. Force Fw = cₛcd·cf·qp(ze)·Aref (5.3).
+• Terrain (buildings and structures): terrain of a lower category upwind closer than 30·h – that category
+  (NA.16 instead of the procedures of A.2); a building more than twice as high nearby – qp at the height zn
+  (A.4, expression (A.14)); displacement height h_dis in terrain category IV (A.5, expression (A.15)).
+• Out of scope: scaffolding (PN-EN 12811-1, NA.13), bridges (8), cₛcd to Annex C (procedure 2 – NA.10
+  recommends procedure 1) and the charts of Annex D (envelopes; the detailed procedure 6.3 is available).
 • Walls: Table 7.1, ze to Figure 7.4; e = min(b; 2h); h – the highest point of the roof.
 • Flat roofs (7.2.3, Table 7.2): sharp eaves, with parapets (hₚ/h), curved eaves (r/h; below
   0.05 – interpolation to sharp eaves) and mansard eaves (α = 30°…60°; above 60° – interpolation to a roof
@@ -3464,7 +4350,7 @@ def _no_qt():
 try:
     from PySide6.QtCore import Qt, QTimer, QPoint, QPointF, QRectF, QObject, Signal, QEvent, QSize, QUrl
     from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QFontMetricsF, QIcon, QKeySequence, QPainter,
-                               QPalette, QPainterPath, QPen, QPixmap, QPolygonF)
+                               QPalette, QPainterPath, QPen, QPixmap, QPolygonF, QTransform)
     from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFrame,
                                    QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
                                    QMessageBox, QPushButton, QScrollArea, QSplitter, QTabWidget, QTextBrowser,
@@ -4333,12 +5219,69 @@ class VtkScene:
     _inst = None
     _failed = None                                   # the reason VTK cannot be used (None – not tried / fine)
 
+    _warm = None                                     # the warm-up thread (warm_up)
+
+    @classmethod
+    def warm_up(cls):
+        """Right after the start, in a background thread: the engine test (`probe`, a child process) and loading the
+        OpenGL driver (the first vtkRenderWindow – about 1.5 s on its own). Without it the first opening of a 3D
+        view waited a few seconds; the driver loaded once serves the main thread at once. Nothing is drawn here
+        (OpenGL drawing stays in the main thread)."""
+        if renderer_choice() != "vtk" or cls._inst is not None or cls._failed or cls._warm is not None:
+            return
+        import threading
+
+        def run():
+            try:
+                import numpy                             # noqa: F401
+                if cls.probe():
+                    import vtkmodules.vtkRenderingOpenGL2  # noqa: F401
+                    from vtkmodules.vtkRenderingCore import vtkRenderWindow
+                    vtkRenderWindow()
+            except Exception:
+                pass
+        cls._warm = threading.Thread(target=run, daemon=True)
+        cls._warm.start()
+
+        def finish():                                # in the main thread: a tiny picture compiles the shaders
+            if cls._warm.is_alive():
+                QTimer.singleShot(200, finish)
+                return
+            try:
+                cls.warm_draw()
+            except Exception:
+                pass
+        QTimer.singleShot(200, finish)
+
+    @classmethod
+    def warm_draw(cls):
+        """A tiny scene drawn once (opaque, translucent, unlit faces and lines) – the shaders of every kind of
+        face are compiled before the first real 3D view."""
+        import numpy as np
+        v = cls.get()
+        if v is None:
+            return
+        tri = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
+        desc = ([(tri, "#cccccc", None, True, 0, None), (tri, "#ff0000", 185, True, 0, None),
+                 (tri, "#eeeeee", None, False, -1, None)],
+                [(tri[0], tri[1], "#000000", 1, 0, (0, 0, 0), (0, 0, 0))])
+        v.image(dict(hold={"desc": desc}, vis=np.array([True]), ls=1.0, bg=Canvas3D.BG_COL,
+                     proj=((0.3, 0.3, 0.0), 40.0, 0.8, -0.5, 0.9, 0.4, 32.0, 32.0, 64, 64)), 64, 64)
+
     @classmethod
     def get(cls):
         """The shared VTK renderer, or None (the basic renderer draws the faces)."""
         if renderer_choice() != "vtk" or cls._failed:
             return None
+        w = cls._warm
+        if w is not None and w.is_alive():           # the warm-up still runs – wait for it (no second probe)
+            w.join()
         if cls._inst is None:
+            try:
+                import numpy                          # noqa: F401 – the geometry goes to VTK as numpy arrays
+            except Exception as e:
+                cls._failed = f"brak biblioteki numpy ({type(e).__name__})"
+                return None
             if not cls.probe():
                 return None
             try:
@@ -4463,6 +5406,7 @@ class VtkScene:
             raise RuntimeError("OpenGL 3.2 niedostępny")
         self.rw, self.ren = rw, ren
         self._actors = []
+        self._cur = None
 
     @staticmethod
     def _rgb(c):
@@ -4546,18 +5490,154 @@ class VtkScene:
             out.append(act)
         return out
 
+    def prepare(self, desc):
+        """The geometry of a scene on the graphics card, built once (numpy → VTK arrays): desc = (polys, edges),
+        polys [(points, fill, alpha or None, lit, face)], edges [(a, b, colour, width, face)]; face – the index of
+        the face whose visibility the item follows (−1 – always visible). Each frame `show` only selects the cells of
+        the visible faces (the points stay) – a turning view does not rebuild anything."""
+        import numpy as np
+        from vtkmodules.vtkCommonCore import vtkPoints
+        from vtkmodules.vtkCommonDataModel import vtkPolyData, vtkCellArray
+        from vtkmodules.vtkRenderingCore import vtkActor, vtkPolyDataMapper
+        from vtkmodules.util.numpy_support import numpy_to_vtk
+        polys, edges = desc
+        rgb = {}
+
+        def col(c):
+            if c not in rgb:
+                rgb[c] = self._rgb(c)
+            return rgb[c]
+        groups = {}
+        for P, fill, alpha, lit, fi, D in polys:
+            if len(P) < 3:
+                continue
+            a = 255 if alpha is None else int(alpha)
+            groups.setdefault((a >= 255, bool(lit) or a < 255), []).append((P, fill, a, fi, D))
+        prep = dict(parts=[], lines=[], vkey=None, s=1.0)
+        for (opaque, lit), lst in sorted(groups.items(), key=lambda x: (not x[0][0], x[0][1])):
+            lens = np.array([len(x[0]) for x in lst], np.int64)
+            pts = np.array([q for x in lst for q in x[0]], float)
+            dpts = np.array([d for x in lst for d in (x[4] or [(0.0, 0.0, 0.0)] * len(x[0]))], float)
+            cols = np.array([col(x[1]) + (x[2],) for x in lst], np.uint8)
+            fis = np.array([x[3] for x in lst], np.int64)
+            vp = vtkPoints()
+            vp.SetData(numpy_to_vtk(pts, deep=1))
+            pd = vtkPolyData()
+            pd.SetPoints(vp)
+            cells = vtkCellArray()
+            pd.SetPolys(cells)
+            mp = vtkPolyDataMapper()
+            mp.SetInputData(pd)
+            mp.SetScalarModeToUseCellData()
+            mp.SetColorModeToDirectScalars()
+            mp.SetResolveCoincidentTopologyToPolygonOffset()
+            mp.SetRelativeCoincidentTopologyPolygonOffsetParameters(1.0, 1.0)
+            act = vtkActor()
+            act.SetMapper(mp)
+            pr = act.GetProperty()
+            pr.SetInterpolationToFlat()
+            if not lit:
+                pr.LightingOff()
+            else:
+                pr.SetAmbient(0.55 if opaque else 0.62)
+                pr.SetDiffuse(0.55 if opaque else 0.45)
+                pr.SetSpecular(0.0 if opaque else 0.12)
+                pr.SetSpecularPower(18)
+            pr.BackfaceCullingOff()
+            prep["parts"].append(dict(pd=pd, cells=cells, off=np.concatenate(([0], np.cumsum(lens))), lens=lens,
+                                      cols=cols, fi=fis, act=act, kind="poly", vp=vp, p1=pts,
+                                      dp=dpts if np.any(dpts) else None))
+        by_w = {}
+        for a3, b3, c, w, fi, da, db in edges:
+            by_w.setdefault(float(w), []).append((a3, b3, c, fi, da, db))
+        for w, segs in by_w.items():
+            pts = np.array([q for x in segs for q in (x[0], x[1])], float)
+            dpts = np.array([d for x in segs for d in (x[4], x[5])], float)
+            cols = np.array([col(x[2]) for x in segs], np.uint8)
+            fis = np.array([x[3] for x in segs], np.int64)
+            vp = vtkPoints()
+            vp.SetData(numpy_to_vtk(pts, deep=1))
+            pd = vtkPolyData()
+            pd.SetPoints(vp)
+            cells = vtkCellArray()
+            pd.SetLines(cells)
+            mp = vtkPolyDataMapper()
+            mp.SetInputData(pd)
+            mp.SetScalarModeToUseCellData()
+            mp.SetColorModeToDirectScalars()
+            act = vtkActor()
+            act.SetMapper(mp)
+            act.GetProperty().LightingOff()
+            prep["lines"].append(dict(pd=pd, cells=cells, cols=cols, fi=fis, act=act, w=w, kind="line", vp=vp, p1=pts,
+                                      dp=dpts if np.any(dpts) else None))
+        return prep
+
+    @staticmethod
+    def scale(prep, s):
+        """The load layers at the scale s (zoom): the moving points p = p₁ + (s − 1)·Δp; nothing is rebuilt."""
+        if prep["s"] == s:
+            return
+        from vtkmodules.util.numpy_support import numpy_to_vtk
+        prep["s"] = s
+        for part in prep["parts"] + prep["lines"]:
+            if part["dp"] is not None:
+                part["vp"].SetData(numpy_to_vtk(part["p1"] + (s - 1.0) * part["dp"], deep=1))
+                part["vp"].Modified()
+                part["pd"].Modified()
+
+    @staticmethod
+    def show(prep, vis):
+        """Cells of the visible faces only (vis – a bool array over the faces)."""
+        import numpy as np
+        from vtkmodules.vtkCommonCore import VTK_ID_TYPE
+        from vtkmodules.util.numpy_support import numpy_to_vtk
+        key = vis.tobytes()
+        if prep["vkey"] == key:
+            return
+        prep["vkey"] = key
+        vext = np.concatenate((vis, [True]))           # index −1 → always visible
+        for part in prep["parts"] + prep["lines"]:
+            sel = np.nonzero(vext[part["fi"]])[0]
+            act = part["act"]
+            if not len(sel):
+                act.VisibilityOff()
+                continue
+            act.VisibilityOn()
+            if part["kind"] == "poly":
+                lens = part["lens"][sel]
+                noff = np.concatenate(([0], np.cumsum(lens))).astype(np.int64)
+                conn = (np.repeat(part["off"][sel] - noff[:-1], lens) + np.arange(noff[-1])).astype(np.int64)
+            else:
+                noff = (np.arange(len(sel) + 1) * 2).astype(np.int64)
+                conn = np.stack((2 * sel, 2 * sel + 1), axis=1).reshape(-1).astype(np.int64)
+            part["keep"] = (noff, conn)                  # numpy memory used by VTK (deep copies below anyway)
+            part["cells"].SetData(numpy_to_vtk(noff, deep=1, array_type=VTK_ID_TYPE),
+                                  numpy_to_vtk(conn, deep=1, array_type=VTK_ID_TYPE))
+            part["pd"].GetCellData().SetScalars(numpy_to_vtk(part["cols"][sel], deep=1))
+            part["pd"].Modified()
+
     def image(self, scene, w, h, dpr=1.0):
-        """QImage w×h (logical px, painted at dpr) of the scene: dict(polys, edges, proj, bg)."""
+        """QImage w×h (logical px, painted at dpr) of the scene: dict(hold – the prepared geometry `hold["desc"]`,
+        vis – visible faces, proj, bg)."""
         from PySide6.QtGui import QImage
         from vtkmodules.vtkRenderingCore import vtkWindowToImageFilter
         W, H = max(int(round(w * dpr)), 8), max(int(round(h * dpr)), 8)
         ren, rw = self.ren, self.rw
-        for a in self._actors:
-            ren.RemoveActor(a)
-        edges = [(a3, b3, col, wd * dpr) for a3, b3, col, wd in scene["edges"]]
-        self._actors = self._build(scene["polys"], edges)
-        for a in self._actors:
-            ren.AddActor(a)
+        hold = scene["hold"]
+        prep = hold.get("vtk")
+        if prep is None:
+            prep = hold["vtk"] = self.prepare(hold["desc"])
+        if self._cur is not prep:                    # another scene (another canvas) – swap the actors
+            for a in self._actors:
+                ren.RemoveActor(a)
+            self._actors = [p_["act"] for p_ in prep["parts"] + prep["lines"]]
+            for a in self._actors:
+                ren.AddActor(a)
+            self._cur = prep
+        self.scale(prep, scene.get("ls", 1.0))
+        self.show(prep, scene["vis"])
+        for ln in prep["lines"]:
+            ln["act"].GetProperty().SetLineWidth(ln["w"] * dpr)
         bg = QColor(scene.get("bg") or "#fbfbfc")
         ren.SetBackground(bg.redF(), bg.greenF(), bg.blueF())
         ren.SetBackgroundAlpha(1.0)
@@ -4797,10 +5877,316 @@ class Canvas3D(QWidget):
                     else:
                         lx = it["x0"] + (it["bw"] - w) / 2
                     p.drawText(QPointF(lx, it["y0"] + i * it["lh"] + it["asc"]), ln)
+        if getattr(self, "_cube_on", False):
+            self._paint_cube(p)
         p.setPen(QColor("#d5d9df"))
         p.setBrush(QBrush(Qt.BrushStyle.NoBrush))
         p.drawRect(QRectF(0.5, 0.5, self.width() - 1, self.height() - 1))
         p.end()
+
+    # --- view cube (like the ViewCube of AutoCAD) in the top right corner of every 3D view: a click on a face
+    # gives the view square to it (projection on a plane: from above, from the front …), on an edge – the view
+    # between two faces, on a corner – the isometric view; the house above the cube – Widok domyślny. Not on
+    # the printout (images). The view is set smoothly (a short animation); the model is centred again.
+    CUBE_R = 30                                      # half of the cube edge on the screen [px]
+    # (outer normal, u axis, v axis – the text runs along u, its „down” along v, label)
+    CUBE_FACES = (((0, 0, 1), (1, 0, 0), (0, -1, 0), "GÓRA"),
+                  ((0, -1, 0), (1, 0, 0), (0, 0, -1), "PRZÓD"),
+                  ((1, 0, 0), (0, 1, 0), (0, 0, -1), "PRAWY"),
+                  ((0, 1, 0), (-1, 0, 0), (0, 0, -1), "TYŁ"),
+                  ((-1, 0, 0), (0, -1, 0), (0, 0, -1), "LEWY"))
+
+    def _cube_centre(self):
+        R = self.CUBE_R
+        return self.width() - 14 - 1.8 * R, 14 + 1.8 * R
+
+    def _cube_home_rect(self):
+        cx, cy = self._cube_centre()
+        R = self.CUBE_R
+        return QRectF(cx - 1.8 * R - 2, cy - 1.8 * R - 4, 18, 16)
+
+    def _cube_faces(self):
+        """The visible faces of the cube: [(face index, centre, eu, ev, n·D)] (screen vectors of the half axes),
+        the nearest last. None – no view yet."""
+        pr = getattr(self, "_proj", None)
+        if pr is None:
+            return None
+        _, _, cy, sy, cp, sp = pr[:6]
+        R = self.CUBE_R
+        ox, oy = self._cube_centre()
+        D = (sy * cp, cy * cp, -sp)
+
+        def S(v):
+            x, y, z = v
+            return ((x * cy - y * sy) * R, -(z * cp + (x * sy + y * cy) * sp) * R)
+        out = []
+        for i, (n, u, v, _) in enumerate(self.CUBE_FACES):
+            dn = sum(a * b for a, b in zip(n, D))
+            if dn > -0.02:
+                continue
+            c = S(n)
+            out.append((i, (ox + c[0], oy + c[1]), S(u), S(v), dn))
+        out.sort(key=lambda f: -f[4])
+        return out
+
+    CUBE_MID = 0.6          # the centre of a face (the big button) – |u|, |v| ≤ 0.6; edges and corners – the rest
+
+    def _cube_axes(self):
+        """The screen axes in the world: (right R, up U) and the face view now shown: "top", "side" or None (a face
+        of the cube square to the view – then the arrows to the neighbouring views)."""
+        pr = getattr(self, "_proj", None)
+        if pr is None:
+            return None, None, None
+        _, _, cy, sy, cp, sp = pr[:6]
+        R, U = (cy, -sy, 0.0), (sy * sp, cy * sp, cp)
+        square = min(abs(cy), abs(sy)) < 1e-3
+        kind = ("top" if abs(cp) < 1e-3 else "side" if abs(sp) < 1e-3 else None) if square else None
+        return R, U, kind
+
+    def _cube_buttons(self):
+        """The arrows around the cube in a face view: [(key, polygon / path, target)] – target: the direction of
+        the new view ("dir", d) or the turn of the top view by 90° ("roll", ±1)."""
+        R_, U_, kind = self._cube_axes()
+        if kind is None:
+            return []
+        R = self.CUBE_R
+        cx, cy = self._cube_centre()
+        out = []
+        k = 1.42 * R
+        for key, sx, sy_, d in (("up", 0, -1, U_), ("down", 0, 1, tuple(-c for c in U_)),
+                                ("left", -1, 0, tuple(-c for c in R_)), ("right", 1, 0, R_)):
+            if d[2] < -1e-6:                          # no view from below (the ground)
+                continue
+            tx, ty = cx + sx * k, cy + sy_ * k        # the tip points at the cube
+            bx, by = tx + sx * 9, ty + sy_ * 9
+            px, py = -sy_ * 7, sx * 7
+            out.append((key, [QPointF(tx, ty), QPointF(bx + px, by + py), QPointF(bx - px, by - py)], ("dir", d)))
+        if kind == "top":                             # turning the top view by 90°
+            # the picture turns the way the arrow points (clockwise arrow – the model turns clockwise)
+            for key, a0, a1, sg in (("rollcw", -62.0, -28.0, -1), ("rollccw", -118.0, -152.0, 1)):
+                out.append((key, (a0, a1), ("roll", sg)))
+        return out
+
+    def _roll_path(self, a0, a1):
+        """A curved arrow around the cube from angle a0 to a1 (screen degrees) – QPainterPath and the arrow head."""
+        R = self.CUBE_R
+        cx, cy = self._cube_centre()
+        r = 1.62 * R
+        path = QPainterPath()
+        n = 10
+        pts = [(cx + r * math.cos(math.radians(a0 + (a1 - a0) * i / n)),
+                cy + r * math.sin(math.radians(a0 + (a1 - a0) * i / n))) for i in range(n + 1)]
+        path.moveTo(*pts[0])
+        for q in pts[1:]:
+            path.lineTo(*q)
+        (ax, ay), (bx, by) = pts[-2], pts[-1]
+        ln = math.hypot(bx - ax, by - ay) or 1.0
+        ux, uy = (bx - ax) / ln, (by - ay) / ln
+        head = [QPointF(bx + ux * 6, by + uy * 6), QPointF(bx - uy * 5, by + ux * 5), QPointF(bx + uy * 5, by - ux * 5)]
+        return path, head, pts
+
+    def _paint_cube(self, p):
+        faces = self._cube_faces()
+        if not faces:
+            return
+        hov = getattr(self, "_cube_hover", None)
+        hd = None                                    # the direction of the hovered face / edge / corner
+        if isinstance(hov, tuple):
+            n_, u_, v_, _ = self.CUBE_FACES[hov[0]]
+            hd = tuple(a_ + hov[1] * b_ + hov[2] * c_ for a_, b_, c_ in zip(n_, u_, v_))
+        p.save()
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        mid = self.CUBE_MID
+        for i, c, eu, ev, dn in faces:
+            def pt(u, v):
+                return QPointF(c[0] + u * eu[0] + v * ev[0], c[1] + u * eu[1] + v * ev[1])
+            shade = int(250 - 30 * (1 + dn))         # faces turned away a little darker
+            p.setPen(QPen(QColor("#8b95a1"), 1))
+            p.setBrush(QBrush(QColor(shade, shade + 2, min(shade + 5, 255))))
+            p.drawPolygon(QPolygonF([pt(-1, -1), pt(1, -1), pt(1, 1), pt(-1, 1)]))
+            if hd is not None and sum(x * y for x, y in zip(hd, self.CUBE_FACES[i][0])) == 1:
+                # the face / edge / corner under the cursor – its part on every visible face (a corner: three
+                # faces, an edge: two), filled and outlined like the ViewCube of AutoCAD
+                n_, u_, v_, _ = self.CUBE_FACES[i]
+                cu = sum(x * y for x, y in zip(hd, u_))
+                cv_ = sum(x * y for x, y in zip(hd, v_))
+                u0, u1 = (-1, -mid) if cu < 0 else (mid, 1) if cu > 0 else (-mid, mid)
+                v0, v1 = (-1, -mid) if cv_ < 0 else (mid, 1) if cv_ > 0 else (-mid, mid)
+                hc = QColor(ACCENT)
+                hc.setAlpha(95)
+                p.setPen(QPen(QColor("#1d4ed8"), 1.6))
+                p.setBrush(QBrush(hc))
+                p.drawPolygon(QPolygonF([pt(u0, v0), pt(u1, v0), pt(u1, v1), pt(u0, v1)]))
+            area = abs(eu[0] * ev[1] - eu[1] * ev[0])
+            if area < 0.12 * self.CUBE_R ** 2:        # almost edge-on – no text
+                continue
+            k = 1.0 / 40.0
+            p.save()
+            p.setTransform(QTransform(eu[0] * k, eu[1] * k, ev[0] * k, ev[1] * k, c[0], c[1]), True)
+            f = qfont((FONT, 7, "bold"))
+            f.setPixelSize(15)
+            p.setFont(f)
+            p.setPen(QColor("#374151"))
+            p.drawText(QRectF(-40, -40, 80, 80), Qt.AlignmentFlag.AlignCenter, self.CUBE_FACES[i][3])
+            p.restore()
+        for key, shape, _ in self._cube_buttons():          # a face view: arrows to the neighbouring views
+            col = QColor(ACCENT) if hov == key else QColor("#6b7280")
+            if key.startswith("roll"):
+                path, head, _ = self._roll_path(*shape)
+                p.setPen(QPen(col, 2.2))
+                p.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+                p.drawPath(path)
+                p.setPen(QPen(Qt.PenStyle.NoPen))
+                p.setBrush(QBrush(col))
+                p.drawPolygon(QPolygonF(head))
+            else:
+                p.setPen(QPen(Qt.PenStyle.NoPen))
+                p.setBrush(QBrush(col))
+                p.drawPolygon(QPolygonF(shape))
+        # Widok domyślny – a small house above the cube
+        r = self._cube_home_rect()
+        hc = QColor(ACCENT) if hov == "home" else QColor("#6b7280")
+        p.setPen(QPen(hc, 1.4))
+        p.setBrush(QBrush(QColor("#ffffff")))
+        x0, y0, w, h = r.x(), r.y(), r.width(), r.height()
+        p.drawPolygon(QPolygonF([QPointF(x0 + w / 2, y0 + 1), QPointF(x0 + w - 1, y0 + h * 0.48),
+                                 QPointF(x0 + w - 3, y0 + h * 0.48), QPointF(x0 + w - 3, y0 + h - 1),
+                                 QPointF(x0 + 3, y0 + h - 1), QPointF(x0 + 3, y0 + h * 0.48),
+                                 QPointF(x0 + 1, y0 + h * 0.48)]))
+        p.restore()
+
+    def cube_hit(self, x, y):
+        """What of the cube lies under (x, y): (face, cu, cv) – cu, cv ∈ {−1, 0, 1} (the big centre of the face, an
+        edge or a corner), "home", the key of an arrow ("up", "down", "left", "right", "rollcw", "rollccw") or None."""
+        if not getattr(self, "_cube_on", False):
+            return None
+        if self._cube_home_rect().adjusted(-2, -2, 2, 2).contains(QPointF(x, y)):
+            return "home"
+        for key, shape, _ in self._cube_buttons():
+            if key.startswith("roll"):
+                _, _, pts = self._roll_path(*shape)
+                if min(math.hypot(x - qx, y - qy) for qx, qy in pts) < 7:
+                    return key
+            else:
+                cxs = sum(q.x() for q in shape) / 3
+                cys = sum(q.y() for q in shape) / 3
+                if math.hypot(x - cxs, y - cys) < 10:
+                    return key
+        mid = self.CUBE_MID
+        for i, c, eu, ev, dn in reversed(self._cube_faces() or []):
+            det = eu[0] * ev[1] - eu[1] * ev[0]
+            if abs(det) < 1e-6:
+                continue
+            dx, dy = x - c[0], y - c[1]
+            u = (dx * ev[1] - dy * ev[0]) / det
+            v = (eu[0] * dy - eu[1] * dx) / det
+            if abs(u) <= 1.0 and abs(v) <= 1.0:
+                cell = lambda t: -1 if t < -mid else (1 if t > mid else 0)
+                return i, cell(u), cell(v)
+        return None
+
+    @staticmethod
+    def _dir_view(d, yaw0):
+        """(yaw, pitch) of the view from the direction d (towards the model); straight from above – the nearest
+        square yaw to yaw0."""
+        d = list(d)
+        d[2] = max(d[2], 0.0)
+        ln = math.sqrt(sum(c * c for c in d)) or 1.0
+        d = [c / ln for c in d]
+        pitch = math.asin(clamp(d[2], -1.0, 1.0))
+        if math.hypot(d[0], d[1]) < 1e-9:
+            yaw = round(yaw0 / (math.pi / 2)) * (math.pi / 2)
+        else:
+            yaw = math.atan2(-d[0], -d[1])
+        return yaw, pitch
+
+    def cube_target(self, hit, yaw0):
+        """(yaw, pitch) of the view from the face / edge / corner hit: the view direction runs from the sum of the
+        normals towards the model. From below – not possible (the ground): the lower cells give a side view.
+        hit may also be an arrow key of a face view."""
+        if isinstance(hit, str):
+            btn = next((t for k, _, t in self._cube_buttons() if k == hit), None)
+            if btn is None:
+                return None
+            pitch0 = math.asin(clamp(self._proj[5], -1.0, 1.0))
+            if btn[0] == "roll":
+                return yaw0 + btn[1] * math.pi / 2, pitch0
+            return self._dir_view(btn[1], yaw0)
+        i, cu, cv_ = hit
+        n, u, v, _ = self.CUBE_FACES[i]
+        return self._dir_view([a + cu * b + cv_ * c for a, b, c in zip(n, u, v)], yaw0)
+
+    def cube_hover(self, x, y):
+        """Hover over the cube – highlight; True when the cursor is over it."""
+        h = self.cube_hit(x, y)
+        if h != getattr(self, "_cube_hover", None):
+            self._cube_hover = h
+            self.update()
+        if h is not None:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        return h is not None
+
+    def leaveEvent(self, e):
+        if getattr(self, "_cube_hover", None) is not None:
+            self._cube_hover = None
+            self.update()
+        super().leaveEvent(e)
+
+    def cube_click(self, x, y):
+        """Click on the cube: the view from that side (animated) or Widok domyślny. True – handled."""
+        h = self.cube_hit(x, y)
+        if h is None:
+            return False
+        if h == "home":
+            self.cube_home()
+            return True
+        yaw0, pitch0 = self.cube_get()
+        tgt = self.cube_target(h, yaw0)
+        if tgt is not None:
+            self.cube_animate(yaw0, pitch0, *tgt)
+        return True
+
+    CUBE_ANIM_S = 0.8                                # the time of the turn to a new view [s]
+
+    def cube_animate(self, yaw0, pitch0, yaw1, pitch1):
+        """A smooth turn to the new view (like the ViewCube of AutoCAD): the time fixed (not the number of frames –
+        a slower computer shows fewer frames, the turn does not get longer), easing in and out; yaw the shorter
+        way round."""
+        dy = (yaw1 - yaw0 + math.pi) % (2 * math.pi) - math.pi
+        if abs(abs(dy) - math.pi) < 1e-9 and yaw1 > yaw0:
+            dy = math.pi
+        tm = getattr(self, "_cube_timer", None)
+        if tm is not None:
+            tm.stop()
+        t0 = time.perf_counter()
+
+        def tick():
+            t = min((time.perf_counter() - t0) / self.CUBE_ANIM_S, 1.0)
+            e = 4 * t ** 3 if t < 0.5 else 1 - (-2 * t + 2) ** 3 / 2          # ease in-out (cubic)
+            last = t >= 1.0
+            if last:
+                self._cube_timer.stop()
+            self.cube_set(yaw0 + dy * e, pitch0 + (pitch1 - pitch0) * e, last)
+        self.cube_set(yaw0, pitch0, False, start=True)
+        self._cube_timer = QTimer(self)
+        self._cube_timer.timeout.connect(tick)
+        self._cube_timer.start(10)
+
+    # the view of the 3D window (App); CaseCanvas – the view of its viewport
+    def cube_get(self):
+        return self.app.yaw, self.app.pitch
+
+    def cube_set(self, yaw, pitch, final, start=False):
+        a = self.app
+        if start:                                    # the model centred again (rotation point – its centre)
+            a.pan_x = a.pan_y = 0.0
+            a.piv = None
+        a.yaw, a.pitch = yaw, pitch
+        a._draw3d_now()
+        self.update()
+
+    def cube_home(self):
+        self.app.reset_view()
 
     def _paint_scene3d(self, p, it):
         dpr = p.device().devicePixelRatioF() if p.device() is not None else 1.0
@@ -4816,7 +6202,8 @@ class Canvas3D(QWidget):
         if it["img"] is not None:
             p.drawImage(QRectF(0, 0, self.width(), self.height()), it["img"])
             return
-        for pts, fill, outline, alpha, edges, width in it["scene"]["flat"]:
+        sc_ = it["scene"]
+        for pts, fill, outline, alpha, edges, width in (sc_["flat_fn"]() if sc_.get("flat_fn") else sc_["flat"]):
             fake = dict(fill=fill, outline=outline, alpha=alpha, edges=edges, width=width, pts=pts)
             br = self._brush(fill)
             if alpha is not None and fill:
@@ -4873,6 +6260,9 @@ class Canvas3D(QWidget):
         x, y = self._xy(e)
         b = e.button()
         shift = bool(e.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        if b == Qt.MouseButton.LeftButton and not shift and self.cube_click(x, y):
+            self._drag = None
+            return
         if b == Qt.MouseButton.MiddleButton or (b == Qt.MouseButton.LeftButton and shift):
             self._drag = "pan"
             self.app._pan_press(_Ev(x, y))
@@ -4887,6 +6277,8 @@ class Canvas3D(QWidget):
         elif self._drag == "rot":
             self.app._rotate(_Ev(x, y))
         else:
+            if self.cube_hover(x, y):
+                return
             if self.hit(x, y):
                 self.setCursor(Qt.CursorShape.PointingHandCursor)
             else:
@@ -5777,7 +7169,7 @@ class Win3D(QWidget):
 #  PROJECT – list of cases (saved 3D models with results)
 # ===================================================================
 VIEW_KEYS = ("yaw", "pitch", "zoom", "pan_x", "pan_y", "piv")     # piv – rotation point (None – model centre)
-TOGGLE_KEYS = ("labels3d", "arrows3d", "dims3d", "bdims3d", "odims3d")
+TOGGLE_KEYS = ("labels3d", "arrows3d", "dims3d", "bdims3d", "odims3d", "loads3d")
 
 
 def html_body(doc):
@@ -5868,11 +7260,29 @@ class CaseCanvas(Canvas3D):
     def contextMenuEvent(self, e):
         self.card.viewport_menu(self, e.globalPos())
 
+    def cube_get(self):
+        return self.view["yaw"], self.view["pitch"]
+
+    def cube_set(self, yaw, pitch, final, start=False):
+        if start:
+            self.view.update(pan_x=0.0, pan_y=0.0, piv=None)
+        self.view.update(yaw=yaw, pitch=pitch)
+        self.redraw()
+        if final:
+            self.card.view_changed(self.view, self.idx)
+
+    def cube_home(self):
+        self.card._reset_view(self.idx)
+
     def mousePressEvent(self, e):
         if not self.is_active():
             self.set_active(True)
         x, y = self._xy(e)
         b = e.button()
+        if b == Qt.MouseButton.LeftButton and not (e.modifiers() & Qt.KeyboardModifier.ShiftModifier) \
+                and self.cube_click(x, y):
+            self._drag, self._last = None, None
+            return
         shift = bool(e.modifiers() & Qt.KeyboardModifier.ShiftModifier)
         self._drag = "pan" if (b == Qt.MouseButton.MiddleButton or (b == Qt.MouseButton.LeftButton and shift)) \
             else ("rot" if b == Qt.MouseButton.LeftButton else None)
@@ -5881,14 +7291,14 @@ class CaseCanvas(Canvas3D):
     def mouseMoveEvent(self, e):
         x, y = self._xy(e)
         if self._drag is None or self._last is None:
+            if self.cube_hover(x, y):
+                return
             self.setCursor(Qt.CursorShape.PointingHandCursor if self.hit(x, y) else Qt.CursorShape.ArrowCursor)
             return
         lx, ly = self._last
         if self._drag == "rot":
             if abs(x - lx) + abs(y - ly) < 3 and not self._moved:
                 return
-            if not self._moved:
-                self.app.set_pivot(self.view, self)
             self._moved = True
             self.view["yaw"] += (x - lx) * 0.01
             self.view["pitch"] = clamp(self.view["pitch"] + (y - ly) * 0.01, math.radians(2), math.radians(88))
@@ -5933,6 +7343,8 @@ class CaseCanvas(Canvas3D):
     def zoom_view(self, f, at):
         """Zoom by f about the point under the cursor at = (x, y)."""
         old = self.view["zoom"]
+        if getattr(self, "_proj", None) is not None:
+            self.app.pivot_at(at, self.view, self)  # the rotation point – under the cursor
         self.view["zoom"] = clamp(old * f, getattr(self, "_zmin", ZOOM_MIN), ZOOM_MAX)
         if old > 0:
             self.view["pan_x"], self.view["pan_y"] = zoom_pan(self.view["pan_x"], self.view["pan_y"],
@@ -5985,9 +7397,18 @@ class CaseCard(QFrame):
     """Item of the case list: header (drag, expand, name, Edytuj, Usuń), when expanded –
     3D preview and report."""
 
-    def __init__(self, pw, case):
+    RECENT = False                                   # a card of the Ostatnio dodane window (RecentWindow)
+
+    def _changed(self):
+        """A change of the case (view, toggles, name, dimension): a project change – not in Ostatnio dodane (those
+        cases are not in the project)."""
+        if not self.RECENT:
+            self.app.project_changed()
+
+    def __init__(self, pw, case, recent_add=None):
         super().__init__()
         self.pw, self.app, self.case = pw, pw.app, case
+        self.RECENT = recent_add is not None
         self.setObjectName("card")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 6, 8, 6)
@@ -6009,6 +7430,7 @@ class CaseCard(QFrame):
         self.btn_exp.setToolTip("Rozwiń / zwiń")
         self._set_exp_icon(False)
         self.btn_exp.clicked.connect(lambda checked=False: (
+            None if self.RECENT else
             self.app.echo(("COLLAPSE " if self.body is not None else "EXPAND ") + case_no(self.app, self.case)),
             self.toggle()))
         hd.addWidget(self.btn_exp)
@@ -6031,6 +7453,19 @@ class CaseCard(QFrame):
         self.info = QLabel("")
         self.info.setObjectName("muted")
         hd.addWidget(self.info, 1)
+        if self.RECENT:                              # Ostatnio dodane: only Dodaj (no handle, print box, menu)
+            self.handle.setVisible(False)
+            self.ck_print.setVisible(False)
+            self.name.mouseDoubleClickEvent = lambda e: None
+            b = QPushButton("Dodaj")
+            b.setToolTip("Dodaj ten przypadek do projektu (lokalizacja i strefy – projektu)")
+            b.clicked.connect(lambda checked=False: recent_add(self))
+            hd.addWidget(b)
+            self.btn_add = b
+            lay.addLayout(hd)
+            self.body = None
+            self._update_info()
+            return
         b = QPushButton("Edytuj")
         b.clicked.connect(lambda checked=False: self.pw.edit_case(self.case))
         hd.addWidget(b)
@@ -6062,6 +7497,12 @@ class CaseCard(QFrame):
         self.set_print_state()
         if ex.get("mode") == "własne":
             self.info.setText(f"  Własne · {lab_info(self.case['state'].get('wlasne'))} · "
+                              f"dodano {self.case.get('created', '')}")
+            self.name.setText(self.case["name"])
+            return
+        if ex.get("mode") == "konstrukcje":
+            op = self.case["state"].get("opcje", {})
+            self.info.setText(f"  Wiatr · {op.get('w_object') or op.get('st_type', '')} · "
                               f"dodano {self.case.get('created', '')}")
             self.name.setText(self.case["name"])
             return
@@ -6146,7 +7587,7 @@ class CaseCard(QFrame):
             self.app.echo(f"RENAME {case_no(self.app, self.case)} {cq(t)}")
             self.case["name"] = t
             self.name.setText(t)
-            self.app.project_changed()
+            self._changed()
 
     # --- dragging by the ⠿ handle (reordering): the card follows the cursor, the others make room
     def _drag_press(self, e):
@@ -6233,7 +7674,7 @@ class CaseCard(QFrame):
         self.layout().addWidget(body)
 
     def _viewport_box(self, k, calc):
-        """One viewport: bar (view toggles, Widok domyślny) + 3D preview. Right click on the preview – Duplikuj."""
+        """One viewport: bar (view toggles) + 3D preview (the view cube – also the default view). Right click on the preview – Duplikuj."""
         box = QWidget()
         vl = QVBoxLayout(box)
         vl.setContentsMargins(0, 0, 0, 0)
@@ -6241,7 +7682,8 @@ class CaseCard(QFrame):
         bar = QHBoxLayout()
         tg = self.vp_data(k).setdefault("toggles", {})
         # only the view and building dimensions here (click a dimension in the preview); other changes – Edytuj button
-        for key, lab in (("labels3d", "Etykiety"), ("dims3d", "Wymiary pól"), ("bdims3d", "Wymiary budynku")):
+        for key, lab in (("loads3d", "Obciążenia"), ("labels3d", "Etykiety"), ("dims3d", "Wymiary pól"),
+                         ("bdims3d", "Wymiary budowli" if calc["mode"] == "konstrukcje" else "Wymiary budynku")):
             ch = QCheckBox(lab)
             ch.setChecked(bool(tg.get(key, True)))
             ch.toggled.connect(lambda on, key=key, k=k: self._toggle(key, on, k))
@@ -6257,10 +7699,7 @@ class CaseCard(QFrame):
         box.title = QLabel("")
         box.title.setObjectName("muted")
         bar.addWidget(box.title)
-        bar.addStretch(1)
-        b = QPushButton("Widok domyślny")
-        b.clicked.connect(lambda checked=False, k=k: self._reset_view(k))
-        bar.addWidget(b)
+        bar.addStretch(1)                            # the default view – the house of the view cube
         vl.addLayout(bar)
         box.canvas = CaseCanvas(self.app, self, k)
         vl.addWidget(box.canvas)
@@ -6295,7 +7734,7 @@ class CaseCard(QFrame):
               "toggles": dict(src.get("toggles") or {})}
         ex.setdefault("viewports", []).insert(k, copy.deepcopy(cp))
         self._rebuild_body()
-        self.app.project_changed()
+        self._changed()
 
     def remove_viewport(self, k):
         """Usuń viewport: any of them, but at least one stays (removing the first – the next one takes its place)."""
@@ -6311,7 +7750,7 @@ class CaseCard(QFrame):
         if not vps:
             ex.pop("viewports", None)
         self._rebuild_body()
-        self.app.project_changed()
+        self._changed()
 
     def _rebuild_body(self):
         """The body again (a different number of viewports); the list keeps its place."""
@@ -6356,7 +7795,7 @@ class CaseCard(QFrame):
         self.vp_data(k).setdefault("toggles", {})[key] = bool(on)
         self.vps[k].canvas._scene_key = None
         self.vps[k].canvas.redraw()
-        self.app.project_changed()
+        self._changed()
 
     def _reset_view(self, k=0):
         th = self.case["_calc"]["wind"]["theta"] if self.case["_calc"]["mode"] == "wiatr" else 0
@@ -6367,7 +7806,7 @@ class CaseCard(QFrame):
 
     def view_changed(self, view, k=0):
         self.vp_data(k)["view"] = dict(view)
-        self.app.project_changed()
+        self._changed()
 
     def edit_value(self, key):
         """Change of a dimension clicked in the preview – the case is recalculated."""
@@ -6397,8 +7836,83 @@ class CaseCard(QFrame):
             self.app.recapture_case(self.case)
             QMessageBox.warning(self, "Zmiana wymiaru", "Nie zmieniono wymiaru:\n" + err)
             return
-        self.app.project_changed()
+        self._changed()
         self.refresh()
+
+
+class RecentWindow(QWidget):
+    """Ostatnio dodane (the button above the list of cases, Obciążenia → Ostatnio dodane…, RECENTWINDOW): the cases
+    recently added to any project (every load type) as cards like in the main window – expanding, the 3D preview
+    (viewports, the view cube, toggles, a dimension click), the report; on the right only Dodaj (the case goes to
+    the project with the location and zones of the project; the window stays open). Nothing here changes the
+    project. Owned by the main window (one taskbar button), non-blocking."""
+
+    def __init__(self, app):
+        super().__init__(app.pw, Qt.WindowType.Window)
+        self.app = app
+        self.setWindowTitle("Ostatnio dodane")
+        if os.path.exists(ICON_FILE):
+            self.setWindowIcon(QIcon(ICON_FILE))
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(6)
+        self.empty = QLabel("Brak ostatnio dodanych przypadków – pojawią się tu po dodaniu przypadku do projektu.")
+        self.empty.setObjectName("muted")
+        lay.addWidget(self.empty)
+        sc = QScrollArea()
+        sc.setWidgetResizable(True)
+        sc.setFrameShape(QFrame.Shape.NoFrame)
+        inner = QWidget()
+        inner.setObjectName("page")
+        self.vl = QVBoxLayout(inner)
+        self.vl.setContentsMargins(0, 0, 0, 0)
+        self.vl.setSpacing(6)
+        self.vl.addStretch(1)
+        sc.setWidget(inner)
+        lay.addWidget(sc, 1)
+        self.cards = []
+        scr = QApplication.primaryScreen().availableGeometry()
+        self.resize(min(1100, scr.width() - 120), min(860, scr.height() - 100))
+        self.rebuild()
+
+    def rebuild(self):
+        """The cards anew from the list in settings.json (the newest first)."""
+        for c in self.cards:
+            self.vl.removeWidget(c)
+            c.hide()
+            c.deleteLater()
+        self.cards = []
+        for i, r in enumerate(recent_cases()):
+            ex = json.loads(json.dumps(r.get("extra") or {}))
+            ex["mode"] = r.get("mode", ex.get("mode", "śnieg"))
+            case = {"id": -(i + 1), "name": r.get("name", ""), "created": r.get("time", ""), "extra": ex,
+                    "state": json.loads(json.dumps(r.get("state") or {}))}
+            c = CaseCard(self, case, recent_add=self.add)
+            c.set_number(f"{i + 1}.")
+            self.vl.insertWidget(self.vl.count() - 1, c)
+            self.cards.append(c)
+        self.empty.setVisible(not self.cards)
+
+    def add(self, card):
+        """Dodaj: the case of the card (with its view, toggles and changed dimensions) to the project."""
+        if card not in self.cards:
+            return None
+        c = self.app.add_recent(self.cards.index(card), case=card.case)
+        if c is not None:
+            self.rebuild()                           # the case added moved to the top of the list
+        return c
+
+    # what CaseCard asks of its list
+    def card_clicked(self, card, mods):
+        pass
+
+    def keep_view(self, fn):
+        fn()
+
+    def closeEvent(self, e):
+        if CaseCanvas.active is not None and self.isAncestorOf(CaseCanvas.active):
+            CaseCanvas.active = None
+        super().closeEvent(e)
 
 
 class CaseList(QWidget):
@@ -7486,17 +9000,326 @@ def mat_save(path, items):
         f.write("\n".join(out) + "\n")
 
 
+# --- formulas in the value field of an own-load item (KAYENN Lab): „0,12[m]*25[kN/m3]”, „2*(0,5+0,3)”
+# A safe parser of its own (no eval): numbers (decimal comma or point), + − * / ^ (also · × ÷), brackets ( ),
+# units in square brackets after a number or a bracket (or alone: [m] = 1 m), functions, the constant pi.
+# Every value carries its dimension (kN, m, angle) – adding different units is an error, and the unit of the
+# result follows from the formula: it must be kN/mⁿ (n = 0…3) or a plain number (then the unit of the item).
+# Angles: trigonometric functions take degrees (a plain number) or an angle with [°] / [rad].
+G_ACC = 9.81                                            # kg → kN (as the steel sections of the database)
+FORMULA_UNITS = {                                       # atom: (factor to kN / m / rad, (kN, m, angle) exponents)
+    "m": (1.0, (0, 1, 0)), "cm": (0.01, (0, 1, 0)), "mm": (0.001, (0, 1, 0)), "km": (1000.0, (0, 1, 0)),
+    "kN": (1.0, (1, 0, 0)), "N": (0.001, (1, 0, 0)), "MN": (1000.0, (1, 0, 0)),
+    "kg": (G_ACC / 1000, (1, 0, 0)), "t": (G_ACC, (1, 0, 0)),
+    "Pa": (0.001, (1, -2, 0)), "kPa": (1.0, (1, -2, 0)), "MPa": (1000.0, (1, -2, 0)),
+    "°": (math.pi / 180, (0, 0, 1)), "deg": (math.pi / 180, (0, 0, 1)), "rad": (1.0, (0, 0, 1)),
+    "%": (0.01, (0, 0, 0)), "-": (1.0, (0, 0, 0)),
+}
+FORMULA_FUNCS = ("sqrt", "sin", "cos", "tan", "asin", "acos", "atan", "ln", "log", "exp", "abs", "min", "max")
+_SUP = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
+
+
+class FormulaError(ValueError):
+    pass
+
+
+def formula_unit(txt):
+    """A unit written in square brackets („kN/m3”, „kN/m^3”, „kN/m²”, „kN·m”, „kg/m3”, „N/mm2”) →
+    (factor, (kN, m, angle) exponents); FormulaError – unknown unit."""
+    s = str(txt).strip().replace(" ", "").replace("²", "2").replace("³", "3").replace("^", "")
+    s = s.replace("·", "*").replace("×", "*")
+    if s in ("-", "%", "°"):
+        return FORMULA_UNITS[s]
+    toks = re.findall(r"[*/]|[A-Za-z°]+-?\d*|.", s)
+    fac, dims, op = 1.0, [0, 0, 0], "*"
+    if not toks or toks[0] in "*/" or toks[-1] in "*/":
+        raise FormulaError(f"nieznana jednostka [{txt}]")
+    for t in toks:
+        if t in ("*", "/"):
+            op = t
+            continue
+        m_ = re.fullmatch(r"([A-Za-z°]+)(-?\d*)", t)
+        if not m_ or m_.group(1) not in FORMULA_UNITS:
+            raise FormulaError(f"nieznana jednostka [{txt}]")
+        f0, d0 = FORMULA_UNITS[m_.group(1)]
+        n = int(m_.group(2)) if m_.group(2) not in ("", "-") else 1
+        n = -n if op == "/" else n
+        fac *= f0 ** n
+        dims = [a + b * n for a, b in zip(dims, d0)]
+        op = "*"
+    return fac, tuple(dims)
+
+
+def dims_text(d):
+    """A dimension (kN, m, angle) as a unit: (1, -2, 0) → „kN/m²”, (0, 1, 0) → „m”, (0, 0, 0) → „liczba bez jednostki”."""
+    def atom(name, n):
+        return name + (str(abs(n)).translate(_SUP) if abs(n) != 1 else "")
+    num = [atom(nm, n) for nm, n in zip(("kN", "m", "rad"), d) if n > 0]
+    den = [atom(nm, n) for nm, n in zip(("kN", "m", "rad"), d) if n < 0]
+    if not num and not den:
+        return "liczba bez jednostki"
+    return ("·".join(num) or "1") + ("/" + "·".join(den) if den else "")
+
+
+def _formula_tokens(s):
+    """Tokens of a formula: (kind, text) – num, unit, name, op, ( ) ;."""
+    out, i, n = [], 0, len(s)
+    while i < n:
+        c = s[i]
+        if c.isspace():
+            i += 1
+        elif c.isdigit() or (c in ",." and i + 1 < n and s[i + 1].isdigit()):
+            m_ = re.compile(r"\d*[,.]?\d*(?:[eE][+-]?\d+)?").match(s, i)
+            out.append(("num", m_.group()))
+            i = m_.end()
+        elif c == "[":
+            j = s.find("]", i)
+            if j < 0:
+                raise FormulaError("niezamknięty nawias [")
+            out.append(("unit", s[i + 1:j]))
+            i = j + 1
+        elif c.isalpha() or c == "_":
+            m_ = re.compile(r"[A-Za-z_]\w*").match(s, i)
+            if not m_:
+                raise FormulaError(f"nieoczekiwany znak „{c}”")
+            out.append(("name", m_.group()))
+            i = m_.end()
+        elif c in "+-−*/^·×÷:();":
+            out.append(("op", {"−": "-", "·": "*", "×": "*", "÷": "/", ":": "/"}.get(c, c)))
+            i += 1
+        else:
+            raise FormulaError(f"nieoczekiwany znak „{c}”")
+    return out
+
+
+def formula_eval(s):
+    """Value of a formula: (value in kN / m / rad, (kN, m, angle) exponents, any unit written).
+    FormulaError – an error described in words."""
+    toks = _formula_tokens(str(s))
+    if not toks:
+        raise FormulaError("pusta formuła")
+    pos, used = [0], [False]
+
+    def peek():
+        return toks[pos[0]] if pos[0] < len(toks) else (None, None)
+
+    def take(kind=None, text=None):
+        k, t = peek()
+        if k is None or (kind and k != kind) or (text and t != text):
+            if k is None:
+                raise FormulaError("niepełna formuła")
+            raise FormulaError(f"nieoczekiwany znak „{t}”")
+        pos[0] += 1
+        return t
+
+    def same(a, b, what):
+        if a[1] != b[1]:
+            raise FormulaError(f"różne jednostki – {what}: {dims_text(a[1])} i {dims_text(b[1])}")
+
+    def nodim(q, fn):
+        if q[1] != (0, 0, 0):
+            raise FormulaError(f"argument funkcji {fn} musi być bez jednostki (jest: {dims_text(q[1])})")
+        return q[0]
+
+    def expr():
+        q = term()
+        while peek() in (("op", "+"), ("op", "-")):
+            o = take()
+            r = term()
+            same(q, r, "dodawanie" if o == "+" else "odejmowanie")
+            q = (q[0] + r[0] if o == "+" else q[0] - r[0], q[1])
+        return q
+
+    def term():
+        q = unary()
+        while peek() in (("op", "*"), ("op", "/")):
+            o = take()
+            r = unary()
+            if o == "/" and r[0] == 0:
+                raise FormulaError("dzielenie przez zero")
+            q = (q[0] * r[0] if o == "*" else q[0] / r[0],
+                 tuple(a + b if o == "*" else a - b for a, b in zip(q[1], r[1])))
+        return q
+
+    def unary():
+        if peek() in (("op", "-"), ("op", "+")):
+            o = take()
+            q = unary()
+            return (-q[0], q[1]) if o == "-" else q
+        return power()
+
+    def power():
+        q = postfix()
+        if peek() == ("op", "^"):
+            take()
+            e = unary()
+            if e[1] != (0, 0, 0):
+                raise FormulaError("wykładnik potęgi musi być liczbą bez jednostki")
+            d = tuple(a * e[0] for a in q[1])
+            if any(abs(x - round(x)) > 1e-9 for x in d):
+                raise FormulaError(f"potęga {dims_text(q[1])} daje niecałkowity wykładnik jednostki")
+            try:
+                v = q[0] ** e[0]
+            except (OverflowError, ZeroDivisionError):
+                raise FormulaError("potęga poza zakresem") from None
+            if isinstance(v, complex) or not math.isfinite(v):
+                raise FormulaError("potęga poza zakresem")
+            q = (v, tuple(int(round(x)) for x in d))
+        return q
+
+    def postfix():
+        q = primary()
+        while peek()[0] == "unit":
+            f, d = formula_unit(take())
+            used[0] = True
+            q = (q[0] * f, tuple(a + b for a, b in zip(q[1], d)))
+        return q
+
+    def primary():
+        k, t = peek()
+        if k == "num":
+            take()
+            v = parse_num(t)
+            if v is None:
+                raise FormulaError(f"niepoprawna liczba „{t}”")
+            return (v, (0, 0, 0))
+        if k == "unit":
+            return (1.0, (0, 0, 0))                     # [m] alone = 1 m (postfix adds the unit)
+        if (k, t) == ("op", "("):
+            take()
+            q = expr()
+            take("op", ")")
+            return q
+        if k == "name":
+            take()
+            if t.lower() == "pi":
+                return (math.pi, (0, 0, 0))
+            fn = t.lower()
+            if fn not in FORMULA_FUNCS:
+                raise FormulaError(f"nieznana funkcja „{t}”")
+            take("op", "(")
+            args = [expr()]
+            while peek() == ("op", ";"):
+                take()
+                args.append(expr())
+            take("op", ")")
+            return call(fn, args)
+        if k is None:
+            raise FormulaError("niepełna formuła")
+        raise FormulaError(f"nieoczekiwany znak „{t}”")
+
+    def call(fn, args):
+        if fn in ("min", "max"):
+            for a in args[1:]:
+                same(args[0], a, fn)
+            return ((min if fn == "min" else max)(a[0] for a in args), args[0][1])
+        if len(args) != 1:
+            raise FormulaError(f"funkcja {fn} ma jeden argument")
+        q = args[0]
+        try:
+            if fn == "abs":
+                return (abs(q[0]), q[1])
+            if fn == "sqrt":
+                if any(x % 2 for x in q[1]):
+                    raise FormulaError(f"pierwiastek z {dims_text(q[1])} daje niecałkowity wykładnik jednostki")
+                return (math.sqrt(q[0]), tuple(x // 2 for x in q[1]))
+            if fn in ("sin", "cos", "tan"):
+                if q[1] == (0, 0, 0):
+                    a = math.radians(q[0])              # a plain number – degrees
+                elif q[1] == (0, 0, 1):
+                    a = q[0]
+                else:
+                    raise FormulaError(f"argument funkcji {fn} musi być kątem (jest: {dims_text(q[1])})")
+                return (getattr(math, fn)(a), (0, 0, 0))
+            if fn in ("asin", "acos", "atan"):
+                return (getattr(math, fn)(nodim(q, fn)), (0, 0, 1))
+            if fn == "exp":
+                return (math.exp(nodim(q, fn)), (0, 0, 0))
+            return ((math.log if fn == "ln" else math.log10)(nodim(q, fn)), (0, 0, 0))
+        except FormulaError:
+            raise
+        except (ValueError, OverflowError):
+            raise FormulaError(f"funkcja {fn} – argument poza dziedziną") from None
+
+    q = expr()
+    if pos[0] < len(toks):
+        raise FormulaError(f"nieoczekiwany znak „{toks[pos[0]][1]}”")
+    if not math.isfinite(q[0]):
+        raise FormulaError("wynik poza zakresem")
+    return q[0], q[1], used[0]
+
+
+def formula_pretty(s):
+    """A formula for the report: „0,12[m]*25[kN/m3]” → „0,12 m · 25 kN/m³” (decimal comma – the source text)."""
+    try:
+        toks = _formula_tokens(str(s))
+    except FormulaError:
+        return str(s).strip()
+    out, prev = [], None
+    for k, t in toks:
+        if k == "num":
+            out.append(t.replace(".", ","))
+        elif k == "unit":
+            u = re.sub(r"(?<=[A-Za-z])\^?(-?\d+)", lambda m_: m_.group(1).translate(_SUP), t.strip())
+            out.append(("" if u in ("°", "%") else " ") + u.replace("*", "·"))
+        elif k == "name":
+            out.append("π" if t.lower() == "pi" else t)
+        elif t in "+-*/":
+            unary_ = prev is None or prev in (("op", "("), ("op", ";")) or (prev[0] == "op" and prev[1] in "+-*/^")
+            out.append(("−" if t == "-" else t) if unary_ else {"+": " + ", "-": " − ", "*": " · ", "/": " / "}[t])
+        elif t == ";":
+            out.append("; ")
+        else:
+            out.append(t)
+        prev = (k, t)
+    return "".join(out).strip()
+
+
+def lab_value(txt, unit):
+    """The value field of an item: a number or a formula. dict(ok, val, exp, err, formula – the text was a
+    formula, units – the unit follows from the formula). Without units the result is in the item's unit."""
+    s = str(txt or "").strip()
+    exp0 = unit_exp(unit)
+    v = parse_num(s)
+    if v is not None:
+        return dict(ok=True, val=v, exp=exp0, err="", formula=False, units=False)
+    if not s:
+        return dict(ok=False, val=None, exp=exp0, err="niepoprawna wartość obciążenia", formula=False, units=False)
+    try:
+        val, d, used = formula_eval(s)
+    except FormulaError as e:
+        return dict(ok=False, val=None, exp=exp0, err=f"błąd w formule: {e}", formula=True, units=False)
+    if d == (0, 0, 0):
+        return dict(ok=True, val=val, exp=exp0, err="", formula=True, units=False)
+    if d[0] == 1 and d[2] == 0 and -3 <= d[1] <= 0:
+        return dict(ok=True, val=val, exp=-d[1], err="", formula=True, units=True)
+    return dict(ok=False, val=None, exp=exp0, formula=True, units=True,
+                err=f"wynik formuły w {dims_text(d)} – oczekiwana jednostka: kN, kN/m, kN/m² lub kN/m³")
+
+
+LAB_FORMULA_TIP = ("Liczba albo formuła, np. 0,12[m]*25[kN/m3] lub 2*(0,5+0,3).\n"
+                   "Jednostki w nawiasach kwadratowych: m, cm, mm, kN, N, kg, t, Pa, kPa, MPa, °, rad, %, "
+                   "np. [kN/m3], [kg/m] (g = 9,81 m/s²).\n"
+                   "Działania: + − * / ^ i nawiasy ( ). Funkcje: sqrt, sin, cos, tan (kąt w stopniach), "
+                   "asin, acos, atan, ln, log, exp, abs, min, max (argumenty oddzielone średnikiem); stała pi.\n"
+                   "Formuła z jednostkami sama ustala jednostkę wyniku; bez jednostek – wynik w jednostce pozycji.")
+
+
 def lab_item_calc(it):
-    """Item result: base value × defined dimensions × multiplier (optional).
+    """Item result: base value (a number or a formula) × defined dimensions × multiplier (optional).
     dict(ok, val, exp, unit, formula, err)."""
-    v = parse_num(str(it.get("wartosc", "")))
-    exp = unit_exp(it.get("jedn"))
+    lv = lab_value(it.get("wartosc", ""), it.get("jedn"))
+    exp = lv["exp"]
     if exp is None:
         return dict(ok=False, err="nieznana jednostka", val=None, exp=None, unit="", formula="")
-    if v is None:
-        return dict(ok=False, err="niepoprawna wartość obciążenia", val=None, exp=exp, unit=LAB_UNITS[exp],
-                    formula="")
-    parts, val, e = [f"{lab_fmt(v)} {LAB_UNITS[exp]}"], v, exp
+    if not lv["ok"]:
+        return dict(ok=False, err=lv["err"], val=None, exp=exp, unit=LAB_UNITS[exp], formula="")
+    v = lv["val"]
+    base = f"{lab_fmt(v)} {LAB_UNITS[exp]}"
+    if lv["formula"]:
+        f = formula_pretty(it.get("wartosc", ""))
+        base = f"({f})" + ("" if lv["units"] else f" {LAB_UNITS[exp]}")
+    parts, val, e = [base], v, exp
     for k, nm in lab_dims(exp):
         on, txt = (it.get("wym") or {}).get(k, (False, ""))
         if not on:
@@ -7517,7 +9340,9 @@ def lab_item_calc(it):
         if abs(n - 1) > 1e-12:
             parts.append(f"{lab_fmt(n, 3 if abs(n - round(n)) > 1e-9 else 0)} (mnożnik)")
             val *= n
-    expr = " · ".join(parts) if len(parts) > 1 else ""
+    if lv["formula"] and len(parts) == 1:              # the formula alone – without the brackets (and the unit:
+        parts[0] = formula_pretty(it.get("wartosc", ""))  # the result after „=” has it)
+    expr = " · ".join(parts) if len(parts) > 1 or lv["formula"] else ""
     formula = expr + (f" = {lab_fmt(val)} {LAB_UNITS[e]}" if expr else "")
     return dict(ok=True, err="", val=val, exp=e, unit=LAB_UNITS[e], formula=formula, expr=expr)
 
@@ -7762,13 +9587,16 @@ class LabRow(QFrame):
         self.val = QLineEdit(str(item.get("wartosc", "")))
         self.val.setFixedWidth(100)
         self.val.setAlignment(AL_R)
+        self.val.setToolTip(LAB_FORMULA_TIP)
         self.val.textChanged.connect(self._val)
         self.val.editingFinished.connect(lambda: self.flush_echo())
         g.addWidget(self.val, 1, 1)
         self.btn_db = None
+        self.unit_lab = None
         if item.get("z_bazy"):
             self.unit = None
-            g.addWidget(QLabel(item.get("jedn", "")), 1, 2)
+            self.unit_lab = QLabel(item.get("jedn", ""))
+            g.addWidget(self.unit_lab, 1, 2)
         else:
             self.unit = QComboBox()
             for e_, lab in LAB_MANUAL:
@@ -7837,6 +9665,7 @@ class LabRow(QFrame):
         ml.addSpacing(12)
         ml.addWidget(self.res, 1)
         g.addLayout(ml, 3, 0, 1, 6)
+        self._formula_unit()
         self._show_dims()
 
     # --- dragging by the ⠿ handle (like case cards in the main window)
@@ -7899,7 +9728,29 @@ class LabRow(QFrame):
         if self.item.get("przedzial"):
             self.item["przedzial"] = ""                # value changed by hand – no range information
             self.info.setText(" · ".join(x for x in (self.item.get("kategoria", ""), self.item.get("zrodlo", "")) if x))
+        self._formula_unit()
+        self._show_dims()
         self.win.changed()
+
+    def _formula_unit(self):
+        """A formula with units sets the unit of the item (the list shows it, the choice is locked); the field
+        grows with a long formula."""
+        t = self.val.text()
+        fm = self.val.fontMetrics()
+        self.val.setFixedWidth(max(100, min(460, fm.horizontalAdvance(t) + 24)))
+        lv = lab_value(t, self.item.get("jedn"))
+        locked = lv["ok"] and lv["units"]
+        if locked and self.item.get("jedn") != LAB_UNITS[lv["exp"]]:
+            self.item["jedn"] = LAB_UNITS[lv["exp"]]
+        if self.unit is not None:
+            e0 = unit_exp(self.item.get("jedn"))
+            self.unit.blockSignals(True)
+            self.unit.setCurrentIndex(next((i for i, (e_, _) in enumerate(LAB_MANUAL) if e_ == e0), 0))
+            self.unit.blockSignals(False)
+            self.unit.setEnabled(not locked)
+            self.unit.setToolTip("Jednostkę ustala formuła" if locked else "")
+        elif self.unit_lab is not None:
+            self.unit_lab.setText(self.item.get("jedn", ""))
 
     def _mult(self, t):
         self.item["mnoznik"] = t.strip()
@@ -7927,11 +9778,14 @@ class LabRow(QFrame):
             box.setVisible(k in ok)
 
     def add_to_db(self):
-        """Dodaj do bazy – dialog with category (suggested) and source; the item goes into its category."""
-        if parse_num(self.val.text()) is None or not self.name.text().strip():
+        """Dodaj do bazy – dialog with category (suggested) and source; the item goes into its category.
+        A formula – its value goes to the database (the database keeps numbers)."""
+        lv = lab_value(self.val.text(), self.item.get("jedn"))
+        if not lv["ok"] or not self.name.text().strip():
             QMessageBox.warning(self.win, "Dodaj do bazy", "Podaj nazwę i poprawną wartość obciążenia.")
             return None
-        d = MatAddDialog(self.win, self.item)
+        it = dict(self.item, wartosc=f"{lv['val']:.6g}".replace(".", ","), jedn=LAB_UNITS[lv["exp"]])
+        d = MatAddDialog(self.win, it)
         d.accepted.connect(lambda d=d: self._added(d.mat))
         self._add_dlg = d                                  # (tests)
         d.show()
@@ -7957,7 +9811,7 @@ class LabRow(QFrame):
         else:
             self.res.setText(html.escape(r["err"]))
             self.res.setStyleSheet("color:#b91c1c;")
-        self.val.setProperty("bad", parse_num(self.val.text()) is None)
+        self.val.setProperty("bad", not lab_value(self.val.text(), self.item.get("jedn"))["ok"])
         self.val.style().unpolish(self.val)
         self.val.style().polish(self.val)
 
@@ -10356,18 +12210,24 @@ class ProjectWindow(QWidget):
         app.about_menu(mb)
         lay.setMenuBar(mb)
         self.menu_bar = mb
-        self.empty = QLabel("Projekt nie zawiera przypadków. Wybierz z menu „Obciążenia” obciążenia normowe albo "
-                            "własne i dodaj przypadek przyciskiem „Dodaj do projektu”.")
-        self.empty.setObjectName("muted")
-        lay.addWidget(self.empty)
-        self.list_bar = QWidget()                    # Rozwiń wszystko / Zwiń wszystko
+        # Ostatnio dodane – always first, in a fixed place (also in an empty project – then the only button; no
+        # „empty project” text – user's decision); Rozwiń / Zwiń wszystko to the right of it, only with cases
+        self.list_bar = QWidget()
         bh = QHBoxLayout(self.list_bar)
         bh.setContentsMargins(0, 0, 0, 0)
         bh.setSpacing(4)
+        from PySide6.QtWidgets import QMenu
+        self.btn_recent = QPushButton("Ostatnio dodane")         # cases recently added (any project) – a window
+        self.btn_recent.setToolTip("Ostatnio dodawane przypadki (wszystkie rodzaje obciążeń) – podgląd i dodanie do "
+                                   "projektu")
+        self.btn_recent.clicked.connect(lambda checked=False: (app.echo("RECENTWINDOW"), app.recent_window()))
+        bh.addWidget(self.btn_recent)
+        self._exp_btns = []
         for txt, on in (("Rozwiń wszystko", True), ("Zwiń wszystko", False)):
             b = QPushButton(txt)
             b.clicked.connect(lambda checked=False, on=on: self.set_all_open(on))
             bh.addWidget(b)
+            self._exp_btns.append(b)
         bh.addStretch(1)
         self.btn_del_sel = QPushButton("Usuń zaznaczone")        # visible while any case is selected
         self.btn_del_sel.setToolTip("Usuwa zaznaczone przypadki")
@@ -10376,7 +12236,8 @@ class ProjectWindow(QWidget):
         bh.addWidget(self.btn_del_sel)
         self.sel = set()                             # selected cases (ids; only visible ones)
         self._anchor = None                          # the case a Shift+click range starts from
-        self.list_bar.setVisible(False)
+        for b in self._exp_btns:
+            b.setVisible(False)
         lay.addWidget(self.list_bar)
         sc = QScrollArea()
         sc.setWidgetResizable(True)
@@ -10505,8 +12366,8 @@ class ProjectWindow(QWidget):
                 if "group" in n:
                     add(n["items"], depth + 1, visible and opened, n, off or bool(n.get("noprint")))
         add(proj["tree"], 0, True, None)
-        self.empty.setVisible(not self.cards)
-        self.list_bar.setVisible(bool(self.cards))
+        for b in self._exp_btns:
+            b.setVisible(bool(self.cards))
         self.list.update()                           # watermark of an empty project
         self._apply_sel()
 
@@ -10787,7 +12648,8 @@ class ProjectWindow(QWidget):
     def update_buttons(self):
         """Check marks of the Obciążenia menu (open windows) and the labels of the cards (edited case)."""
         app = self.app
-        self.list_bar.setVisible(bool(self.cards))
+        for b in self._exp_btns:
+            b.setVisible(bool(self.cards))
         self.act_codes.setChecked(app.win.isVisible())
         lw = getattr(app, "lab", None)
         self.act_lab.setChecked(lw is not None and lw.isVisible())
@@ -12400,7 +14262,7 @@ def form_fields(f):
             fd = FIELD_DEFS.get(key)
             lab = getattr(getattr(es[0], "_label", None), "_base", None) or (fd[1] if fd else key)
             out.append(num(key, lab, fd[2] if fd else ""))
-    for lb, e, un in f.s_slots + f.w_slots:
+    for lb, e, un in f.s_slots + f.w_slots + f.t_slots:
         if e._key and e._key not in seen and e.isVisibleTo(root):
             seen.add(e._key)
             out.append(num(e._key, lb.text(), un.text()))
@@ -12958,6 +14820,44 @@ def _c_move(app, a):
     return "Przeniesiono."
 
 
+@command("RECENT", "", "Lista ostatnio dodanych przypadków (wszystkie projekty i rodzaje obciążeń); RECENTADD dodaje "
+         "wybrany do projektu.", group="Lista przypadków")
+def _c_recent(app, a):
+    lst = recent_cases()
+    if not lst:
+        return "Brak ostatnio dodanych przypadków."
+    return [f"{i}. {recent_label(r)}" for i, r in enumerate(lst, 1)]
+
+
+@command("RECENTWINDOW", "", "Okno Ostatnio dodane: karty ostatnio dodanych przypadków (podgląd 3D, raport) z "
+         "przyciskiem Dodaj; ponownie – zamyka okno.", group="Lista przypadków")
+def _c_recent_window(app, a):
+    w = app.host.recent_window(toggle=True)
+    return "Okno Ostatnio dodane – otwarte." if w is not None else "Okno Ostatnio dodane – zamknięte."
+
+
+@command("RECENTADD", "numer…", "Dodaje do projektu przypadki z listy ostatnio dodanych (numery jak w RECENT); "
+         "lokalizacja i strefy – projektu.", group="Lista przypadków")
+def _c_recent_add(app, a):
+    _need(a, 1, "RECENTADD numer…")
+    lst, out = recent_cases(), []
+    for t in a:
+        if not t.isdigit() or not 1 <= int(t) <= len(lst):
+            raise CmdError(f"Na liście ostatnio dodanych nie ma pozycji „{t}” (RECENT wypisze listę).")
+    items = [lst[int(t) - 1] for t in a]
+    for r in items:                                  # the list changes while adding – find the entry again
+        i = next((k for k, x in enumerate(recent_cases()) if x == r), None)
+        app.cmd.depth += 1
+        try:
+            c = app.add_recent(i) if i is not None else None
+        finally:
+            app.cmd.depth -= 1
+        if c is None:
+            raise CmdError(f"Nie można dodać „{r.get('name', '')}”.")
+        out.append(c["name"])
+    return "Dodano: " + "; ".join(out)
+
+
 @command("RESULTS", "[numer]", "Raport tekstowy: przypadku z projektu albo (bez numeru) bieżącego formularza.",
          group="Lista przypadków")
 def _c_results(app, a):
@@ -13088,17 +14988,21 @@ def _c_lab_list(app, a):
 
 
 @command("LABADD", "nazwa [wartość [jednostka [mnożnik]]]",
-         "Dodaje obciążenie wpisane ręcznie; jednostka: kN, kN/m, kN/m², kN/m³ (domyślnie kN/m²). "
-         "Nazwę ze spacjami weź w cudzysłów.", group="Obciążenia własne")
+         "Dodaje obciążenie wpisane ręcznie; jednostka: kN, kN/m, kN/m², kN/m³ (domyślnie kN/m²). Wartość – liczba "
+         "albo formuła, np. \"0,12[m]*25[kN/m3]\" (formuła z jednostkami sama ustala jednostkę). "
+         "Nazwę i formułę ze spacjami weź w cudzysłów.", group="Obciążenia własne")
 def _c_lab_add(app, a):
     _need(a, 1, "LABADD nazwa [wartość [jednostka [mnożnik]]]")
     lw = _lab(app)
     val = a[1] if len(a) > 1 else ""
-    if val and parse_num(val) is None:
-        raise CmdError(f"„{val}” nie jest liczbą.")
     e = unit_exp(a[2]) if len(a) > 2 else 2
     if e is None:
         raise CmdError("Jednostka: kN, kN/m, kN/m2, kN/m3.")
+    if val:
+        lv = lab_value(val, LAB_UNITS[e])
+        if not lv["ok"]:
+            raise CmdError(f"„{val}” nie jest liczbą." if not lv["formula"] else f"„{val}”: {lv['err']}.")
+        e = lv["exp"]
     it = dict(nazwa=a[0], wartosc=val, jedn=LAB_UNITS[e], z_bazy=False, wym={})
     if len(a) > 3:
         if parse_num(a[3]) is None:
@@ -13152,8 +15056,8 @@ LAB_FIELDS = {"NAME": "nazwa", "VALUE": "wartosc", "UNIT": "jedn", "MULTIPLIER":
 
 
 @command("LABFIELD", "numer NAME|VALUE|UNIT|MULTIPLIER|THICKNESS|WIDTH|LENGTH wartość",
-         "Zmienia pole pozycji obciążeń własnych; wymiar (grubość, szerokość, długość) ustawia wartość i włącza go, "
-         "wartość „-” wyłącza.", group="Obciążenia własne")
+         "Zmienia pole pozycji obciążeń własnych; VALUE – liczba albo formuła, np. 0,12[m]*25[kN/m3]; wymiar "
+         "(grubość, szerokość, długość) ustawia wartość i włącza go, wartość „-” wyłącza.", group="Obciążenia własne")
 def _c_lab_field(app, a):
     _need(a, 3, "LABFIELD numer pole wartość")
     lw = _lab(app)
@@ -13164,8 +15068,9 @@ def _c_lab_field(app, a):
     if fld == "NAME":
         row.name.setText(val)
     elif fld == "VALUE":
-        if parse_num(val) is None:
-            raise CmdError(f"„{val}” nie jest liczbą.")
+        lv = lab_value(val, row.item.get("jedn"))
+        if not lv["ok"]:
+            raise CmdError(f"„{val}” nie jest liczbą." if not lv["formula"] else f"„{val}”: {lv['err']}.")
         row.val.setText(val)
     elif fld == "MULTIPLIER":
         if val != "-" and parse_num(val) is None:
@@ -13302,13 +15207,65 @@ _ask_params("LABTODB", ("Numer pozycji:", True, "one"), ("Kategoria (Enter – d
             ("Źródło (Enter – domyślne):", False, "one"))
 
 
+# Ostatnio dodane: cases recently added to the main window (any project, all load types) – settings.json
+RECENT_MAX = 12
+RECENT_MODES = {"śnieg": "Śnieg", "wiatr": "Wiatr", "użytkowe": "Użytkowe", "własne": "Własne",
+                "konstrukcje": "Wiatr"}
+
+
+def recent_cases():
+    """The list of recently added cases (newest first): dict(name, mode, state, extra, time)."""
+    out = settings_get("recent_cases", [])
+    return [r for r in out if isinstance(r, dict) and isinstance(r.get("state"), dict)] if isinstance(out, list) else []
+
+
+def recent_remember(case):
+    """A case added to the project goes to the top of the list (the same data – moved, not repeated)."""
+    from datetime import datetime
+    try:
+        ex = {k: v for k, v in (case.get("extra") or {}).items() if k not in ("noprint", "viewports")}
+        ent = json.loads(json.dumps(dict(name=case.get("name", ""), mode=ex.get("mode", "śnieg"), state=case["state"],
+                                         extra=ex, time=datetime.now().strftime("%Y-%m-%d %H:%M"))))
+    except (TypeError, ValueError, KeyError):
+        return
+    key = json.dumps([ent["mode"], ent["state"], ent["extra"].get("snow_case")], sort_keys=True)
+    rest = [r for r in recent_cases()
+            if json.dumps([r.get("mode"), r.get("state"), (r.get("extra") or {}).get("snow_case")], sort_keys=True) != key]
+    settings_set("recent_cases", [ent] + rest[:RECENT_MAX - 1])
+
+
+def recent_label(r):
+    """Text of a list item: name · load type (shape / structure) · date."""
+    op = (r.get("state") or {}).get("opcje", {})
+    md = r.get("mode", "śnieg")
+    what = {"śnieg": op.get("snow_type"), "wiatr": op.get("wind_type"), "konstrukcje": op.get("w_object") or op.get("st_type")}.get(md)
+    return " · ".join(x for x in (r.get("name", ""), tr(RECENT_MODES.get(md, md)), tr(what) if what else "",
+                                  r.get("time", "")) if x)
+
+
 class App:
     NSLOT = 6
     STATE_VARS = ("snow_type", "wind_type", "snow_zone", "snow_ce", "ct_mode", "guard", "s_diff", "s_obst", "s_exc",
                   "sx_fobst", "sx_canopy", "sx_annex", "sx_epar", "sx_gpar", "sx_pobst", "sx_gap",
                   "w_mtype", "wind_zone", "terrain", "theta", "variant", "cpi_mode", "cdir_sec", "dom_zone", "w_edge",
-                  "w_oro", "w_cfr", "w_struct", "w_skin")
-    OPT_DEFAULTS = dict(w_oro=OROGRAPHY[0], w_cfr=CFR_TYPES[1], w_struct=CSCD_STRUCT[0], w_skin=SKIN_TYPES[0])
+                  "w_oro", "w_cfr", "w_struct", "w_skin", "w_na16", "w_cat2", "w_a4", "w_a5",
+                  "st_type", "st_shelter", "st_sides", "st_psurf", "st_rough", "st_row", "st_near", "st_lat",
+                  "st_flag", "st_orient", "st_end", "st_cscd", "st_delta", "st_var", "w_object")
+    OPT_DEFAULTS = dict(w_oro=OROGRAPHY[0], w_cfr=CFR_TYPES[1], w_struct=CSCD_STRUCT[0], w_skin=SKIN_TYPES[0],
+                        w_na16=False, w_cat2="I", w_a4=False, w_a5=False,       # Annex A.2 (NA.16), A.4, A.5
+                        st_type=list(STRUCT_TYPES)[0], st_shelter=False, st_sides=POLY_SIDES[2],   # structures
+                        st_psurf=POLY_SURF[1], st_rough=ROUGH_NAMES[6], st_row=False, st_near=False,
+                        st_lat=LATTICE_NAMES[0], st_flag=FLAG_TYPES[0], st_orient=ORIENT_TYPES[0],
+                        st_end=END_TYPES[0], st_cscd=CSCD_MODES[0], st_delta="stalowe wieże kratowe – spawane",
+                        st_var=CYL_VARIANTS[0],
+                        w_object="Dwuspadowy")     # Budowla: a building shape or a structure
+    # allowed values of the options above (None – a switch); a value from an older or damaged file – the default
+    OPT_CHOICES = dict(w_oro=OROGRAPHY, w_cfr=CFR_TYPES, w_struct=CSCD_STRUCT, w_skin=SKIN_TYPES, w_na16=None,
+                       w_cat2=tuple(TERRAIN), w_a4=None, w_a5=None, st_type=tuple(STRUCT_TYPES), st_shelter=None,
+                       st_sides=POLY_SIDES, st_psurf=POLY_SURF, st_rough=ROUGH_NAMES + (ROUGH_CABLE,), st_row=None,
+                       st_near=None, st_lat=LATTICE_NAMES, st_flag=FLAG_TYPES, st_orient=ORIENT_TYPES,
+                       st_end=END_TYPES, st_cscd=CSCD_MODES, st_delta=DELTA_NAMES, st_var=CYL_VARIANTS,
+                       w_object=tuple(WIND_TYPES) + tuple(STRUCT_TYPES))
 
     @staticmethod
     def _shared(name):
@@ -13349,6 +15306,8 @@ class App:
             self.cmd._keys = CommandKeys(self.cmd)
             qapp.installEventFilter(self.cmd._keys)
         self.sgeo = self.wgeo = self.snow = self.wind = self.env = None
+        self.struct, self._t_ok = None, False          # wind: structures other than buildings (calc_struct)
+        self.stm = None                                # the 3D model of the last valid structure (scene_struct)
         self.win3d = self.cv = None
         self._3d_geom = None
         self._last_theta = None
@@ -13391,6 +15350,7 @@ class App:
         self.dims3d = Var(True)
         self.bdims3d = Var(True)
         self.odims3d = Var(True)                   # dimensions of the orography (separate from the others)
+        self.loads3d = Var(True)                   # the loads (layers, values) – off: the bare building
         if self.host is self:
             self.project = {"cases": [], "next": 1, "globals": None, "name": "", "tree": []}   # cases (newest first)
             self.pw = None                         # main window (KAYENN Manager)
@@ -13411,10 +15371,16 @@ class App:
                     self.snow_ce, self.ct_mode, self.s_obst, self.s_exc, self.sx_fobst, self.sx_canopy,
                     self.sx_annex, self.sx_epar, self.sx_gpar, self.sx_pobst, self.sx_gap, self.w_mtype, self.wind_zone, self.terrain,
                     self.theta, self.variant, self.cpi_mode, self.cdir_sec, self.dom_zone, self.w_edge,
-                    self.w_oro, self.w_cfr, self.w_struct, self.w_skin, self.loc):
+                    self.loc) + tuple(getattr(self, n) for n in self.OPT_DEFAULTS):
             var.trace(self._opt_changed)
         self.snow_case.trace(self._case_changed)
-        for var in (self.labels3d, self.arrows3d, self.dims3d, self.bdims3d, self.odims3d):
+        # Budowla (wind tab): one list of building shapes and structures – w_object; wind_type keeps the
+        # last building shape, st_type the last structure (setting either of them chooses it)
+        self.w_object.trace(lambda: (self.wind_type if self.w_object.get() in WIND_TYPES else self.st_type).set(
+            self.w_object.get()) if self.w_object.get() in WIND_TYPES or self.w_object.get() in STRUCT_TYPES else None)
+        self.wind_type.trace(lambda: self.w_object.set(self.wind_type.get()))
+        self.st_type.trace(lambda: self.w_object.set(self.st_type.get()))
+        for var in (self.labels3d, self.arrows3d, self.dims3d, self.bdims3d, self.odims3d, self.loads3d):
             var.trace(self.draw3d)
         if self.host is self:
             self.project_path = None
@@ -13525,7 +15491,7 @@ class App:
 
     def _sync_entries(self, key):
         val = self.v[key].get()
-        ws = list(self.entries.get(key, [])) + [e for _, e, _ in self.s_slots + self.w_slots if e._key == key]
+        ws = list(self.entries.get(key, [])) + [e for _, e, _ in self.s_slots + self.w_slots + self.t_slots if e._key == key]
         for e in ws:
             if e.text() != val:
                 e.setText(val)
@@ -13587,6 +15553,35 @@ class App:
         return e
 
     # ------------------------------------------------------- widgets ---
+    @staticmethod
+    def _flabel(text):
+        """The label of a form field – always one line (no wrapping – user's rule)."""
+        return QLabel(text)
+
+    def _fix_label_col(self, c, extra=()):
+        """A card whose fields change (Budowla of the wind tab): one field per row and the label column as wide as
+        the longest label it can ever show (the labels in the card now + `extra`, in the current language; again
+        after a language change) – switching a shape / structure, or turning the wheel over a drop-down list,
+        never moves the form."""
+        g = c.grid
+        texts = set(extra)
+        for i in range(g.count()):
+            w_ = g.itemAt(i).widget()
+            r_, col_, _, _ = g.getItemPosition(i)
+            if isinstance(w_, QLabel) and col_ == 0 and w_.objectName() != "cardTitle":
+                texts.add(getattr(w_, "_base", None) or w_.text())
+        texts.discard("")
+        for cb in c.findChildren(QComboBox):          # long lists narrow down to the window (no wider form)
+            if cb.sizeAdjustPolicy() != QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon:
+                cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+                cb.setMinimumContentsLength(min(cb.minimumContentsLength() or 22, 22))
+
+        def apply():
+            fm = QFontMetrics(QLabel().font())
+            g.setColumnMinimumWidth(0, max(fm.horizontalAdvance(tr(t)) for t in texts) + 12)
+        apply()
+        LANG_HOOKS.append(apply)
+
     def card(self, layout, title=None, stretch=0):
         f = QFrame()
         f.setObjectName("card")
@@ -13612,7 +15607,7 @@ class App:
 
     def num(self, c, r, col, key, label, unit):
         g = c.grid
-        lb = QLabel(label)
+        lb = self._flabel(label)
         lb._base = label
         g.addWidget(lb, r, col * 3)
         e = self._mk_entry()
@@ -13628,7 +15623,7 @@ class App:
 
     def combo(self, c, r, col, var, label, values, width=12, span=1):
         g = c.grid
-        lb = QLabel(label)
+        lb = self._flabel(label)
         lb._base = label
         g.addWidget(lb, r, col * 3)
         cb = self._mk_combo(var, values, None if span > 1 else width)
@@ -13665,11 +15660,12 @@ class App:
         c.grid.addWidget(lb, r, 0, 1, 6)
         return lb
 
-    def slots(self, c, first_row, n=None):
+    def slots(self, c, first_row, n=None, cols=2):
+        """Fields whose meaning changes with the shape (geometry, structure); cols = 1 – one field per row."""
         sl = []
         for i in range(n or self.NSLOT):
-            r, col = first_row + i // 2, i % 2
-            lb = QLabel("")
+            r, col = first_row + i // cols, i % cols
+            lb = self._flabel("")
             e = self._mk_entry()
             e._key, e._shown = None, False
             e.textEdited.connect(lambda t, e=e: (self.v[e._key].set(t), self._user_field(
@@ -13701,6 +15697,8 @@ class App:
         sc = QScrollArea()
         sc.setWidgetResizable(True)
         sc.setFrameShape(QFrame.Shape.NoFrame)
+        # the scroll bar always there – its appearing / disappearing would change the width of the form (it moved)
+        sc.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         sc.setWidget(page)
         self.nb.addTab(sc, title)
         return lay
@@ -13832,10 +15830,13 @@ class App:
         self.num(c, 7, 1, "ox", "Odległość od grzbietu x", "m")
         for e_ in self.entries["ox"]:
             e_.setToolTip("x < 0 – na stoku nawietrznym, x > 0 – za grzbietem")
+        self._site_rows(c, 8)
 
-        c = self.card(lay, "Budynek")
-        self.combo(c, 1, 0, self.wind_type, "Kształt", list(WIND_TYPES), span=2)
-        self.w_slots = self.slots(c, 2)
+        c = self.card(lay, "Budowla")
+        cb = self.combo(c, 1, 0, self.w_object, "Rodzaj", list(WIND_TYPES) + list(STRUCT_TYPES), span=2)
+        cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        cb.setMinimumContentsLength(22)
+        self.w_slots = self.slots(c, 2, cols=1)          # one field per row (rows 2–7)
         ex = QWidget()
         h = QHBoxLayout(ex)
         h.setContentsMargins(0, 4, 0, 0)
@@ -13845,7 +15846,7 @@ class App:
         h.addWidget(self.w_mt_lb)
         h.addWidget(self.w_mt_cb)
         h.addStretch(1)
-        c.grid.addWidget(ex, 6, 0, 1, 6)
+        c.grid.addWidget(ex, 8, 0, 1, 6)
         ex2 = QWidget()                                   # flat roof: edge type (Table 7.2)
         h = QHBoxLayout(ex2)
         h.setContentsMargins(0, 4, 0, 0)
@@ -13853,28 +15854,37 @@ class App:
         h.addWidget(QLabel("Krawędzie dachu"))
         h.addWidget(self._mk_combo(self.w_edge, EDGE_TYPES, None))
         h.addStretch(1)
-        c.grid.addWidget(ex2, 7, 0, 1, 6)
+        c.grid.addWidget(ex2, 9, 0, 1, 6)
+        self._struct_rows(c, 10)                          # structures other than buildings (7.4, 7.6–7.12)
+        c_bud = c
 
-        c = self.card(lay, "Parametry")
+        c = self.card(lay, "Parametry")                   # one field per row (user's rule)
         self.combo(c, 1, 0, self.cdir_sec, "Sektor kierunku wiatru (c_dir)",
                    (CDIR_ANY,) + CDIR_SECTORS, span=2)
         self.num(c, 2, 0, "cseason", "c_season", "–")
-        self.num(c, 2, 1, "Aload", "Pole obciążone A", "m²")
-        self.theta_boxes.append(self.combo(c, 3, 0, self.theta, "Kierunek wiatru θ", ["0°", "90°"], width=6))
-        self.num(c, 3, 1, "phi", "Blokowanie wiaty φ", "0…1")
-        self.variant_boxes.append(self.combo(c, 4, 0, self.variant, "Wariant", [], span=2))
-        self.combo(c, 5, 0, self.cpi_mode, "Ciśnienie wewnętrzne cpi", CPI_MODES, span=2)
-        self.num(c, 6, 0, "mu", "Wskaźnik otworów μ", "0,33…1")
-        self.num(c, 6, 1, "ndom", "Stosunek otworów n", "≥ 2")
-        self.dom_cb = self.combo(c, 7, 0, self.dom_zone, "Ściana dominująca", DOM_ZONES, span=2)
-        self.combo(c, 8, 0, self.w_cfr, "Powierzchnia – tarcie", CFR_TYPES, span=2)
-        self.combo(c, 9, 0, self.w_struct, "Konstrukcja – cₛcd", CSCD_STRUCT, span=2)
-        self.combo(c, 10, 0, self.w_skin, "Przegroda", SKIN_TYPES, span=2)
+        self.num(c, 3, 0, "Aload", "Pole obciążone A", "m²")
+        self.theta_boxes.append(self.combo(c, 4, 0, self.theta, "Kierunek wiatru θ", ["0°", "90°"], width=6))
+        self.num(c, 5, 0, "phi", "Blokowanie wiaty φ", "0…1")
+        self.variant_boxes.append(self.combo(c, 6, 0, self.variant, "Wariant", [], span=2))
+        self.combo(c, 7, 0, self.cpi_mode, "Ciśnienie wewnętrzne cpi", CPI_MODES, span=2)
+        self.num(c, 8, 0, "mu", "Wskaźnik otworów μ", "0,33…1")
+        self.num(c, 9, 0, "ndom", "Stosunek otworów n", "≥ 2")
+        self.dom_cb = self.combo(c, 10, 0, self.dom_zone, "Ściana dominująca", DOM_ZONES, span=2)
+        self.combo(c, 11, 0, self.w_cfr, "Powierzchnia – tarcie", CFR_TYPES, span=2)
+        self.combo(c, 12, 0, self.w_struct, "Konstrukcja – cₛcd", CSCD_STRUCT, span=2)
+        self.combo(c, 13, 0, self.w_skin, "Przegroda", SKIN_TYPES, span=2)
+        self._bld_params = [c]                            # a building only (a structure: c_dir, c_season in its card)
+        # the same label column in Budowla and Parametry – the fields of both cards in one line
+        lbl_all = [f[1] for t in (WIND_TYPES, STRUCT_TYPES) for _, fl in t.values() for f in fl
+                   if not isinstance(f, str)] + [STRUCT_N1[1], "Kąt α₁ (połać 1)", "Rodzaj konstrukcji – tłumienie δs (Tabl. F.2)"]
+        self._fix_label_col(c, lbl_all)
+        self._fix_label_col(c_bud, lbl_all + ["Ciśnienie wewnętrzne cpi", "Sektor kierunku wiatru (c_dir)"])
 
         c = self.card(lay, "Wyniki", stretch=1)
         self.wind_text, self.wind_tree = self._results(
             c, ("Pole", "Pow. [m²]", "ze [m]", "cpe", "we [kN/m²]", "netto min", "netto max"),
             (66, 64, 54, 56, 76, 76, 76), 0, (0,))
+        self.struct_text = self.wind_text                 # a structure – its report in the same field
         self.nb.currentChanged.connect(self._tab_changed)
         self.nb.setCurrentIndex(TAB_SNOW)                 # at start – snow (3D model available right away)
 
@@ -13882,6 +15892,184 @@ class App:
                    self.w_edge_ex):
             w_.setVisible(False)
         self._s_layout = self._w_layout = None
+
+    def _site_rows(self, c, r):
+        """Teren card rows of the wind tab (buildings and structures): a smoother terrain category upwind
+        (NA.16), a building more than twice as high nearby (Annex A.4), displacement height (Annex A.5). The fields of
+        an option are shown only while it is switched on."""
+        g = c.grid
+        rows = getattr(self, "_site_w", None)
+        if rows is None:
+            rows = self._site_w = {"na16": [], "a4": [], "a5": []}
+
+        def grab(rr, cols):
+            out = []
+            for col in cols:
+                for k in range(3):
+                    it_ = g.itemAtPosition(rr, col * 3 + k)
+                    if it_ is not None and it_.widget() is not None:
+                        out.append(it_.widget())
+            return out
+        g.addWidget(self._mk_check("Teren niższej kategorii od strony nawietrznej (NA.16)", self.w_na16), r, 0, 1, 6)
+        self.combo(c, r + 1, 0, self.w_cat2, "Kategoria tego terenu", list(TERRAIN), width=4)
+        self.num(c, r + 1, 1, "w_x16", "Odległość do granicy x", "m")
+        rows["na16"] += grab(r + 1, (0, 1))
+        g.addWidget(self._mk_check("Budynek ponad dwa razy wyższy w sąsiedztwie (Załącznik A.4)", self.w_a4),
+                    r + 2, 0, 1, 6)
+        self.num(c, r + 3, 0, "w_hh", "Wysokość budynku h_high", "m")
+        self.num(c, r + 3, 1, "w_dl", "Większy wymiar rzutu d_large", "m")
+        self.num(c, r + 4, 0, "w_xa4", "Odległość od budynku x", "m")
+        rows["a4"] += grab(r + 3, (0, 1)) + grab(r + 4, (0,))
+        g.addWidget(self._mk_check("Wysokość przemieszczenia h_dis – teren kategorii IV (Załącznik A.5)", self.w_a5),
+                    r + 5, 0, 1, 6)
+        self.num(c, r + 6, 0, "w_have", "Średnia wysokość przeszkód h_ave", "m")
+        self.num(c, r + 6, 1, "w_xa5", "Odległość od przeszkód x", "m")
+        rows["a5"] += grab(r + 6, (0, 1))
+        for e_ in self.entries["w_x16"]:
+            e_.setToolTip("Odległość od budowli do granicy terenu niższej kategorii, mierzona pod wiatr; "
+                          "przy x < 30·h przyjmowana jest ta kategoria (NA.16)")
+        for e_ in self.entries["w_have"]:
+            e_.setToolTip("Przy braku dokładniejszych danych h_ave = 15 m (A.5)")
+        return r + 7
+
+    def _struct_rows(self, c, r0):
+        """Budowla card: the options and fields of a structure other than a building (7.4, 7.6–7.12) –
+        shown only when such a structure is chosen; report only, no 3D model."""
+        narrow = []                                      # long items (Table F.2, lattices) – do not widen the window
+        g = c.grid
+        self.t_opts = {}
+        for r, (key, var, label, values) in enumerate((
+                ("variant", self.st_var, "Wariant", CYL_VARIANTS),
+                ("sides", self.st_sides, "Liczba boków", POLY_SIDES),
+                ("psurf", self.st_psurf, "Powierzchnia i krawędzie", POLY_SURF),
+                ("rough", self.st_rough, "Powierzchnia (chropowatość k)", ROUGH_NAMES + (ROUGH_CABLE,)),
+                ("lat", self.st_lat, "Rodzaj kratownicy", LATTICE_NAMES),
+                ("flag", self.st_flag, "Rodzaj flagi", FLAG_TYPES),
+                ("orient", self.st_orient, "Położenie elementu", ORIENT_TYPES),
+                ("end", self.st_end, "Wpływ swobodnego końca ψλ", END_TYPES),
+                ("cscd", self.st_cscd, "Współczynnik konstrukcyjny cₛcd", CSCD_MODES),
+                ("delta", self.st_delta, "Rodzaj konstrukcji – tłumienie δs (Tabl. F.2)", DELTA_NAMES)), start=r0):
+            cb = self.combo(c, r, 0, var, label, values, span=2)
+            self.t_opts[key] = (cb._label, cb)
+            narrow.append(cb)
+        for cb in narrow:
+            cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            cb.setMinimumContentsLength(22)
+        for r, (key, var, label) in enumerate((
+                ("shelter", self.st_shelter, "Ściana osłonięta od strony nawietrznej inną ścianą (7.4.2)"),
+                ("row", self.st_row, "Walce pionowe ustawione w rzędzie (7.9.3)"),
+                ("near", self.st_near, "Walec w pobliżu płaskiej powierzchni (7.9.2(6))")), start=r0 + 10):
+            ch = self._mk_check(label, var)
+            g.addWidget(ch, r, 0, 1, 6)
+            self.t_opts[key] = (ch,)
+        self.t_slots = self.slots(c, r0 + 13, n=8, cols=1)
+        cb = self.combo(c, r0 + 21, 0, self.cdir_sec, "Sektor kierunku wiatru (c_dir)", (CDIR_ANY,) + CDIR_SECTORS,
+                        span=2)                           # the same variables as in Parametry of a building
+        e_ = self.num(c, r0 + 22, 0, "cseason", "c_season", "–")
+        self.t_opts["climate"] = (cb._label, cb, e_._label, e_, g.itemAtPosition(r0 + 22, 2).widget())
+        for ws in self.t_opts.values():
+            for w_ in ws:
+                w_.setVisible(False)
+
+    def _site_opts(self):
+        """NA.16, A.4, A.5 – the options of the Teren card (read with checking; fields shown only when on)."""
+        on = dict(na16=bool(self.w_na16.get()), a4=bool(self.w_a4.get()), a5=bool(self.w_a5.get()))
+        for k, ws in (getattr(self, "_site_w", None) or {}).items():
+            for w_ in ws:
+                if w_.isHidden() == on[k]:
+                    w_.setVisible(on[k])
+        na16 = (dict(cat2=self.w_cat2.get(), x=self._read_simple("w_x16", 0, 1e6, False, on["na16"]))
+                if on["na16"] else None)
+        a4 = (dict(hh=self._read_simple("w_hh", 0, 1000, True, on["a4"]),
+                   dl=self._read_simple("w_dl", 0, 5000, True, on["a4"]),
+                   x=self._read_simple("w_xa4", 0, 1e5, False, on["a4"])) if on["a4"] else None)
+        a5 = (dict(have=self._read_simple("w_have", 0, 500, True, on["a5"]),
+                   x=self._read_simple("w_xa5", 0, 1e5, False, on["a5"])) if on["a5"] else None)
+        return dict(na16=na16, a4=a4, a5=a5)
+
+    def _struct_opts(self):
+        """The options of a structure (wind tab) as numbers / names for calc_struct."""
+        kind = STRUCT_TYPES[self.st_type.get()][0] if self.st_type.get() in STRUCT_TYPES else "wall"
+        sides = [5, 6, 8, 10, 12, 16][POLY_SIDES.index(self.st_sides.get())] if self.st_sides.get() in POLY_SIDES else 8
+        lat = next((k for n, k, _ in LATTICE_TYPES if n == self.st_lat.get()), "plane")
+        o = dict(shelter=bool(self.st_shelter.get()), sides=sides,
+                 psurf=POLY_SURF.index(self.st_psurf.get()) if self.st_psurf.get() in POLY_SURF else 1,
+                 rough_name=self.st_rough.get(), row=bool(self.st_row.get()), near=bool(self.st_near.get()),
+                 lat=self.st_lat.get(), lat_kind=lat,
+                 flag=FLAG_TYPES.index(self.st_flag.get()) if self.st_flag.get() in FLAG_TYPES else 0,
+                 orient=ORIENT_TYPES.index(self.st_orient.get()) if self.st_orient.get() in ORIENT_TYPES else 0,
+                 end=END_TYPES.index(self.st_end.get()) if self.st_end.get() in END_TYPES else 0,
+                 cscd=(CSCD_MODES.index(self.st_cscd.get()) if self.st_cscd.get() in CSCD_MODES else 0)
+                 if kind == "cyl" else 0, delta=self.st_delta.get(),
+                 var=CYL_VARIANTS.index(self.st_var.get()) if self.st_var.get() in CYL_VARIANTS else 0)
+        return kind, o
+
+    def _struct_read(self):
+        """Shows the options and fields of the chosen structure and reads them (invalid – marked red). A building
+        chosen – everything of a structure hidden, None."""
+        kind, o = self._struct_opts()
+        if self.w_object.get() not in STRUCT_TYPES:
+            for ws in self.t_opts.values():
+                for w_ in ws:
+                    if not w_.isHidden():
+                        w_.setVisible(False)
+            self.fill_slots(self.t_slots, [], False)
+            return None
+        show = dict(variant=kind == "cyl" and o["rough_name"] != ROUGH_CABLE, sides=kind == "poly", psurf=kind == "poly" and o["sides"] in (12, 16),
+                    rough=kind in ("cyl", "sphere") or (kind == "poly" and o["sides"] == 16),
+                    lat=kind == "lattice", flag=kind == "flag", orient=kind in STRUCT_LINE, end=kind in STRUCT_LINE,
+                    cscd=kind == "cyl", delta=kind in STRUCT_FORCE and o["cscd"] == 0,
+                    shelter=kind == "wall", row=kind == "cyl", near=kind == "cyl", climate=True)
+        for key, ws in self.t_opts.items():
+            for w_ in ws:
+                if w_.isHidden() == show[key]:
+                    w_.setVisible(show[key])
+        rough = self.t_opts["rough"][1]
+        want = ROUGH_NAMES + ((ROUGH_CABLE,) if kind == "cyl" else ())
+        if tuple(rough._items) != want:
+            self._set_items(rough, want)
+            if self.st_rough.get() not in want:
+                self.st_rough._v = self.OPT_DEFAULTS["st_rough"]
+                self._sync_combo(rough)
+        fields = struct_fields(kind, o)
+        act = self.fill_slots(self.t_slots, fields, False)
+        p = self._read_geo(self.t_slots, act)
+        return kind, o, p
+
+    @staticmethod
+    def _struct_height(kind, p):
+        """Height h of the structure for NA.16 (30·h), A.4 (h_low) and A.5 (0,6·h)."""
+        return {"wall": p.get("h", 0.0), "sign": p.get("zg", 0.0) + p.get("h", 0.0),
+                "sphere": p.get("zg", 0.0) + p.get("b", 0.0)}.get(kind, p.get("ze", 0.0))
+
+    def show_struct(self):
+        """Report of a structure other than a building (fill_text items) – the site and the structure."""
+        r, site = self.struct, self.t_site
+        P4 = "PN-EN 1991-1-4"
+        it = [("h", "Prędkość i ciśnienie wiatru")]
+        it.append(("v", f"vb,0 = {f2(site['vb0'])} m/s, qb,0 = {f2(site['qb0'], 3)} kN/m²",
+                   f"strefa {self.t_wp['zone']}, A = {f2(self.t_A, 0)} m n.p.m. (ρ = 1,25 kg/m³)",
+                   f"{P4}, 4.2(1)P, 4.5(1); Załącznik krajowy, Tabl. NA.1"))
+        sec = self.t_wp["cdir_sec"]
+        it.append(("v", f"c_dir = {f2(self.t_wp['cdir'], 2)}, c_season = {f2(self.t_wp['cseason'], 2)}, "
+                        f"vb = {f2(site['vb'])} m/s",
+                   "współczynniki kierunkowy (" + ("sektor " + sec.split()[-1] if sec in CDIR_SECTORS else
+                                                   "bez rozróżniania kierunków") + ") i sezonowy, bazowa prędkość wiatru",
+                   f"{P4}, 4.2(2)P, wzór (4.1); Załącznik krajowy, Tabl. NA.2, NA.4"))
+        it.append(("v", f"qb = {f2(site['qb'], 4)} kN/m²", "wartość bazowa ciśnienia prędkości"
+                   + (" (strefa 3: ×(20000−A)/(20000+A))" if site["dens"] != 1 else ""), f"{P4}, 4.5(1), wzór (4.10)"))
+        if site["oro"]:
+            it.append(("v", f"orografia: {OROGRAPHY[site['oro']['kind']]}",
+                       "współczynnik orografii c₀(z) w cₑ(z) (wzór (4.8))", f"{P4}, 4.3.3, Załącznik A.3"))
+        it += site_items(site, self.t_wp)
+        it.append(("h", f"Konstrukcja: {self.t_type}"))
+        it += r["items"]
+        if r["ok"]:
+            it.append(("h", "Zestawienie"))
+            it.append(("t", r["table"]))
+        else:
+            it.append(("n", r["err"]))
+        self.fill_text(self.struct_text, it)
 
     def fill_text(self, t, items):
         """items: ("v", value, description[, basis]) | ("h", heading) | ("n", note) | ("s", symbol, description) |
@@ -13978,6 +16166,10 @@ class App:
             SHORTCUTS.bind(act, cmd, echo=False, scope="app")          # toggle_codes / toggle_lab write the echo themselves
             act.triggered.connect(lambda checked=False, fn=fn: fn())
             out.append(act)
+        m.addSeparator()
+        act = m.addAction("Ostatnio dodane…")
+        SHORTCUTS.bind(act, "RECENTWINDOW", scope="app")
+        act.triggered.connect(lambda checked=False: self.recent_window())
         return out
 
     def options(self, toggle=False):
@@ -14453,10 +16645,19 @@ class App:
                 out.append(f'<p style="margin:12px 0 2px 0;">{e}</p>')
         t.setHtml("".join(out))
 
+    def _add_tip(self):
+        """Tooltip of Dodaj do projektu for the current tab (and object)."""
+        mode = self._cur_mode()
+        return ("Zapisz przyjęte obciążenia użytkowe jako nowy przypadek projektu" if mode == "użytkowe" else
+                "Zapisz obciążenie wiatrem konstrukcji jako nowy przypadek projektu" if mode == "konstrukcje"
+                else "Zapisz bieżący model 3D i wyniki jako nowy przypadek projektu")
+
+    def _no_model(self):
+        """The current form has no 3D model: Użytkowe, or a structure other than a building not calculated yet."""
+        return self.nb.currentIndex() == TAB_USE or (self._cur_mode() == "konstrukcje" and self.stm is None)
+
     def _tab_changed(self, i):
-        use = i == TAB_USE
-        self.btn_add.setToolTip("Zapisz przyjęte obciążenia użytkowe jako nowy przypadek projektu" if use else
-                                "Zapisz bieżący model 3D i wyniki jako nowy przypadek projektu")
+        self.btn_add.setToolTip(self._add_tip())
         if not self._loading and 0 <= i <= 2:
             self.echo("TAB " + ("USE", "SNOW", "WIND")[i])
         if i in (TAB_SNOW, TAB_WIND):
@@ -15056,6 +17257,7 @@ class App:
         cpi_kind = CPI_MODES.index(self.cpi_mode.get()) if self.cpi_mode.get() in CPI_MODES else 0
         skind, sfields = SNOW_TYPES[self.snow_type.get()]
         wkind, wfields = WIND_TYPES[self.wind_type.get()]
+        is_st = self.w_object.get() in STRUCT_TYPES       # wind tab: a structure other than a building
         canopy = wkind in ("can1", "can2")
         for k, on in (("U", ct_f), ("ti", ct_f), ("mu", cpi_kind == 1 and not canopy),
                       ("ndom", cpi_kind == 2 and not canopy), ("phi", canopy)):
@@ -15082,6 +17284,7 @@ class App:
                    Lu=self._read_simple("oLu", 0, 1e5, True, oro_k > 0),
                    Ld=self._read_simple("oLd", 0, 1e5, True, oro_k == 1) or 1.0,
                    x=self._read_simple("ox", -1e5, 1e5, False, oro_k > 0)) if oro_k else None
+        sopt = self._site_opts()                     # NA.16, Annex A.4, A.5 (wind and structures)
 
         # ---------- snow: building
         sdiff = skind == "duo" and self.s_diff.get()
@@ -15122,11 +17325,14 @@ class App:
             hide = {EDGE_TYPES[0]: ("w_r", "w_am"), EDGE_TYPES[1]: ("w_hp", "w_am"),
                     EDGE_TYPES[2]: ("w_hp", "w_r")}.get(self.w_edge.get(), ("w_r", "w_am"))
             wfields = [f for f in wfields if f[0] not in hide]
-        wact = self.fill_slots(self.w_slots, wfields, wdiff)
-        if self._w_layout != wkind:
-            self._w_layout = wkind
-            self.w_ex.setVisible(wkind == "multi")
-            self.w_edge_ex.setVisible(wkind == "flat")
+        wact = self.fill_slots(self.w_slots, [] if is_st else wfields, wdiff)
+        if self._w_layout != (wkind, is_st):
+            self._w_layout = (wkind, is_st)
+            self.w_ex.setVisible(wkind == "multi" and not is_st)
+            self.w_edge_ex.setVisible(wkind == "flat" and not is_st)
+            for w_ in self._bld_params:
+                w_.setVisible(not is_st)
+            self.btn_add.setToolTip(self._add_tip())
         wp_geo = self._read_geo(self.w_slots, wact)
         wp_geo.update(A=A, mtype=self.w_mtype.get(), edge=self.w_edge.get())
         if wkind == "duo" and not wdiff:
@@ -15143,7 +17349,9 @@ class App:
         w_ok = not any(k in W_KEYS or k.startswith("w_") for k in bad)
         if not s_ok:
             s_msg.append("Śnieg: popraw zaznaczone pola.")
-        if not w_ok:
+        if is_st:
+            w_ok = False                       # a structure: the building is not calculated
+        elif not w_ok:
             w_msg.append("Wiatr: popraw zaznaczone pola.")
 
         def geo(ok, msgs, cond, key, text):
@@ -15184,8 +17392,15 @@ class App:
         w_ok = geo(w_ok, w_msg, lambda: wkind == "can2" and wp_geo["alpha"] < 0
                    and wp_geo["B"] / 2 * tg(-wp_geo["alpha"]) >= wp_geo["H"],
                    "w_alpha", "Wiatr: kosz wiaty schodzi poniżej poziomu terenu.")
+        # ---------- structures tab (fields of the chosen type)
+        t_rd = self._struct_read()
+        T_KEYS = {"A", "cseason", "oH", "oLu", "oLd", "ox", "w_x16", "w_hh", "w_dl", "w_xa4", "w_have", "w_xa5"}
+        t_ok = t_rd is not None and not any(k in T_KEYS or k.startswith("t_") for k in set(self._errors))
+        t_msg = ["Konstrukcja: popraw zaznaczone pola."] if t_rd is not None and not t_ok else []
         self._s_ok, self._w_ok = s_ok, w_ok
-        msgs = s_msg + w_msg
+        if not t_ok:
+            self._t_ok = False
+        msgs = s_msg + w_msg + t_msg
         self.status.configure(text=("⚠ " + "  ".join(msgs) + "  Model i wyniki – ostatnie poprawne dane.")
                               if msgs else "")
 
@@ -15212,7 +17427,7 @@ class App:
                       cfr=CFR_VALUES[CFR_TYPES.index(self.w_cfr.get())] if self.w_cfr.get() in CFR_TYPES else 0.02,
                       delta=CSCD_DELTA[CSCD_STRUCT.index(self.w_struct.get())]
                       if self.w_struct.get() in CSCD_STRUCT else 0.10,
-                      skin=SKIN_TYPES.index(self.w_skin.get()) if self.w_skin.get() in SKIN_TYPES else 0)
+                      skin=SKIN_TYPES.index(self.w_skin.get()) if self.w_skin.get() in SKIN_TYPES else 0, **sopt)
             ths = [f"{t}°" for t in wind_thetas(wg)]
             for cb in self.theta_boxes:
                 self._set_items(cb, ths, len(ths) > 1)
@@ -15233,18 +17448,31 @@ class App:
             self.wind = calc_wind(wg, wp, th, var)
             self.env = wind_envelope(wg, wp)
             self.show_wind()
+        if t_ok:                                     # a structure other than a building
+            t_kind, t_o, t_p = t_rd
+            wpt = dict(zone=self.wind_zone.get(), cat=self.terrain.get(),
+                       cdir=cdir_value(self.wind_zone.get(), self.cdir_sec.get()), cdir_sec=self.cdir_sec.get(),
+                       cseason=cse, oro=oro, **sopt)
+            site = wind_site(wpt, A, self._struct_height(t_kind, t_p))
+            self.struct = calc_struct(t_kind, t_p, t_o, site)
+            self.t_site, self.t_wp, self.t_A, self.t_type = site, wpt, A, self.st_type.get()
+            self._t_ok = self.struct["ok"]
+            if self._t_ok:
+                self.stm = dict(kind=t_kind, p=dict(t_p), o=dict(t_o), res=dict(self.struct["res"]))
+            self.show_struct()
         self.draw3d()
 
     def _mark_key(self, key):
         """Marks red all fields showing the given quantity."""
-        ws = list(self.entries.get(key, [])) + [e for _, e, _ in self.s_slots + self.w_slots if e._key == key]
+        ws = list(self.entries.get(key, [])) + [e for _, e, _ in self.s_slots + self.w_slots + self.t_slots if e._key == key]
         for e in ws:
             self._mark_bad(e, True)
 
     def desc_update(self):
         self.ce_desc.configure(text=SNOW_CE[self.snow_ce.get()][1] + self._zone_note("snow"))
-        self.wind_desc.configure(text=WIND_ZONES[self.wind_zone.get()] + "\nKategoria " + self.terrain.get() +
-                                 ": " + TERRAIN[self.terrain.get()][3] + self._zone_note("wind"))
+        t = (WIND_ZONES[self.wind_zone.get()] + "\nKategoria " + self.terrain.get() + ": " +
+             TERRAIN[self.terrain.get()][3] + self._zone_note("wind"))
+        self.wind_desc.configure(text=t)
 
     # ============================================================ 3D WINDOW ===
     def toggle_3d(self):
@@ -15314,15 +17542,13 @@ class App:
         bar.addWidget(self.tb_wind)
         bar.addStretch(1)
         bar2 = QHBoxLayout()
+        bar2.addWidget(self._mk_check("Obciążenia", self.loads3d))
         bar2.addWidget(self._mk_check("Etykiety", self.labels3d))
         bar2.addWidget(self._mk_check("Wymiary pól", self.dims3d))
         bar2.addWidget(self._mk_check("Wymiary budynku", self.bdims3d))
         self.ck_odims = self._mk_check("Wymiary orografii", self.odims3d)
         bar2.addWidget(self.ck_odims)
-        bar2.addStretch(1)
-        b = QPushButton("Widok domyślny")
-        b.clicked.connect(lambda checked=False: self.reset_view())
-        bar2.addWidget(b)
+        bar2.addStretch(1)                           # the default view – the house of the view cube
         self.tb_box = QWidget()                     # the whole bar – hidden when there is no model (Użytkowe tab)
         tbl = QVBoxLayout(self.tb_box)
         tbl.setContentsMargins(0, 0, 0, 0)
@@ -15341,7 +17567,7 @@ class App:
             return
         self._tb_mode = mode
         wind = mode == "wiatr"
-        self.tb_snow.setVisible(not wind)
+        self.tb_snow.setVisible(mode == "śnieg")
         self.tb_wind.setVisible(wind)
 
     def draw3d(self):
@@ -15405,8 +17631,8 @@ class App:
 
     def field_def(self, key):
         """Field definition for the current shape (the same key may have different ranges in different shapes)."""
-        for tp, var in ((SNOW_TYPES, self.snow_type), (WIND_TYPES, self.wind_type)):
-            for f in tp[var.get()][1]:
+        for tp, var in ((SNOW_TYPES, self.snow_type), (WIND_TYPES, self.wind_type), (STRUCT_TYPES, self.st_type)):
+            for f in tp[var.get()][1] if var.get() in tp else []:
                 if not isinstance(f, str) and f[0] == key:
                     return f
         return FIELD_DEFS.get(key)
@@ -15437,8 +17663,11 @@ class App:
         st["strefy_recznie"] = g["manual"]
 
     def _cur_mode(self):
-        """Load type of the current tab: „użytkowe”, „śnieg” or „wiatr”."""
-        return "użytkowe" if self.nb.currentIndex() == TAB_USE else self.mode3d.get()
+        """Load type of the current tab: „użytkowe”, „śnieg”, „wiatr” or „konstrukcje” (wind, not a building)."""
+        i = self.nb.currentIndex()
+        if i == TAB_WIND and self.w_object.get() in STRUCT_TYPES:
+            return "konstrukcje"                     # wind on a structure other than a building – report only
+        return "użytkowe" if i == TAB_USE else self.mode3d.get()
 
     def _main_extra(self):
         return {"mode": self._cur_mode(), "snow_case": self.snow_case.get(),
@@ -15481,6 +17710,11 @@ class App:
             ok, err = self._use_valid()
             return dict(ok=ok, err=err, state=self.get_state(), calc=dict(mode=mode, snow_case=None),
                         report=self._use_report())
+        if mode == "konstrukcje":
+            ok = bool(self._t_ok) and self.struct is not None
+            return dict(ok=ok, err=(self.struct or {}).get("err") or self.status.text(), state=self.get_state(),
+                        calc=dict(mode=mode, snow_case=None, struct=self.stm if ok else None),
+                        report=source_html(self.struct_text))
         return dict(ok=bool(getattr(self, "_w_ok" if mode == "wiatr" else "_s_ok", False)),
                     err=self.status.text(), state=self.get_state(),
                     calc=dict(sgeo=self.sgeo, snow=self.snow, wgeo=self.wgeo, wind=self.wind, mode=mode,
@@ -15518,7 +17752,7 @@ class App:
 
     def field_def_state(self, st, key):
         op = st.get("opcje", {})
-        for tp, n in ((SNOW_TYPES, "snow_type"), (WIND_TYPES, "wind_type")):
+        for tp, n in ((SNOW_TYPES, "snow_type"), (WIND_TYPES, "wind_type"), (STRUCT_TYPES, "st_type")):
             if op.get(n) in tp:
                 for f in tp[op[n]][1]:
                     if not isinstance(f, str) and f[0] == key:
@@ -15526,8 +17760,9 @@ class App:
         return FIELD_DEFS.get(key)
 
     # --- drawing a saved case on any canvas
-    _CTX_ATTRS = ("sgeo", "snow", "wgeo", "wind", "cv", "yaw", "pitch", "zoom", "pan_x", "pan_y", "piv", "_scene_key",
-                  "_scene_cache", "_snow_ztop", "_edit_keys", "_placed", "_defer_angles", "_scene_ver", "_s_ok", "_w_ok", "_ctx")
+    _CTX_ATTRS = ("sgeo", "snow", "wgeo", "wind", "stm", "cv", "yaw", "pitch", "zoom", "pan_x", "pan_y", "piv",
+                  "_scene_key", "_scene_cache", "_snow_ztop", "_edit_keys", "_placed", "_defer_angles", "_scene_ver",
+                  "_s_ok", "_w_ok", "_t_ok", "_ctx")
 
     def render_case(self, cv, case, image=False):
         self.ensure_calc(case)
@@ -15539,7 +17774,9 @@ class App:
         vars_ = {n: getattr(self, n)._v for n in ("snow_case", "mode3d") + TOGGLE_KEYS}
         tg = vpd.get("toggles") or {}
         try:
-            self.sgeo, self.snow, self.wgeo, self.wind = calc["sgeo"], calc["snow"], calc["wgeo"], calc["wind"]
+            self.sgeo, self.snow, self.wgeo, self.wind = (calc.get("sgeo"), calc.get("snow"), calc.get("wgeo"),
+                                                          calc.get("wind"))
+            self.stm = calc.get("struct")
             self.cv = cv
             self.piv = None
             for k in VIEW_KEYS:
@@ -15549,7 +17786,7 @@ class App:
             self._scene_cache = getattr(cv, "_scene_cache", None)
             self._scene_ver = ("przypadek", id(calc))
             self._edit_keys = {}
-            self._s_ok = self._w_ok = True
+            self._s_ok = self._w_ok = self._t_ok = True
             self._ctx = "img" if image else "view"
             self.snow_case._v = calc["snow_case"]
             self.mode3d._v = calc["mode"]
@@ -15683,6 +17920,7 @@ class App:
         host._apply_result(case, host._compute(case))
         host.project_changed()
         host.pw.insert_case(case)
+        recent_remember(case)
         return case
 
     def store_lab_case(self, case, data):
@@ -15796,6 +18034,7 @@ class App:
             return
         extra = self._main_extra()
         case = self.editing
+        new_case = False
         if case is None:
             from datetime import datetime
             n = self.project["next"]
@@ -15804,6 +18043,7 @@ class App:
                     "extra": extra}
             self.project["cases"].insert(0, case)                    # newest on top
             msg = f"Dodano do projektu: „{case['name']}”."
+            new_case = True
         else:
             if case["extra"].get("viewports"):
                 extra["viewports"] = case["extra"]["viewports"]              # other viewports of the case stay
@@ -15818,6 +18058,78 @@ class App:
             self.pw.insert_case(case)
         else:
             self.pw.refresh_cases([case])
+        if new_case:
+            recent_remember(case)
+
+    def add_recent(self, i, case=None):
+        """Ostatnio dodane → item i (0 – the newest): the case again at the top of the project. Location, altitude
+        and zones – those of the project (the other cases do not change). case – the card of the Ostatnio dodane
+        window (its state and view, also when a dimension was changed there)."""
+        from datetime import datetime
+        host = self.host
+        lst = recent_cases()
+        if not 0 <= i < len(lst):
+            return None
+        host.echo(f"RECENTADD {i + 1}")
+        host.end_editor()
+        r0 = lst[i]
+        src = case if case is not None else r0
+        st = json.loads(json.dumps(src["state"]))
+        ex = json.loads(json.dumps(src.get("extra") or {}))
+        ex["mode"] = r0.get("mode", ex.get("mode", "śnieg"))
+        g = host.project.get("globals")
+        if g is not None and ex["mode"] != "własne":
+            host._put_globals(st, g)
+        n = host.project["next"]
+        host.project["next"] = n + 1
+        ex.pop("noprint", None)
+        case = {"id": n, "name": r0.get("name") or tr(f"Przypadek {n}"),
+                "created": datetime.now().strftime("%Y-%m-%d %H:%M"), "extra": ex, "state": st}
+        r = host._compute(case)
+        if not r["ok"]:
+            QMessageBox.warning(host.pw, "Ostatnio dodane", "Nie można dodać przypadku – dane są niepoprawne:\n"
+                                + (r["err"] or ""))
+            return None
+        host.project["cases"].insert(0, case)
+        msg = host._store_case(case, r, f"Dodano do projektu: „{case['name']}” (ostatnio dodane).")
+        host.project_changed()
+        host.info_msg(msg)
+        host.pw.insert_case(case)
+        recent_remember(case)
+        return case
+
+    def recent_window(self, toggle=False):
+        """Ostatnio dodane – the window with the cards of the recently added cases (RecentWindow); toggle – an
+        open window is closed."""
+        host = self.host
+        w = getattr(host, "_recent_win", None)
+        if toggle and w is not None and w.isVisible():
+            w.close()
+            return None
+        if w is None:
+            w = RecentWindow(host)
+            w.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+            w.destroyed.connect(lambda *a: setattr(host, "_recent_win", None))
+            host._recent_win = w
+        else:
+            w.rebuild()
+        w.show()
+        w.raise_()
+        w.activateWindow()
+        return w
+
+    def recent_menu(self, menu):
+        """Fills a menu with the recently added cases (the console RECENT gives the same list)."""
+        menu.clear()
+        lst = recent_cases()
+        if not lst:
+            a = menu.addAction("Brak przypadków – dodaj przypadek do projektu")
+            a.setEnabled(False)
+            return
+        for i, r in enumerate(lst):
+            a = no_tr(menu.addAction(""))             # the name of the case – user data (recent_label translates the rest)
+            a.setText(recent_label(r))
+            a.triggered.connect(lambda checked=False, i=i: self.add_recent(i))
 
     def info_msg(self, text):
         self.proj_msg.setText(text)
@@ -15843,9 +18155,9 @@ class App:
         self.set_state(case["state"])
         self.dirty = dirty
         md = ex.get("mode", "śnieg")
-        self.nb.setCurrentIndex({"wiatr": TAB_WIND, "użytkowe": TAB_USE}.get(md, TAB_SNOW))
-        if md != "użytkowe":
-            self.mode3d.set(md)
+        self.nb.setCurrentIndex({"wiatr": TAB_WIND, "użytkowe": TAB_USE, "konstrukcje": TAB_WIND}.get(md, TAB_SNOW))
+        if md in ("śnieg", "wiatr", "konstrukcje"):
+            self.mode3d.set("wiatr" if md == "konstrukcje" else md)
         if self.snow and ex.get("snow_case") in [c["name"] for c in self.snow["cases"]]:
             self.snow_case.set(ex["snow_case"])
         for k, v in (ex.get("view") or {}).items():
@@ -16004,8 +18316,8 @@ class App:
                 if n not in st.get("opcje", {}):
                     getattr(self, n).set(val)
             for n, val in st.get("opcje", {}).items():
-                if n in self.OPT_DEFAULTS and val not in {"w_oro": OROGRAPHY, "w_cfr": CFR_TYPES,
-                                                         "w_struct": CSCD_STRUCT, "w_skin": SKIN_TYPES}[n]:
+                ch = self.OPT_CHOICES.get(n)
+                if n in self.OPT_DEFAULTS and (val not in ch if ch is not None else not isinstance(val, bool)):
                     val = self.OPT_DEFAULTS[n]
                 if isinstance(val, str):
                     val = LEGACY_OPTS.get(val, val)
@@ -16013,6 +18325,9 @@ class App:
                     if n == "cpi_mode" and val not in CPI_MODES:
                         val = CPI_MODES[0]           # older files („własna wartość”) – the code method (7.2.9(6))
                     getattr(self, n).set(val)
+            op_ = st.get("opcje", {})
+            obj = op_.get("w_object")             # older files – the building shape
+            self.w_object.set(obj if obj in self.OPT_CHOICES["w_object"] else self.wind_type.get())
             self.loc.set(st.get("lokalizacja"))
             self._use_set_state(st.get("uzytkowe"))
             self.recalc()
@@ -16172,6 +18487,7 @@ class App:
         it.append(("v", f"qb = qb,0·(c_dir·c_season)²{dens} = {f2(w['qb'], 4)} kN/m²",
                    "wartość bazowa ciśnienia prędkości" + (" (strefa 3: ×(20000−A)/(20000+A))" if dens else ""),
                    f"{P4}, 4.5(1), wzór (4.10)" + ("; Załącznik krajowy, Tabl. NA.1" if dens else "")))
+        it += site_items(inf["site"], self.wp)
         it.append(("v", f"ze = {f2(w['ze'])} m", "wysokość odniesienia",
                    f"{P4}, 7.2.2, Rys. 7.4 (ściany); 7.2.3–7.2.8 (dach)"))
         oro = inf.get("oro")
@@ -16186,11 +18502,11 @@ class App:
                        + ("; Φ < 0,05 – c₀ = 1" if oro["phi"] < 0.05 else ""),
                        f"{P4}, 4.3.3(1), wzór (4.3); Załącznik A.3, wzory (A.1)–(A.13)"))
             it.append(("v", f"cₑ(ze) = c₀²·cr² + c₀·(cₑ,NA − cr²) = {f2(w['ce'], 4)}",
-                       f"współczynnik ekspozycji z orografią (cr i cₑ,NA dla kategorii terenu {self.terrain.get()})",
+                       f"współczynnik ekspozycji z orografią (cr i cₑ,NA dla kategorii terenu {inf['site']['cat']})",
                        f"{P4}, 4.5(1), wzór (4.8); Załącznik krajowy, NA.8, Tabl. NA.3"))
         else:
             it.append(("v", f"cₑ(ze) = {f2(w['ce'], 4)}",
-                       f"współczynnik ekspozycji (kategoria terenu {self.terrain.get()}; c₀ = 1)",
+                       f"współczynnik ekspozycji (kategoria terenu {inf['site']['cat']}; c₀ = 1)",
                        f"{P4}, 4.5(1); Załącznik krajowy, Tabl. NA.3"))
         it.append(("v", f"qp(ze) = {f2(w['qp'], 4)} kN/m²", "wartość szczytowa ciśnienia prędkości",
                    f"{P4}, 4.5(1), wzór (4.8)"))
@@ -16426,15 +18742,17 @@ class App:
         self._moved = False
 
     @staticmethod
-    def pick_pivot(cv):
-        """Rotation point: the model point shown in the centre of the view (the nearest surface of the building
-        or the ground on the line of sight; nothing there – the point of that line at the depth of the current
-        rotation point). None – the view was not drawn yet."""
+    def pick_pivot(cv, at=None, model_only=False):
+        """The model point under the screen point at (None – the centre of the view): the nearest surface of the
+        building or the ground on the line of sight; nothing there – the point of that line at the depth of the
+        current rotation point. model_only – only the building / structure (None when the cursor is beside it).
+        None – the view was not drawn yet."""
         pr = getattr(cv, "_proj", None)
         if pr is None:
             return None
         ctr, sc, cy, sy, cp, sp, ox, oy, W, Hc = pr
-        xr, u = (W / 2 - ox) / sc, (oy - Hc / 2) / sc
+        ax, ay = at if at is not None else (W / 2, Hc / 2)
+        xr, u = (ax - ox) / sc, (oy - ay) / sc
 
         def world(D):                              # inverse of the projection at the depth D
             yr, z = sp * u + cp * D, cp * u - sp * D
@@ -16443,7 +18761,7 @@ class App:
         v = tuple(b - a for a, b in zip(A, B_))
         best = None
         polys = list(getattr(cv, "_proj_faces", []))
-        for poly in polys + [None]:
+        for poly in polys + ([] if model_only else [None]):
             if poly is None:                       # the ground (z = 0) – only the drawn ground plate
                 gx0, gx1, gy0, gy1 = getattr(cv, "_proj_ground", (0, 0, 0, 0))
                 if abs(v[2]) < 1e-12:
@@ -16472,7 +18790,25 @@ class App:
                     continue
             if best is None or t < best:
                 best = t
+        if best is None and model_only:
+            return None
         return world(best if best is not None else 0.0)
+
+    def pivot_at(self, at, view=None, cv=None):
+        """Zooming: the rotation point = the model point under the cursor (beside the model – the last one stays).
+        The pan is set so that the picture does not move (that point keeps its place on the screen)."""
+        cv = cv if cv is not None else self.cv
+        q = self.pick_pivot(cv, at, model_only=True)
+        if q is None:
+            return
+        ctr, sc, cy, sy, cp, sp, ox, oy, W, Hc = cv._proj
+        x, y, z = q[0] - ctr[0], q[1] - ctr[1], q[2] - ctr[2]
+        sx = ox + (x * cy - y * sy) * sc
+        sy_ = oy - (z * cp + (x * sy + y * cy) * sp) * sc
+        if view is not None:
+            view.update(piv=list(q), pan_x=sx - W / 2, pan_y=sy_ - Hc / 2)
+        else:
+            self.piv, self.pan_x, self.pan_y = list(q), sx - W / 2, sy_ - Hc / 2
 
     def set_pivot(self, view=None, cv=None):
         """Rotation start: the rotation point = the model point in the centre of the view (the picture does not
@@ -16489,8 +18825,6 @@ class App:
         lx, ly = self._last
         if abs(e.x - lx) + abs(e.y - ly) < 3 and not getattr(self, "_moved", False):
             return
-        if not getattr(self, "_moved", False):
-            self.set_pivot()
         self._moved = True
         self._last = (e.x, e.y)
         self.yaw += (e.x - lx) * 0.01
@@ -16505,6 +18839,8 @@ class App:
     def _zoom(self, f, at=None):
         """Zoom by f; at = (x, y) – the point under the cursor stays in place (None – the view centre)."""
         old = self.zoom
+        if at is not None and self.cv is not None and getattr(self.cv, "_proj", None) is not None:
+            self.pivot_at(at)                        # the rotation point – under the cursor
         self.zoom = clamp(self.zoom * f, getattr(self.cv, "_zmin", ZOOM_MIN), ZOOM_MAX)
         if at is not None and old > 0 and self.cv is not None:
             self.pan_x, self.pan_y = zoom_pan(self.pan_x, self.pan_y, self.zoom / old, at,
@@ -16515,6 +18851,9 @@ class App:
         """Load layer scale on the 3D model: zooming in (zoom > 1) – thinner layers, so that their thickness on the
         screen stays the same (a close look at a tall building is not covered by huge layers). Quantised in 10%
         steps – the scene is rebuilt only when the step changes. (step, factor)."""
+        f = getattr(self, "_ls_force", None)
+        if f is not None:                            # building the scene at a fixed scale (see `_draw3d_now`)
+            return None, f
         z = max(getattr(self, "zoom", 1.0) or 1.0, 1.0)
         q = round(math.log(z) / math.log(1.1))
         return q, 1.1 ** -q
@@ -16603,7 +18942,11 @@ class App:
     def scene_wind(self):
         """Wind like snow: neutral building surfaces, on each zone a semi-transparent load layer
         outside the surface – thickness ∝ |we|, colour: pressure red, suction blue. Label – the value
-        with its unit only (no zone letter). Dome – zones coloured on the surface (no layer)."""
+        with its unit only (no zone letter). Curved surfaces (dome cap, cylindrical walls of the dome, vault):
+        the layer is offset along the radius of the surface, so its cross-section is a trapezoid and the layers
+        of neighbouring facets meet without gaps; the side walls between them lie in radial planes.
+        Flat roof with rounded / mansard eaves (Table 7.2): the building edge is rounded / bevelled under
+        the load layers, which stay as on a sharp edge (their top surface flat) – the edge shows through them."""
         g, w = self.wgeo, self.wind
         faces, texts, lines = [], [], []
         canopy = g.kind in ("can1", "can2")
@@ -16621,6 +18964,27 @@ class App:
                 return clip_rect(z["poly"], t_par, g.L - t_par, t_par, g.B - t_par)
             return z["poly"]
         allv = [q for z in w["zones"] if not z.get("dome") for q in zpoly(z)]
+        # curved surfaces: (centre, mask, surface id) – the layer goes along the radius from the centre
+        sh_ = g.shape
+        if g.kind == "dome":
+            curv = lambda z: (((sh_.rho, sh_.rho, sh_.zc), (1, 1, 1), "cap") if z.get("dome") else
+                              ((sh_.rho, sh_.rho, 0.0), (1, 1, 0), "cyl") if z.get("cyl") else None)
+        elif g.kind == "vault":
+            fv = g.p["f"]
+            Rv = (fv * fv + (g.B / 2) ** 2) / (2 * fv)
+            curv = lambda z: ((0.0, g.B / 2, g.H + fv - Rv), (0, 1, 1), "vault") if z["kind"] == "roof" else None
+        else:
+            curv = lambda z: None
+
+        def radial(q, cv_):
+            v_ = tuple((a_ - c_) * m_ for a_, c_, m_ in zip(q, cv_[0], cv_[1]))
+            ln_ = math.sqrt(sum(c_ * c_ for c_ in v_))
+            return tuple(c_ / ln_ for c_ in v_) if ln_ > 1e-12 else None
+        # flat roof, rounded / mansard eaves: the building edge under the layers (rings (inset, z) from the wall top
+        # to the roof plane)
+        rings = flat_edge_rings(g)
+        cut = rings[-1][0] if rings else 0.0
+        zcut = rings[0][1] if rings else g.H
 
         def split_edges(P):
             out = []
@@ -16646,6 +19010,7 @@ class App:
             t = min(abs(z["cpe"]) / 2.0, 1.0)
             col = mix((255, 255, 255), PRESS_COL if z["cpe"] > 0 else SUCT_COL, 0.15 + 0.6 * t)
             dome = z.get("dome")
+            cz = curv(z)
             lab = None if dome else f"{f2(z['we'], 3, True)} kN/m²"
             grp = None if dome else (z["kind"], z["name"], round(z["cpe"], 4), z.get("rect") or id(z))
             P = zpoly(z)
@@ -16659,24 +19024,66 @@ class App:
                 c = centroid(P)
                 if n[0] * (c[0] - g.L / 2) + n[1] * (c[1] - g.B / 2) < 0:
                     n = tuple(-c_ for c_ in n)
-            if dome:
-                faces.append(dict(poly=P, fill=col, outline=col, n=n, value=z["we"], cull=not canopy,
-                                  kind=z["kind"]))
-                continue
             roofy = z["kind"] in ("roof", "canopy")
             d = tsc * abs(z["we"])
-            P = split_edges(P)
+            if not dome:
+                P = split_edges(P)
             zero = d < 1e-9                        # zone with zero load (e.g. cpe = −0.0) – label on the surface
-            faces.append(dict(poly=P, fill=ROOF_COL if roofy else WALL_COL, outline=ROOF_OUT if roofy else WALL_OUT,
-                              n=n, cull=not canopy, kind=z["kind"], base=("w", id(z)),
-                              label=lab if zero else None, grp=grp if zero else None))
+            Pb = P                                 # the building surface under the layer
+            if rings and roofy:
+                Pb = clip_rect(P, cut, g.L - cut, cut, g.B - cut)
+            elif rings:
+                Pb = clip_poly(P, lambda p: p[2], -1.0, zcut)
+            if len(Pb) >= 3:
+                faces.append(dict(poly=Pb, fill=ROOF_COL if roofy else WALL_COL,
+                                  outline=ROOF_OUT if roofy else WALL_OUT, n=n, cull=not canopy, kind=z["kind"],
+                                  base=("w", id(z)), label=lab if zero else None, grp=grp if zero else None))
             if zero:
                 continue
-            top = [tuple(a_ + nn * d for a_, nn in zip(q, n)) for q in P]
+            if cz:
+                top = []
+                for q in P:
+                    r_ = radial(q, cz) or n
+                    top.append(tuple(a_ + nn * d for a_, nn in zip(q, r_)))
+            else:
+                top = [tuple(a_ + nn * d for a_, nn in zip(q, n)) for q in P]
             edge = mix((255, 255, 255), PRESS_COL if z["cpe"] > 0 else SUCT_COL, 0.85)
             faces.append(dict(poly=top, fill=col, outline=edge, n=n, cull=True, label=lab, grp=grp, prio=0,
                               alpha=SNOW_ALPHA, on=("w", id(z)), value=z["we"], kind=z["kind"]))
-            slabs.append((P, top, n, d, col, edge, z))
+            slabs.append((P, top, n, d, col, edge, z, cz[2] if cz else None))
+        self._slab_walls(faces, slabs)
+        for pt in w["points"]:
+            texts.append((pt["pos"], f"{f2(pt['we'], 3, True)} kN/m²"))
+        if g.kind == "dome":
+            for P, n in g.shape.wall_facets():
+                faces.append(dict(poly=P, fill=NEUTRAL_COL, outline=NEUTRAL_COL, n=n, cull=True))
+        if isinstance(g.shape, Prism):
+            for P, n in g.shape.vfaces():
+                faces.append(dict(poly=P, fill=NEUTRAL_COL, outline="#6b7280", n=n, cull=False))
+        if g.kind == "flat" and g.hp > 0:
+            faces += parapet_faces(g.L, g.B, g.H, g.hp, col=NEUTRAL_COL, top="#c4c8ce", out="#6b7280")
+        if rings:                                  # rounded / bevelled eaves: facets between the rings
+            L_, B_ = g.L, g.B
+            last = len(rings) - 2
+            for k in range(len(rings) - 1):
+                (u0, z0), (u1, z1) = rings[k], rings[k + 1]
+                r0 = [(u0, u0, z0), (L_ - u0, u0, z0), (L_ - u0, B_ - u0, z0), (u0, B_ - u0, z0)]
+                r1 = [(u1, u1, z1), (L_ - u1, u1, z1), (L_ - u1, B_ - u1, z1), (u1, B_ - u1, z1)]
+                for j in range(4):
+                    j1 = (j + 1) % 4
+                    q = [r0[j], r0[j1], r1[j1], r1[j]]
+                    faces.append(dict(poly=q, fill=ROOF_COL, outline=ROOF_OUT, cull=True,
+                                      edges=[k == 0, True, k == last, True]))
+        if canopy:
+            pr = g.shape
+            for x in (0.15, g.L - 0.15):
+                for y in (0.15, g.B - 0.15):
+                    lines.append(((x, y, 0), (x, y, pr.rz(x, y) - 0.05), "#6b7280", 4))
+        return faces, texts, lines
+
+    def _slab_walls(self, faces, slabs):
+        """Side walls of the load layers: slabs = [(base polygon, top polygon, normal, thickness, fill, edge colour,
+        zone, curved surface id)]."""
         # layer side walls: each zone is a separate layer closed by side walls (also at corners, eaves
         # and ridge – no slanted walls or closing triangles); boundary between zones of the same surface – thickness
         # step facing the thinner layer
@@ -16691,7 +19098,8 @@ class App:
         for k, lst in edges.items():
             if len(lst) >= 2:
                 (i1, a1, b1), (i2, a2, b2) = lst[0], lst[1]
-                if same(slabs[i1][2], slabs[i2][2]):            # same surface – thickness step
+                one = slabs[i1][7] is not None and slabs[i1][7] == slabs[i2][7]    # one curved surface
+                if one or same(slabs[i1][2], slabs[i2][2]):     # same surface – thickness step
                     if abs(slabs[i1][3] - slabs[i2][3]) < 1e-9:
                         continue
                     hi, lo = (i1, i2) if slabs[i1][3] > slabs[i2][3] else (i2, i1)
@@ -16732,22 +19140,333 @@ class App:
                 mid = tuple((a_ + b_) / 2 for a_, b_ in zip(P[ja], P[jb]))
                 inner = tuple(m_ + 0.01 * c_ for m_, c_ in zip(mid, lft))
                 self._wind_side(faces, [P[ja], P[jb], top[jb], top[ja]], inner, slabs[i])
-        for pt in w["points"]:
-            texts.append((pt["pos"], f"{f2(pt['we'], 3, True)} kN/m²"))
-        if g.kind == "dome":
-            for P, n in g.shape.wall_facets():
-                faces.append(dict(poly=P, fill=NEUTRAL_COL, outline=NEUTRAL_COL, n=n, cull=True))
-        if isinstance(g.shape, Prism):
-            for P, n in g.shape.vfaces():
-                faces.append(dict(poly=P, fill=NEUTRAL_COL, outline="#6b7280", n=n, cull=False))
-        if g.kind == "flat" and g.hp > 0:
-            faces += parapet_faces(g.L, g.B, g.H, g.hp, col=NEUTRAL_COL, top="#c4c8ce", out="#6b7280")
-        if canopy:
-            pr = g.shape
-            for x in (0.15, g.L - 0.15):
-                for y in (0.15, g.B - 0.15):
-                    lines.append(((x, y, 0), (x, y, pr.rz(x, y) - 0.05), "#6b7280", 4))
+
+    def scene_struct(self):
+        """A structure other than a building (wind tab, Budowla): the structure neutral, the wind load as on buildings –
+        semi-transparent layers (thickness ∝ the value, red – pressure, blue – suction): the zones of a free-standing
+        wall (cp,net), the pressure around a circular cylinder (cp,0·ψλα – Fig. 7.27, layers along the radius), on the
+        other elements fw [kN/m] on the windward face, a signboard / a taut flag – Fw on the face (the eccentricity –
+        a dimension); a sphere, a free flag – only the values. No force symbols, one value per load (the cylinder: the
+        variant `o["var"]` – cpe or fw). Lines: (a, b, colour, width[, "wind"])."""
+        st = self.stm
+        kind, p, o, res = st["kind"], st["p"], st["o"], st["res"]
+        g = struct_geom(kind, p, o)
+        faces, texts, lines, lay = [], [], [], []
+        BODY, BOUT = NEUTRAL_COL, "#6b7280"
+        unit_v = lambda v: unit(v) if math.sqrt(sum(c * c for c in v)) > 1e-12 else (0.0, 0.0, 1.0)
+
+        def quad(q, fill=BODY, out=BOUT, edges=None, cull=True, n=None):
+            faces.append(dict(poly=q, fill=fill, outline=out, cull=cull, n=n, edges=edges))
+
+        def box(x0, x1, y0, y1, z0, z1, fill=BODY, out=BOUT):
+            quad([(x0, y0, z0), (x1, y0, z0), (x1, y0, z1), (x0, y0, z1)], fill, out, n=(0, -1, 0))
+            quad([(x1, y1, z0), (x0, y1, z0), (x0, y1, z1), (x1, y1, z1)], fill, out, n=(0, 1, 0))
+            quad([(x0, y1, z0), (x0, y0, z0), (x0, y0, z1), (x0, y1, z1)], fill, out, n=(-1, 0, 0))
+            quad([(x1, y0, z0), (x1, y1, z0), (x1, y1, z1), (x1, y0, z1)], fill, out, n=(1, 0, 0))
+            quad([(x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)], fill, out, n=(0, 0, 1))
+            quad([(x0, y1, z0), (x1, y1, z0), (x1, y0, z0), (x0, y0, z0)], fill, out, n=(0, 0, -1))
+
+        def beam(a, b_, w):                      # a square bar between two points (lattice members)
+            u = unit_v(tuple(y - x for x, y in zip(a, b_)))
+            ref = (0.0, 1.0, 0.0) if abs(u[1]) < 0.9 else (1.0, 0.0, 0.0)
+            v = unit_v((u[1] * ref[2] - u[2] * ref[1], u[2] * ref[0] - u[0] * ref[2], u[0] * ref[1] - u[1] * ref[0]))
+            x = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+            cs = [(1, 1), (-1, 1), (-1, -1), (1, -1)]
+            ring = lambda c: [tuple(c[i] + (v[i] * sa + x[i] * sb) * w / 2 for i in range(3)) for sa, sb in cs]
+            ra, rb = ring(a), ring(b_)
+            for k in range(4):
+                k1 = (k + 1) % 4
+                q = [ra[k], ra[k1], rb[k1], rb[k]]
+                c = centroid(q)
+                n = unit_v(tuple(c[i] - (a[i] + b_[i]) / 2 for i in range(3)))
+                quad(q, n=n)
+
+        def layer(P, n, value, label=None, radial=None, surf=None, grp=None):
+            lay.append(dict(P=P, n=n, value=value, label=label, radial=radial, surf=surf, grp=grp))
+
+        def pt_axis(sv, tv, av):                 # section point (s, t) at the position av along the axis
+            return (sv, tv, av) if g["vert"] else (av, tv, g["zc"] + sv)
+
+        fl = lambda v: f"{f2(v, 2)} kN"
+        press = lambda: g.get("round") and not res.get("cable") and o.get("var", 0) == 0     # cp on the cylinder
+        wdir, wat = (0.0, 1.0), None                   # the wind direction and the point it points at
+        size = 1.0
+        if kind == "wall":
+            l_, h_, t_ = g["l"], g["h"], g["t"]
+            size = max(l_, h_)
+            box(0.0, l_, 0.0, t_, 0.0, h_)
+            if p.get("lc", 0.0) > 0:                   # return corner at the free end (Table 7.9)
+                box(0.0, t_, t_, t_ + p["lc"], 0.0, h_)
+            if o.get("shelter"):                       # the sheltering wall upwind (7.4.2, Fig. 7.20)
+                x_ = p["x"]
+                box(0.0, l_, -x_ - t_, -x_, 0.0, h_, fill="#e5e7eb", out="#9ca3af")
+                texts.append(((l_ / 2, -x_ - t_, h_), f"φ = {f2(p['phis'])}"))
+            if p.get("phi", 1.0) < 1.0:
+                texts.append(((0.8 * l_, t_, h_), f"φ = {f2(p['phi'])}"))
+            for nm, a1, b1, cp, ps, w in res.get("zones", []):
+                layer([(a1, 0.0, 0.0), (b1, 0.0, 0.0), (b1, 0.0, h_), (a1, 0.0, h_)], (0.0, -1.0, 0.0), w,
+                      f"{f2(w, 3, True)} kN/m²", grp=("z", nm, a1))
+            wdir, wat = (math.sqrt(0.5), math.sqrt(0.5)), (0.25 * h_, 0.0, h_ / 2)      # oblique wind (Fig. 7.19)
+        elif kind == "sign":
+            b_, h_, zg, t_ = g["b"], g["h"], g["zg"], g["t"]
+            size = max(b_, h_ + zg)
+            box(0.0, b_, 0.0, t_, zg, zg + h_)
+            if zg > 0:                                 # supports – not given by the code (only shown)
+                for x in (0.2 * b_, 0.8 * b_):
+                    lines.append(((x, t_ / 2, 0.0), (x, t_ / 2, zg), "#6b7280", 4))
+            if res.get("zones"):                       # 7.4.3(3): calculated as a free-standing wall
+                for nm, a1, b1, cp, ps, w in res["zones"]:
+                    layer([(a1, 0.0, zg), (b1, 0.0, zg), (b1, 0.0, zg + h_), (a1, 0.0, zg + h_)], (0.0, -1.0, 0.0),
+                          w, f"{f2(w, 3, True)} kN/m²", grp=("z", nm, a1))
+            else:                                      # the resultant Fw (eccentric – the e dimension)
+                layer([(0.0, 0.0, zg), (b_, 0.0, zg), (b_, 0.0, zg + h_), (0.0, 0.0, zg + h_)], (0.0, -1.0, 0.0),
+                      res["F"], "Fw = " + fl(res["F"]))
+            wat = (b_ / 2, 0.0, zg + h_ / 2)
+        elif kind in STRUCT_LINE:
+            a0, a1, b_ = g["a0"], g["a1"], g["b"]
+            size = max(a1 if g["vert"] else g["zc"] + b_ / 2, b_, a1 - a0)
+            offs = [0.0] + ([p["a"], 2 * p["a"]] if g["row"] else [])
+            for k_, so in enumerate(offs):
+                for sec in g["secs"]:
+                    n_ = len(sec)
+                    for j in range(n_):
+                        (s0, t0), (s1, t1) = sec[j], sec[(j + 1) % n_]
+                        q = [pt_axis(s0 + so, t0, a0), pt_axis(s1 + so, t1, a0), pt_axis(s1 + so, t1, a1),
+                             pt_axis(s0 + so, t0, a1)]
+                        mid = ((s0 + s1) / 2, (t0 + t1) / 2)
+                        cm = centroid(sec)
+                        ns = (mid[0] - cm[0], mid[1] - cm[1])
+                        nn = unit_v(pt_axis(ns[0], ns[1], 0.0) if g["vert"] else (0.0, ns[1], ns[0]))
+                        smooth = g.get("round") or (kind == "rect" and n_ > 4)
+                        quad(q, n=nn, edges=[True, False, True, False] if smooth else None)
+                        if press() and k_ == 0:
+                            ang = math.degrees(math.acos(clamp(-nn[1], -1.0, 1.0)))
+                            amin, _, aA, _ = cyl_row(res["re"])
+                            cpe = cyl_cp0(ang, res["re"]) * psi_lambda_alpha(ang, res.get("psl", 1.0), amin, aA)
+                            we = cpe * res["qp"]
+                            ctr_ = (0.0, 0.0, 0.0) if g["vert"] else (0.0, 0.0, g["zc"])
+                            layer(q, nn, we, None, radial=(ctr_, (1, 1, 0) if g["vert"] else (0, 1, 1)), surf="cyl",
+                                  grp=None)
+                    for a_ in (a0, a1):                    # the ends
+                        cap = [pt_axis(sv + so, tv, a_) for sv, tv in sec]
+                        nc = (0.0, 0.0, 1.0 if a_ == a1 else -1.0) if g["vert"] else (1.0 if a_ == a1 else -1.0, 0.0, 0.0)
+                        quad(cap, n=nc)
+            if kind == "lattice":
+                w_ = g["member"]
+                for sv in (-b_ / 2 + w_ / 2, b_ / 2 - w_ / 2):          # chords
+                    beam(pt_axis(sv, 0.0, a0), pt_axis(sv, 0.0, a1), w_)
+                npan = max(1, int(round((a1 - a0) / max(b_, 1e-6))))
+                for k in range(npan + 1):                              # posts and diagonals
+                    ak = a0 + (a1 - a0) * k / npan
+                    beam(pt_axis(-b_ / 2 + w_, 0.0, ak), pt_axis(b_ / 2 - w_, 0.0, ak), 0.8 * w_)
+                    if k < npan:
+                        an = a0 + (a1 - a0) * (k + 1) / npan
+                        sa = -1 if k % 2 == 0 else 1
+                        beam(pt_axis(sa * (b_ / 2 - w_), 0.0, ak), pt_axis(-sa * (b_ / 2 - w_), 0.0, an), 0.7 * w_)
+            if g["near"]:                              # the flat surface below the cylinder (Fig. 7.29)
+                zs = g["zc"] - b_ / 2 - p.get("zg", 0.0)
+                if zs > 1e-3:
+                    box(a0, a1, -1.5 * b_, 1.5 * b_, zs - 0.02 * b_, zs, fill="#e5e7eb", out="#9ca3af")
+            fw = res.get("fw", 0.0)
+            fr = g["front"] - (g["member"] / 2 if kind == "lattice" else 0.0)
+            if not press():
+                P_ = [pt_axis(-b_ / 2, fr, a0), pt_axis(b_ / 2, fr, a0), pt_axis(b_ / 2, fr, a1),
+                      pt_axis(-b_ / 2, fr, a1)]
+                layer(P_, (0.0, -1.0, 0.0), fw, f"fw = {f2(fw, 3)} kN/m")
+            wat = pt_axis(0.0, fr, (a0 + a1) / 2)
+        elif kind == "sphere":
+            b_, zc_ = g["b"], g["zc"]
+            R = b_ / 2
+            size = max(b_, zc_ + R)
+            nr, ns = 12, 24
+            sp_ = lambda i, j: (R * math.sin(math.pi * i / nr) * math.cos(2 * math.pi * j / ns),
+                                R * math.sin(math.pi * i / nr) * math.sin(2 * math.pi * j / ns),
+                                zc_ + R * math.cos(math.pi * i / nr))
+            for i in range(nr):
+                for j in range(ns):
+                    q = [sp_(i, j), sp_(i + 1, j), sp_(i + 1, j + 1), sp_(i, j + 1)]
+                    q = [q[0], q[1], q[2]] if i == 0 else ([q[0], q[1], q[3]] if i == nr - 1 else q)
+                    if i == nr - 1:
+                        q = [sp_(i, j), sp_(i + 1, j), sp_(i, j + 1)]
+                    c = centroid(q)
+                    quad(q, n=unit_v((c[0], c[1], c[2] - zc_)), edges=[False] * len(q))
+            texts.append(((0.0, -R, zc_), "Fx = " + fl(res["F"])))       # the components acting together
+            if res.get("Fz", 0.0) > 0:
+                texts.append(((0.0, 0.0, zc_ + R), "Fz = " + fl(res["Fz"])))
+            wat = (0.0, -R, zc_)
+        elif kind == "flag":
+            h_, l_, ze, ft = g["h"], g["l"], g["ze"], g["ft"]
+            z0 = max(ze - h_, 0.0)
+            size = max(l_, ze)
+            if ft == 0:                                # taut – across the wind, between two poles
+                for x in (0.0, l_):
+                    lines.append(((x, 0.0, 0.0), (x, 0.0, ze), "#6b7280", 4))
+                q = [(0.0, 0.0, z0), (l_, 0.0, z0), (l_, 0.0, ze), (0.0, 0.0, ze)]
+                quad(q, fill="#f3f4f6", cull=False, n=(0.0, -1.0, 0.0))
+                layer(q, (0.0, -1.0, 0.0), res["F"], "Fw = " + fl(res["F"]))
+                wat = (l_ / 2, 0.0, (z0 + ze) / 2)
+            else:                                      # free – in the plane of the wind, the force along it
+                lines.append(((0.0, 0.0, 0.0), (0.0, 0.0, ze), "#6b7280", 4))
+                q = ([(0.0, 0.0, z0), (0.0, l_, z0), (0.0, l_, ze), (0.0, 0.0, ze)] if ft == 1 else
+                     [(0.0, 0.0, z0), (0.0, l_, (z0 + ze) / 2), (0.0, 0.0, ze)])
+                quad(q, fill="#f3f4f6", cull=False, n=(-1.0, 0.0, 0.0))
+                zc_ = (z0 + ze) / 2
+                texts.append(((0.0, l_ / 2 if ft == 1 else l_ / 3, zc_), "Fw = " + fl(res["F"])))
+                wat = (0.0, 0.0, zc_)
+        # load layers (as on buildings): thickness ∝ |value|
+        vmax = max([abs(x["value"]) for x in lay] + [1e-9])
+        tsc = 0.07 * size / vmax * self._load_scale()[1]
+        slabs = []
+        for x in lay:
+            P, n, v = x["P"], x["n"], x["value"]
+            d = tsc * abs(v)
+            if d < 1e-9:
+                continue
+            t = min(abs(v) / vmax, 1.0)
+            col = mix((255, 255, 255), PRESS_COL if v > 0 else SUCT_COL, 0.2 + 0.5 * t)
+            edge = mix((255, 255, 255), PRESS_COL if v > 0 else SUCT_COL, 0.85)
+            # pressure – the layer on the face (outside); suction – the same side (the load pulls away from it)
+            top = []
+            for q in P:
+                r_ = n
+                if x["radial"]:
+                    c_, m_ = x["radial"]
+                    r_ = unit_v(tuple((a_ - cc) * mm for a_, cc, mm in zip(q, c_, m_)))
+                top.append(tuple(a_ + nn * d for a_, nn in zip(q, r_)))
+            z = dict(id=len(slabs))
+            faces.append(dict(poly=top, fill=col, outline=edge, n=n, cull=True, label=x["label"], grp=x["grp"],
+                              prio=0, alpha=SNOW_ALPHA, on=("w", id(z)), value=v, kind="wall"))
+            slabs.append((P, top, n, d, col, edge, z, x["surf"]))
+        self._slab_walls(faces, slabs)
+        if press() and lay:                              # cylinder: the windward, minimum and lee values
+            amin = cyl_row(res["re"])[0]
+            for ang in (0.0, amin, 180.0):
+                best = min(lay, key=lambda x: abs(math.degrees(math.acos(clamp(-x["n"][1], -1, 1))) - ang)
+                           + (0 if x["n"][0] >= -1e-9 else 0.5))
+                c = centroid(best["P"])
+                texts.append((tuple(ci + ni * tsc * abs(best["value"]) for ci, ni in zip(c, best["n"])),
+                              f"{f2(best['value'], 3, True)} kN/m²"))
+        # the wind direction: an arrow towards the structure (on the ground)
+        if wat is not None:
+            ln_ = 0.45 * size
+            sx, sy = wdir
+            a = (wat[0] - sx * 1.55 * ln_, wat[1] - sy * 1.55 * ln_, 0.02)
+            b2 = (wat[0] - sx * 0.6 * ln_, wat[1] - sy * 0.6 * ln_, 0.02)
+            lines.append((a, b2, "#b45309", 7, "wind"))
         return faces, texts, lines
+
+    def draw_struct_dims(self, cv, P, facing, size):
+        """Dimensions of a structure: only the given sizes (clickable – the form field), on the side of the viewer;
+        the zones of a free-standing wall – blue (Wymiary pól)."""
+        st = self.stm
+        kind, p, o, res = st["kind"], st["p"], st["o"], st["res"]
+        g = struct_geom(kind, p, o)
+        col, z0_ = BDIM_COL, (0.0, 0.0, 0.0)
+        N = DIM_STEP * size * self._dim_scale()
+        front = facing((0, -1, 0))
+        txt = lambda v: "=" + f"{f2(v)} m"
+        bd, zd = self.bdims3d.get(), self.dims3d.get()
+        if kind in ("wall", "sign"):
+            L_ = g["l"] if kind == "wall" else g["b"]
+            h_, t_ = g["h"], g["t"]
+            z0 = 0.0 if kind == "wall" else g["zg"]
+            yv = (0.0, -1) if front else (t_, 1)
+            xs = (L_, 1) if facing((-1, 0, 0)) else (0.0, -1)      # heights at the far end
+            if zd and res.get("zones"):
+                segs = [(a1, b1, "") for nm, a1, b1, *_ in res["zones"]]
+                self._dchain(cv, P, lambda u: (u, yv[0], z0 + h_), lambda u: (u, yv[0], z0 + h_ + N), segs, z0_,
+                             DIM_COL)
+            if bd:
+                lv = 1
+                if kind == "wall" and o.get("shelter") and front:
+                    lv = 1
+                self._dchain(cv, P, lambda u: (u, yv[0], 0.0), lambda u: (u, yv[0] + yv[1] * lv * N, 0.0),
+                             [(0.0, L_, "", "t_l" if kind == "wall" else "t_b")], z0_, col)
+                hk = "t_h"
+                hs = ([(0.0, g["zg"], "", "t_zg")] if kind == "sign" and g["zg"] > 0 else []) + \
+                     [(z0, z0 + h_, "", hk)]
+                self._dchain(cv, P, lambda u: (xs[0], t_ / 2, u), lambda u: (xs[0] + xs[1] * N, t_ / 2, u), hs, z0_,
+                             col)
+                if kind == "wall" and p.get("lc", 0.0) > 0:
+                    self._dchain(cv, P, lambda u: (0.0, u, 0.0), lambda u: (-N, u, 0.0),
+                                 [(t_, t_ + p["lc"], "", "t_lc")], z0_, col)
+                if kind == "wall" and o.get("shelter"):
+                    self._dchain(cv, P, lambda u: (xs[0], u, 0.0), lambda u: (xs[0] + xs[1] * N, u, 0.0),
+                                 [(-p["x"], 0.0, "", "t_x")], z0_, col)
+                if kind == "sign" and res.get("e") is not None and not res.get("zones"):
+                    e = res["e"]
+                    self._dchain(cv, P, lambda u: (u, 0.0, z0 + h_), lambda u: (u, 0.0, z0 + h_ + N),
+                                 [(L_ / 2, L_ / 2 + e, "=e = ±" + f"{f2(e)} m")], z0_, DIM_COL)
+            return
+        if not bd:
+            return
+        if kind in STRUCT_LINE:
+            a0, a1, b_ = g["a0"], g["a1"], g["b"]
+            fr = g["front"]
+            hb = b_ / 2 + (g.get("row") and 2 * p["a"] or 0.0)
+            if g["vert"]:
+                xs = (hb, 1) if facing((-1, 0, 0)) else (-b_ / 2, -1)
+                # the axis length and the height z_e – at the far side
+                self._dchain(cv, P, lambda u: (xs[0], 0.0, u), lambda u: (xs[0] + xs[1] * N, 0.0, u),
+                             [(a0, a1, txt(g["l"]), "t_l")], z0_, col)
+                self._dchain(cv, P, lambda u: (xs[0], 0.0, u), lambda u: (xs[0] + xs[1] * 2 * N, 0.0, u),
+                             [(0.0, a1, txt(g["ze"]), "t_ze")], z0_, col, lab_t=0.7)
+                yb = fr if front else -fr
+                ny = -1 if front else 1
+                self._dchain(cv, P, lambda u: (u, yb, a1), lambda u: (u, yb + ny * N, a1),
+                             [(-b_ / 2, b_ / 2, "", "t_d" if kind == "lattice" else "t_b")], z0_, col)
+                if kind == "rect":
+                    xr = b_ / 2 if facing((1, 0, 0)) else -b_ / 2
+                    nx = 1 if facing((1, 0, 0)) else -1
+                    self._dchain(cv, P, lambda u: (xr, u, a1), lambda u: (xr + nx * N, u, a1),
+                                 [(-p["d"] / 2, p["d"] / 2, "", "t_d")], z0_, col)
+                if g.get("row"):
+                    self._dchain(cv, P, lambda u: (u, yb, a1), lambda u: (u, yb + ny * 2 * N, a1),
+                                 [(0.0, p["a"], "", "t_a"), (p["a"], 2 * p["a"], "", "t_a")], z0_, col)
+            else:
+                zc = g["zc"]
+                yv = (fr, -1) if front else (-fr, 1)
+                self._dchain(cv, P, lambda u: (u, yv[0], zc - b_ / 2), lambda u: (u, yv[0] + yv[1] * N, 0.0),
+                             [(a0, a1, "", "t_l")], z0_, col, via=lambda u: (u, yv[0], 0.0))
+                xs = (a1, 1) if facing((-1, 0, 0)) else (a0, -1)
+                self._dchain(cv, P, lambda u: (xs[0], 0.0, u), lambda u: (xs[0] + xs[1] * N, 0.0, u),
+                             [(zc - b_ / 2, zc + b_ / 2, "", "t_d" if kind == "lattice" else "t_b")], z0_, col)
+                self._dchain(cv, P, lambda u: (xs[0], 0.0, u), lambda u: (xs[0] + xs[1] * 2 * N, 0.0, u),
+                             [(0.0, zc + b_ / 2, txt(g["ze"]), "t_ze")], z0_, col, lab_t=0.3)
+                if kind == "rect":
+                    self._dchain(cv, P, lambda u: (xs[0], u, zc + b_ / 2), lambda u: (xs[0], u, zc + b_ / 2 + N),
+                                 [(-p["d"] / 2, p["d"] / 2, "", "t_d")], z0_, col)
+                if g.get("near") and p.get("zg", 0.0) > 0:
+                    zs = zc - b_ / 2 - p["zg"]
+                    self._dchain(cv, P, lambda u: (xs[0], 0.0, u), lambda u: (xs[0] + xs[1] * 3 * N, 0.0, u),
+                                 [(zs, zc - b_ / 2, txt(p["zg"]), "t_zg")], z0_, col)
+            if kind in ("rect", "poly") and p.get("r", 0.0) > 0:
+                self._angle_label(cv, P, (b_ / 2, 0.0, a1) if g["vert"] else (a1, 0.0, g["zc"] + b_ / 2),
+                                  f"r = {f2(p['r'])} m", "t_r")
+        elif kind == "sphere":
+            b_, zc_ = g["b"], g["zc"]
+            xs = (b_ / 2, 1) if facing((-1, 0, 0)) else (-b_ / 2, -1)
+            self._dchain(cv, P, lambda u: (0.0, 0.0, u), lambda u: (xs[0] + xs[1] * N, 0.0, u),
+                         ([(0.0, g["zg"], "", "t_zg")] if g["zg"] > 0 else []) + [(g["zg"], g["zg"] + b_, "", "t_b")],
+                         z0_, col, via=lambda u: (xs[0], 0.0, u))
+        elif kind == "flag":
+            h_, l_, ze, ft = g["h"], g["l"], g["ze"], g["ft"]
+            z0 = max(ze - h_, 0.0)
+            if ft == 0:
+                xs = (l_, 1) if facing((-1, 0, 0)) else (0.0, -1)
+                self._dchain(cv, P, lambda u: (u, 0.0, ze), lambda u: (u, 0.0, ze + N), [(0.0, l_, "", "t_l")],
+                             z0_, col)
+                self._dchain(cv, P, lambda u: (xs[0], 0.0, u), lambda u: (xs[0] + xs[1] * N, 0.0, u),
+                             [(z0, ze, "", "t_h")], z0_, col)
+                self._dchain(cv, P, lambda u: (xs[0], 0.0, u), lambda u: (xs[0] + xs[1] * 2 * N, 0.0, u),
+                             [(0.0, ze, "", "t_ze")], z0_, col, lab_t=0.3)
+            else:
+                ys = (l_, 1) if facing((0, -1, 0)) else (0.0, -1)
+                self._dchain(cv, P, lambda u: (0.0, u, ze if ft == 1 else (z0 + ze) / 2 + (ze - z0) / 2 * (1 - u / l_)),
+                             lambda u: (0.0, u, ze + N), [(0.0, l_, "", "t_l")], z0_, col)
+                self._dchain(cv, P, lambda u: (0.0, 0.0, u), lambda u: (0.0, -N, u), [(z0, ze, "", "t_h")], z0_, col)
+                self._dchain(cv, P, lambda u: (0.0, 0.0, u), lambda u: (0.0, -2 * N, u), [(0.0, ze, "", "t_ze")],
+                             z0_, col, lab_t=0.3)
 
     @staticmethod
     def _wind_side(faces, q, inner, slab):
@@ -16975,10 +19694,11 @@ class App:
         if cv is None or (not ctx and not self.win3d.isVisible()):
             return
         cv.delete("all")
+        cv._cube_on = False                              # the view cube – only on a drawn model on the screen
         W, Hc = cv.winfo_width(), cv.winfo_height()
         if W < 50:
             return
-        if not ctx and self.nb.currentIndex() == TAB_USE:   # Użytkowe tab – no 3D model
+        if not ctx and self._no_model():          # Użytkowe, a structure other than a building – no 3D model
             self.close_editor()
             if self.win3d is not None:
                 self.win3d.setWindowTitle("Model 3D" + self.edit_suffix())
@@ -16989,7 +19709,14 @@ class App:
             cv.update()
             return
         mode = self.mode3d.get()
-        if (self.wgeo if mode == "wiatr" else self.sgeo) is None:
+        if mode == "konstrukcje" or (not ctx and self._cur_mode() == "konstrukcje"):
+            mode = "konstrukcje"                         # a structure other than a building (scene_struct)
+            if self.stm is None:
+                cv.create_text(W / 2, Hc / 2, text="Brak modelu 3D dla tego przypadku", font=(FONT, 13, "bold"),
+                               fill=MUTED)
+                cv.update()
+                return
+        elif (self.wgeo if mode == "wiatr" else self.sgeo) is None:
             return
         if not ctx:
             if getattr(self, "tb_box", None) is not None and not self.tb_box.isVisible():
@@ -16998,15 +19725,58 @@ class App:
             self._title3d()
             self.close_editor()
         self._edit_keys = {}
-        key = (mode, getattr(self, "_scene_ver", 0), self.snow_case.get() if mode != "wiatr" else None,
-               self._load_scale()[0])
-        if getattr(self, "_scene_key", None) == key:          # rotation / pan only – geometry unchanged
-            faces, texts, lines, self._snow_ztop = self._scene_cache
+        loads = bool(self.loads3d.get())
+        q_, s_ = self._load_scale()
+        key = (mode, getattr(self, "_scene_ver", 0), self.snow_case.get() if mode != "wiatr" else None, loads)
+        if getattr(self, "_scene_key", None) in (key, key + (q_,)):   # rotation / pan / zoom – geometry unchanged
+            faces, texts, lines, self._snow_ztop, hold = self._scene_cache
         else:
-            faces, texts, lines = self.scene_wind() if mode == "wiatr" else self.scene_snow()
-            self._scene_key = key
-            self._scene_cache = (faces, texts, lines, getattr(self, "_snow_ztop", 0.0))
-        g = self.wgeo if mode == "wiatr" else self.sgeo
+            # The thickness of the load layers follows the zoom (`_load_scale`) and every point of the scene is linear
+            # in it: the scene is built once at two scales and a zoom only moves the points of the layers
+            # (p = p₁ + (s − 1)·Δp) – no rebuilding while zooming (the dome was slow). A scene whose structure
+            # depends on the scale (it should not happen) – built at the current scale, rebuilt at every step.
+            def build(f):
+                self._ls_force = f
+                try:
+                    fc, tx, ln = (self.scene_wind() if mode == "wiatr" else self.scene_struct()
+                                  if mode == "konstrukcje" else self.scene_snow())
+                finally:
+                    self._ls_force = None
+                if not loads:                    # Obciążenia off: the building / structure without the loads
+                    fc = [dict(f_, label=None, grp=None) if f_.get("label") else f_ for f_ in fc if "alpha" not in f_]
+                    tx = []
+                return fc, tx, ln, getattr(self, "_snow_ztop", 0.0)
+            f1, t1, l1, z1_ = build(1.0)
+            f2, t2, l2, z2_ = build(2.0)
+            hold = {}                    # what does not change while the view turns (the VTK geometry, normals)
+            if len(f1) == len(f2) and len(t1) == len(t2) and len(l1) == len(l2) and \
+                    all(len(a_["poly"]) == len(b_["poly"]) for a_, b_ in zip(f1, f2)):
+                mov = []
+                for i, (a_, b_) in enumerate(zip(f1, f2)):
+                    d_ = [tuple(y_ - x_ for x_, y_ in zip(p1, p2)) for p1, p2 in zip(a_["poly"], b_["poly"])]
+                    if any(abs(c_) > 1e-12 for v_ in d_ for c_ in v_):
+                        a_["_p1"], a_["_d"] = list(a_["poly"]), d_
+                        mov.append(i)
+                hold.update(lin=True, mov=mov, t=(t1, t2), l=(l1, l2), z=(z1_, z2_), s=1.0)
+                faces, texts, lines, self._snow_ztop = f1, t1, l1, z1_
+                self._scene_key = key
+            else:
+                faces, texts, lines, self._snow_ztop = build(s_)
+                self._scene_key = key + (q_,)
+            self._scene_cache = (faces, texts, lines, self._snow_ztop, hold)
+        if hold.get("lin"):                      # the load layers at the scale of this zoom
+            k_ = s_ - 1.0
+            if hold["s"] != s_:
+                for i in hold["mov"]:
+                    f_ = faces[i]
+                    f_["poly"] = [tuple(a_ + k_ * d_ for a_, d_ in zip(P_, D_)) for P_, D_ in zip(f_["_p1"], f_["_d"])]
+                hold["s"] = s_
+            mv = lambda a_, b_: tuple(x_ + k_ * (y_ - x_) for x_, y_ in zip(a_, b_))
+            (t1, t2), (l1, l2), (z1_, z2_) = hold["t"], hold["l"], hold["z"]
+            texts = [(mv(pa, pb), tx) for (pa, tx), (pb, _) in zip(t1, t2)]
+            lines = [(mv(la[0], lb[0]), mv(la[1], lb[1])) + tuple(la[2:]) for la, lb in zip(l1, l2)]
+            self._snow_ztop = z1_ + k_ * (z2_ - z1_)
+        g = self.wgeo if mode == "wiatr" else None if mode == "konstrukcje" else self.sgeo
         # view framing from the building only (load layers change with the zoom – the view must not jump)
         allp = [p for f_ in faces if "alpha" not in f_ for p in f_["poly"]] or [p for f_ in faces for p in f_["poly"]]
         xs, ys, zs = [p[0] for p in allp], [p[1] for p in allp], [p[2] for p in allp]
@@ -17054,7 +19824,7 @@ class App:
             return n
 
         # ground
-        m = (0.8 if mode == "wiatr" else 0.5) * size
+        m = (0.5 if mode == "śnieg" else 0.8) * size
         gr = [(x0 - m, y0 - m, 0), (x1 + m, y0 - m, 0), (x1 + m, y1 + m, 0), (x0 - m, y1 + m, 0)]
         cv._proj_ground = (x0 - m, x1 + m, y0 - m, y1 + m)
         # VTK (the graphics card) draws the ground / terrain and the faces; everything after is painted over it
@@ -17128,28 +19898,70 @@ class App:
         for f_ in faces:
             if f_.get("n") is None:
                 f_["n"] = outward(f_["poly"])
-        drawn = []
-        for f_ in faces:
-            if f_.get("cull") and not facing(f_["n"]):
-                continue
-            pr = [P(p) for p in f_["poly"]]
-            drawn.append((sum(p[2] for p in pr) / len(pr), f_, pr))
-        drawn = depth_sort(drawn)
-        for depth, f_, pr in drawn:
-            if sc3 is None:
+        if sc3 is None:                                   # the basic renderer: painter's algorithm
+            drawn = []
+            for f_ in faces:
+                if f_.get("cull") and not facing(f_["n"]):
+                    continue
+                pr = [P(p) for p in f_["poly"]]
+                drawn.append((sum(p[2] for p in pr) / len(pr), f_, pr))
+            drawn = depth_sort(drawn)
+            for depth, f_, pr in drawn:
                 cv.create_polygon(*[c for p in pr for c in p[:2]], fill=f_["fill"], outline=f_["outline"], width=1,
                                   alpha=f_.get("alpha"), edges=f_.get("edges"))
-                continue
-            Q = f_["poly"]
-            sc3["polys"].append((Q, f_["fill"], f_.get("alpha"), True))
-            if f_.get("outline"):
-                ed = f_.get("edges") or [True] * len(Q)
-                sc3["edges"].extend((Q[i], Q[(i + 1) % len(Q)], f_["outline"], 1)
-                                    for i, on in enumerate(ed) if on)
-            sc3["flat"].append(([p[:2] for p in pr], f_["fill"], f_["outline"], f_.get("alpha"), f_.get("edges"), 1))
-        for a3, b3, col, wdt in lines:
+        else:
+            # VTK: the geometry of the scene goes to the graphics card once (`VtkScene.prepare`); every frame only
+            # the visibility of the faces (culling, computed at once for all faces) and the camera change. No depth
+            # sorting – VTK has a depth buffer and depth peeling. Projected polygons only for the labelled faces.
+            import numpy as np
+            if "nrm" not in hold:
+                hold["nrm"] = np.array([f_["n"] for f_ in faces], float).reshape(-1, 3)
+                hold["cull"] = np.array([bool(f_.get("cull")) for f_ in faces], bool)
+                z3 = (0.0, 0.0, 0.0)
+                dp = [(Q, fill, a, lit, -1, None) for Q, fill, a, lit in sc3["polys"]]
+                de = [(a3, b3, col, w, -1, z3, z3) for a3, b3, col, w in sc3["edges"]]
+                for i, f_ in enumerate(faces):
+                    Q = f_.get("_p1") or f_["poly"]          # the points at the scale 1 and their shift
+                    D = f_.get("_d") or [z3] * len(Q)
+                    dp.append((Q, f_["fill"], f_.get("alpha"), True, i, f_.get("_d")))
+                    if f_.get("outline"):
+                        ed = f_.get("edges") or [True] * len(Q)
+                        n_ = len(Q)
+                        de.extend((Q[j], Q[(j + 1) % n_], f_["outline"], 1, i, D[j], D[(j + 1) % n_])
+                                  for j, on in enumerate(ed) if on)
+                hold["desc"] = (dp, de)
+            Nn = hold["nrm"]
+            vis = ~hold["cull"] | ((Nn[:, 0] * sy + Nn[:, 1] * cy) * cp - Nn[:, 2] * sp < -1e-6)
+            sc3.update(hold=hold, vis=vis, ls=s_ if hold.get("lin") else 1.0)
+            drawn = []
+            for i in np.nonzero(vis)[0]:
+                f_ = faces[int(i)]
+                if f_.get("grp") is not None or f_.get("label"):
+                    drawn.append((0.0, f_, [P(p) for p in f_["poly"]]))
+            flat_bg = list(sc3["flat"])
+
+            def flat_fn(faces=faces, vis=vis, P=P, flat_bg=flat_bg):
+                """Faces projected and sorted – only when VTK fails while painting (basic renderer)."""
+                dr = []
+                for i in np.nonzero(vis)[0]:
+                    f_ = faces[int(i)]
+                    pr = [P(p) for p in f_["poly"]]
+                    dr.append((sum(p[2] for p in pr) / len(pr), f_, pr))
+                return flat_bg + [([p[:2] for p in pr], f_["fill"], f_["outline"], f_.get("alpha"), f_.get("edges"), 1)
+                                  for _, f_, pr in depth_sort(dr)]
+            sc3["flat_fn"] = flat_fn
+        for ln_ in lines:
+            a3, b3, col, wdt = ln_[:4]
             a, b = P(a3), P(b3)
-            cv.create_line(a[0], a[1], b[0], b[1], fill=col, width=wdt)
+            kind_ = ln_[4] if len(ln_) > 4 else None
+            if kind_ == "wind":                      # the wind direction (structures)
+                cv.create_line(a[0], a[1], b[0], b[1], width=7, arrow="last", arrowshape=(18, 22, 8), fill=col)
+                tx, ty = a[0] + (a[0] - b[0]) * 0.25, a[1] + (a[1] - b[1]) * 0.25 + 12
+                cv.create_text(tx, ty, text="wiatr", font=(FONT, 10, "bold"), fill=col)
+            elif kind_ == "arrow":                   # a resultant force
+                cv.create_line(a[0], a[1], b[0], b[1], width=wdt, arrow="last", arrowshape=(12, 14, 5), fill=col)
+            else:
+                cv.create_line(a[0], a[1], b[0], b[1], fill=col, width=wdt)
         # one arrow and one label per zone (largest visible part)
         best = {}
         for depth, f_, pr in drawn:
@@ -17215,7 +20027,9 @@ class App:
                 self.draw_dims(cv, g, P, facing, size)
             if terr and self.odims3d.get():
                 self._oro_dims(cv, P, facing, terr)
-            if self.bdims3d.get():
+            if mode == "konstrukcje":
+                self.draw_struct_dims(cv, P, facing, size)
+            elif self.bdims3d.get():
                 self.draw_bdims(cv, mode, g, P, facing, size)
         finally:
             angles, self._defer_angles = self._defer_angles, None
@@ -17235,24 +20049,27 @@ class App:
                 self._label(cv, c[0], c[1], f_["label"], dodge=True, poly=[(p[0], p[1]) for p in pr])
         for args in angles:
             self._angle_label(*args)
-        if mode == "śnieg" and self.snow["overhang"]:
+        if mode == "śnieg" and self.snow["overhang"] and loads:
             self.draw_overhang(cv, g, P, facing, self.snow["overhang"], size)
         if hasattr(cv, "raise_tagged"):
             cv.raise_tagged("plaque")                 # dimension / load plaques above everything else (they mask it)
         self.draw_legend(cv, mode, g, Hc, fnt)
         if terr:
             cv.create_text(14, 14, anchor="nw", font=(FONT, 9, "bold"), fill=MUTED, text="orografia w realnej skali")
-        if not getattr(self, "_w_ok" if mode == "wiatr" else "_s_ok", True):
+        if not getattr(self, {"wiatr": "_w_ok", "konstrukcje": "_t_ok"}.get(mode, "_s_ok"), True):
             cv.create_text(12, 10, anchor="nw", fill="#b91c1c", font=(FONT, 9, "bold"),
-                           text="⚠ Błędne dane budynku – pokazano ostatni poprawny model")
+                           text="⚠ Błędne dane budowli – pokazano ostatni poprawny model" if mode == "konstrukcje"
+                           else "⚠ Błędne dane budynku – pokazano ostatni poprawny model")
         if ctx == "img":
             return
+        cv._cube_on = True
         card_view = ctx == "view" and not (isinstance(cv, CaseCanvas) and cv.is_active())
         cv.create_text(W - 10, Hc - 8, anchor="se", justify="right", fill="#8a929c", font=(FONT, 8),
                        text=("Kliknij podgląd, aby powiększać kółkiem i gestami\n" if card_view else "")
                        + "Lewy przycisk – obrót\nŚrodkowy (lub Shift + lewy) – przesuwanie\n"
                          "Kółko – powiększenie\nPanel dotykowy: dwa palce – przesuwanie, "
-                         "rozsunięcie – powiększenie\nKliknięcie wymiaru – zmiana")
+                         "rozsunięcie – powiększenie\nKliknięcie wymiaru – zmiana\n"
+                         "Kostka w rogu – widok z boku, z góry lub z narożnika")
 
     def _label(self, cv, x, y, text, outline="", dodge=False, poly=None):
         """Label with a background. When it overlaps a text drawn earlier: with dodge=True moved to the nearest
@@ -17306,7 +20123,29 @@ class App:
     def draw_legend(self, cv, mode, g, Hc, fnt):
         """Legend of the currently visible symbols only."""
         items = []                       # (kind, colour, description)
-        if mode == "wiatr":
+        if mode == "konstrukcje":
+            st = self.stm or {}
+            vals = [z[5] for z in st.get("res", {}).get("zones", [])]
+            kind = st.get("kind")
+            cylp = kind == "cyl" and not st["res"].get("cable") and st["o"].get("var", 0) == 0
+            if cylp:
+                vals = [1.0, -1.0]
+            if vals:
+                if any(v > 0 for v in vals):
+                    items.append(("box", mix((255, 255, 255), PRESS_COL, 0.6), "parcie (+) [kN/m²]"))
+                if any(v < 0 for v in vals):
+                    items.append(("box", mix((255, 255, 255), SUCT_COL, 0.6), "ssanie (−) [kN/m²]"))
+            elif kind in STRUCT_LINE:
+                items.append(("box", mix((255, 255, 255), PRESS_COL, 0.6), "obciążenie na jednostkę długości [kN/m]"))
+            elif kind == "sign" or (kind == "flag" and not st["o"].get("flag", 0)):
+                items.append(("box", mix((255, 255, 255), PRESS_COL, 0.6), "siła wypadkowa Fw [kN]"))
+            if self.dims3d.get() and st.get("res", {}).get("zones"):
+                items.append(("line", DIM_COL, "wymiary pól"))
+            if self.bdims3d.get():
+                items.append(("line", BDIM_COL, "wymiary budowli" if self._ctx == "img"
+                              else "wymiary budowli (kliknij, aby zmienić)"))
+            mode = "-"
+        elif mode == "wiatr":
             can = g.kind in ("can1", "can2")
             items.append(("box", mix((255, 255, 255), PRESS_COL, 0.6),
                           "parcie (+) [kN/m²] – ku dołowi" if can else "parcie (+) [kN/m²]"))
@@ -17322,9 +20161,11 @@ class App:
                 items.append(("line", SDIM_COL, "wymiary pól obciążenia"))
         if mode == "wiatr" and self.odims3d.get() and (self.wind.get("info") or {}).get("oro"):
             items.append(("line", ORO_COL, "wymiary orografii" if self._ctx == "img" else "wymiary orografii (kliknij, aby zmienić)"))
-        if self.bdims3d.get():
+        if self.bdims3d.get() and mode != "-":
             items.append(("line", BDIM_COL, "wymiary budynku" if self._ctx == "img"       # printout – no clicking
                           else "wymiary budynku (kliknij, aby zmienić)"))
+        if not self.loads3d.get():
+            items = [x for x in items if x[0] == "line" and x[1] != OVH_COL]
         y = Hc - 14 - 20 * len(items)
         for kind, col, txt in items:
             if kind == "box":
@@ -17511,6 +20352,14 @@ class App:
         N = DIM_STEP * size * self._dim_scale()
         used = getattr(self, "_dim_used", set())
         first = lambda side: 2 if side in used else 1           # first free level on the given side
+        rings = [] if snow else flat_edge_rings(g)
+        if rings:                                # rounded / mansard eaves: r or α at the edge on the viewer's side
+            u_, z_ = rings[len(rings) // 2]
+            y_ = u_ if facing((0, -1, 0)) else g.B - u_
+            et = g.p.get("edge")
+            txt, key = ((f"r = {f2(g.p['r'])} m", "w_r") if et == EDGE_TYPES[1] else
+                        (f"α = {f2(g.p.get('am', 45.0), 1)}°", "w_am"))
+            self._angle_label(cv, P, (0.3 * g.L, y_, z_), txt, key)
         if g.kind == "dome":
             sh = g.shape
             yf, ny = (0.0, -1) if facing((0, -1, 0)) else (sh.D, 1)
@@ -18130,6 +20979,7 @@ def main():
         app.open_path(files[0])
     app.pw.rebuild()
     app.pw.showMaximized()                           # always the main window first, maximised
+    QTimer.singleShot(300, VtkScene.warm_up)         # the 3D engine ready before the first 3D view (background)
     if "--autotest" not in sys.argv and not os.environ.get("KAYENN_NO_UPDATE"):
         QTimer.singleShot(3000, app.auto_update_check)
     if "--autotest" in sys.argv:                     # package check: start, report, screenshots, quit

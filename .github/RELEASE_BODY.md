@@ -1,46 +1,40 @@
-# KAYENN 0.2.3 – automatic update fixed on Windows
+# KAYENN 0.2.4 – wind on other structures, a view cube, a faster 3D engine
 
 KAYENN is a program for structural engineers for determining building loads, released under the open source
 **MIT** licence.
 
-## What's new in 0.2.3
+## What's new in 0.2.4
 
-> [!IMPORTANT]
-> **Windows: the one-click update did not install anything.** In 0.2.1 and 0.2.2, **About → Check for updates →
-> Install** downloaded the new version and closed the program, but the installer was never started – after the next
-> start the old version was still there. Fixed in 0.2.3. **Because the bug is in the version you have, install
-> 0.2.3 on Windows once by hand** (download the installer below); from 0.2.3 on, updates install with one click.
-> If KAYENN is installed for all users (in *Program Files*), Windows asks for administrator permission during the
-> update – the request may appear as a flashing button on the taskbar.
->
-> macOS and Linux were not affected.
-
-## Since 0.2.0
-
-- **3D models drawn on the graphics card (VTK).** Every 3D view – the 3D model window, the previews in the case
-  cards and the printout images – now uses one engine: lighting, real depth and correctly blended translucent load
-  layers. Dimensions, labels and the legend stay where they were. On a computer without a suitable OpenGL driver
-  (e.g. a virtual machine) the program automatically uses the previous renderer; the engine can also be switched in
-  **File → Options**. This is the base for the future FEM module.
-- **Printed and working cases.** Every case card and case group has a **printed** checkbox. Unchecked, the case
-  (or the whole group) stays in the project but is left out of the printout and the numbering: it gets the number
-  of the printed item before it plus a letter – 2.1, 2.1A, 2.2; a group 1A with its cases 1.1A, 1.2A.
-- **Automatic updates.** When a new version is found (at start or in **About → Check for updates**), the
-  **Install** button downloads the package for your system, checks its SHA-256 checksum, closes the program (asking
-  to save the project as usual), installs the new version and starts it again – no manual download or installer
-  wizard. The console command `UPDATES INSTALL` does the same.
-  - Windows: the installer runs in the background; macOS: KAYENN.app is replaced (on Apple Silicon the native
-    package is used); Linux: the `.deb` is installed after the system asks for your password, an unpacked
-    `.tar.gz` folder is replaced. The portable Windows version opens the download page.
-- **The keyboard shortcut file is always in English**, whatever the interface language. An existing file gets the
-  English header and the English command names (also a file from the very first versions, which 0.2.1 left in
-  Polish); your own shortcuts are kept.
-- The macOS disk image shows an **Applications** link to drag the program to.
+- **Wind on structures other than buildings** (Wind tab, the **Structure** list – together with the building
+  shapes): free-standing walls and fences (with a return corner and a sheltering wall), signboards, structural
+  elements of rectangular, sharp-edged and polygonal sections, circular cylinders (also in a row and near a flat
+  surface), spheres, lattice structures and flags (PN-EN 1991-1-4, 7.4 and 7.6–7.13), with the structural factor
+  cₛcd (Annex B, procedure 1). Every structure has a **3D model** with the load and its given dimensions; for a
+  circular cylinder choose the **Variant**: the pressure around the circumference (7.9.1) or the force per unit
+  length (7.9.2).
+- **Terrain**: a smoother terrain upwind (NA.16), a building more than twice as high nearby (A.4) and the
+  displacement height in towns (A.5).
+- **3D models of the wind load**
+  - **The dome** shows its roof load in 3D like the other roofs; on curved surfaces (dome, cylindrical walls,
+    vaulted roofs) the load layers follow the curve without gaps.
+  - **Flat roofs with rounded or mansard eaves** show the edge of the building under the load.
+  - **A view cube** in the corner of every 3D view (as in AutoCAD): click a face, an edge or a corner for the
+    view from that side; in a view square to a face, arrows lead to the neighbouring views and turn the view from
+    above. The house above the cube restores the default view (the *Default view* button is gone).
+  - **Zoom about the point under the cursor** – that point also becomes the centre of rotation.
+  - **Loads** checkbox – shows the building without the loads.
+- **A faster 3D engine**: rotating and zooming large models (e.g. a dome) is several times smoother, and the first
+  3D view opens without the few-second wait after the start.
+- **Recently added**: the button above the case list (always first) opens a window with the cases you added
+  recently in any project – preview them as in the project (3D model, report) and **Add** them again; the case
+  takes the location and zones of the current project.
+- **Own loads**: formulas with units in the value field, e.g. `0,12[m]*25[kN/m3]` – the units are checked and the
+  unit of the result is set automatically.
+- The forms no longer move when you switch the building shape or the structure (one field per row on the Wind tab).
 
 > [!NOTE]
-> **Updating:** on Windows download and install 0.2.3 by hand (see above); on macOS and Linux from 0.2.1 or 0.2.2
-> use **Install**, from 0.2.0 or 0.1.0 download it by hand. Your settings, keyboard shortcuts and material
-> databases are kept.
+> **Updating:** from 0.2.3 use **About → Check for updates → Install**; from older versions download the package
+> for your system below. Your settings, keyboard shortcuts and material databases are kept.
 
 ## What it does
 
@@ -67,9 +61,9 @@ clause of the code), crashes, unclear behaviour and awkward English wording are 
 
 | System | File |
 |---|---|
-| Windows 10 / 11 | `KAYENN-0.2.3-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
-| macOS 12+ | `KAYENN-0.2.3-macos-arm64.dmg` (Apple Silicon) or `…-macos-x64.dmg` (Intel) |
-| Linux | `kayenn_0.2.3_amd64.deb` or `KAYENN-0.2.3-linux-x86_64.tar.gz` |
+| Windows 10 / 11 | `KAYENN-0.2.4-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
+| macOS 12+ | `KAYENN-0.2.4-macos-arm64.dmg` (Apple Silicon) or `…-macos-x64.dmg` (Intel) |
+| Linux | `kayenn_0.2.4_amd64.deb` or `KAYENN-0.2.4-linux-x86_64.tar.gz` |
 
 The program is not digitally signed yet – on the first start the system may warn about an unknown publisher
 (Windows: “More info” → “Run anyway”; macOS: right click → “Open”).
