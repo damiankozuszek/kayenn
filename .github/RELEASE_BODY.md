@@ -1,36 +1,32 @@
-# KAYENN 0.2.4 – wind on other structures, a view cube, a faster 3D engine
+# KAYENN 0.2.5 – formulas like in SMath, a wind rose
 
 KAYENN is a program for structural engineers for determining building loads, released under the open source
 **MIT** licence.
 
-## What's new in 0.2.4
+## What's new in 0.2.5
 
-- **Wind on structures other than buildings** (Wind tab, the **Structure** list – together with the building
-  shapes): free-standing walls and fences (with a return corner and a sheltering wall), signboards, structural
-  elements of rectangular, sharp-edged and polygonal sections, circular cylinders (also in a row and near a flat
-  surface), spheres, lattice structures and flags (PN-EN 1991-1-4, 7.4 and 7.6–7.13), with the structural factor
-  cₛcd (Annex B, procedure 1). Every structure has a **3D model** with the load and its given dimensions; for a
-  circular cylinder choose the **Variant**: the pressure around the circumference (7.9.1) or the force per unit
-  length (7.9.2).
-- **Terrain**: a smoother terrain upwind (NA.16), a building more than twice as high nearby (A.4) and the
-  displacement height in towns (A.5).
-- **3D models of the wind load**
-  - **The dome** shows its roof load in 3D like the other roofs; on curved surfaces (dome, cylindrical walls,
-    vaulted roofs) the load layers follow the curve without gaps.
-  - **Flat roofs with rounded or mansard eaves** show the edge of the building under the load.
-  - **A view cube** in the corner of every 3D view (as in AutoCAD): click a face, an edge or a corner for the
-    view from that side; in a view square to a face, arrows lead to the neighbouring views and turn the view from
-    above. The house above the cube restores the default view (the *Default view* button is gone).
-  - **Zoom about the point under the cursor** – that point also becomes the centre of rotation.
-  - **Loads** checkbox – shows the building without the loads.
-- **A faster 3D engine**: rotating and zooming large models (e.g. a dome) is several times smoother, and the first
-  3D view opens without the few-second wait after the start.
-- **Recently added**: the button above the case list (always first) opens a window with the cases you added
-  recently in any project – preview them as in the project (3D model, report) and **Add** them again; the case
-  takes the location and zones of the current project.
-- **Own loads**: formulas with units in the value field, e.g. `0,12[m]*25[kN/m3]` – the units are checked and the
-  unit of the result is set automatically.
-- The forms no longer move when you switch the building shape or the structure (one field per row on the Wind tab).
+- **Own loads – formulas in their own window.** The value field now shows only the value; the **fx** button in the
+  field (or **Ctrl+G**) opens the formula window – a worksheet like in SMath:
+  - mathematics written as mathematics: fractions (also multi-level), brackets, square roots and roots of any
+    degree, powers and absolute values are built as you type (`/`, `(`, `\`, Ctrl+\, `^`, `|`);
+  - **variables** (`a=` after a new name becomes the assignment `:=`; a variable is read below its definition),
+    lower and upper indexes in names (`_`, Ctrl+_), **Greek letters** (Ctrl+G after a letter);
+  - **units** after `'` – the known ones (`'kN`, `'m`, `'kg` …) and **your own** (`'pcs`) – only the result is
+    checked;
+  - comparisons, **and / or / xor**, the condition **if – else** drawn on several levels, trigonometric functions,
+    logarithms;
+  - comments anywhere on an unlimited sheet; a region that grows moves the ones below it down; the house in the
+    corner shows everything; a help with the keys can be shown on the sheet (**Help**).
+
+  The value of the item is the last expression ending with `=`; a result with units sets the unit of the item.
+  The printout shows the whole worksheet.
+- **Wind rose** on the 3D model of the wind when a sector of the directional factor is chosen.
+- **View cube**: the house returns to the default view with the same smooth turn, zoom and position included.
+- **Updates**: the downloaded installer is removed after a successful installation.
+
+> [!IMPORTANT]
+> The text formulas of 0.2.4 (e.g. `0,12[m]*25[kN/m3]` typed in the value field) are not read any more – such an
+> item shows an invalid value; write the formula again in the formula window.
 
 > [!NOTE]
 > **Updating:** from 0.2.3 use **About → Check for updates → Install**; from older versions download the package
@@ -61,9 +57,9 @@ clause of the code), crashes, unclear behaviour and awkward English wording are 
 
 | System | File |
 |---|---|
-| Windows 10 / 11 | `KAYENN-0.2.4-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
-| macOS 12+ | `KAYENN-0.2.4-macos-arm64.dmg` (Apple Silicon) or `…-macos-x64.dmg` (Intel) |
-| Linux | `kayenn_0.2.4_amd64.deb` or `KAYENN-0.2.4-linux-x86_64.tar.gz` |
+| Windows 10 / 11 | `KAYENN-0.2.5-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
+| macOS 12+ | `KAYENN-0.2.5-macos-arm64.dmg` (Apple Silicon) or `…-macos-x64.dmg` (Intel) |
+| Linux | `kayenn_0.2.5_amd64.deb` or `KAYENN-0.2.5-linux-x86_64.tar.gz` |
 
 The program is not digitally signed yet – on the first start the system may warn about an unknown publisher
 (Windows: “More info” → “Run anyway”; macOS: right click → “Open”).

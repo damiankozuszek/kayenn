@@ -54,8 +54,11 @@ programem do obliczeń konstrukcji metodą elementów skończonych (MES).
 
 - **Obciążenia powierzchniowe, liniowe i skupione** wpisywane ręcznie lub tworzone z **bazy materiałów**
   (ciężar objętościowy × grubość, szerokość, długość), z mnożnikiem, np. liczbą sztuk.
-- **Formuły z jednostkami** w polu wartości, np. `0,12[m]*25[kN/m3]` albo `78,5[kN/m3]*8[mm]/cos(30)`: program
-  sprawdza jednostki (dodanie metrów do kiloniutonów jest błędem) i sam ustala jednostkę wyniku.
+- **Formuły** we własnym oknie (przycisk **fx** w polu wartości, Ctrl+G): arkusz jak w SMath – ułamki,
+  pierwiastki, potęgi i nawiasy zapisane jak w matematyce, zmienne (`:=`), litery greckie, jednostki po `'`
+  (np. `25'kN/'m^3`) i komentarze w dowolnym miejscu arkusza. Program sprawdza jednostki (dodanie metrów do
+  kiloniutonów jest błędem) i sam ustala jednostkę wyniku; w polu wartości jest tylko wynik, a na wydruku – cały
+  arkusz.
 - Baza zawiera wszystkie materiały z Załącznika A do PN-EN 1991-1-1, ciężary ponad dwóch tysięcy kształtowników
   stalowych (z „Tablic do projektowania konstrukcji metalowych”) i wiele materiałów wykończeniowych. Możesz ją
   dowolnie rozbudowywać i zmieniać, a każda pozycja pokazuje swoje źródło.

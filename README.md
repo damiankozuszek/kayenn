@@ -54,8 +54,11 @@ structural analysis program based on the finite element method (FEM).
 
 - **Area, line and point loads** entered by hand or derived from the **material database** (unit weight ×
   thickness, width, length), with a multiplier, e.g. a number of pieces.
-- **Formulas with units** in the value field, e.g. `0,12[m]*25[kN/m3]` or `78,5[kN/m3]*8[mm]/cos(30)`: the program
-  checks the units (adding metres to kilonewtons is an error) and sets the unit of the result itself.
+- **Formulas** in their own window (the **fx** button in the value field, Ctrl+G): a worksheet like in SMath –
+  fractions, roots, powers and brackets written as mathematics, variables (`:=`), Greek letters, units after `'`
+  (e.g. `25'kN/'m^3`) and comments anywhere on the sheet. The program checks the units (adding metres to
+  kilonewtons is an error) and sets the unit of the result itself; the value field shows only the result, and the
+  printout shows the whole worksheet.
 - The database contains all materials from Annex A of PN-EN 1991-1-1, the weights of over two thousand steel
   sections (from “Tablice do projektowania konstrukcji metalowych”) and many finishing materials. You can extend
   and change it freely, and every item shows its source.
