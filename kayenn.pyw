@@ -9084,7 +9084,7 @@ def mat_save(path, items):
 
 # --- formulas in the value field of an own-load item (KAYENN Lab): „0,12[m]*25[kN/m3]”, „2*(0,5+0,3)”
 # Units of the formula worksheet (`ws_calc`): every value carries its dimension (kN, m, angle) – adding different
-# units is an error; trigonometric functions take degrees (a plain number) or an angle with 'deg / 'rad.
+# units is an error; an angle – radians by default (a plain number, 'rad), 'deg / '° – degrees, 'grad – grads.
 G_ACC = 9.81                                            # kg → kN (as the steel sections of the database)
 FORMULA_UNITS = {                                       # atom: (factor to kN / m / rad, (kN, m, angle) exponents)
     "m": (1.0, (0, 1, 0)), "cm": (0.01, (0, 1, 0)), "mm": (0.001, (0, 1, 0)), "km": (1000.0, (0, 1, 0)),
@@ -9092,6 +9092,7 @@ FORMULA_UNITS = {                                       # atom: (factor to kN / 
     "kg": (G_ACC / 1000, (1, 0, 0)), "t": (G_ACC, (1, 0, 0)),
     "Pa": (0.001, (1, -2, 0)), "kPa": (1.0, (1, -2, 0)), "MPa": (1000.0, (1, -2, 0)),
     "°": (math.pi / 180, (0, 0, 1)), "deg": (math.pi / 180, (0, 0, 1)), "rad": (1.0, (0, 0, 1)),
+    "grad": (math.pi / 200, (0, 0, 1)),                 # grads (gons): a right angle = 100 grad
     "%": (0.01, (0, 0, 0)), "-": (1.0, (0, 0, 0)),
 }
 _SUP = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
@@ -9150,17 +9151,30 @@ WS_GREEK = dict(zip(_WS_LAT, _WS_GRK))           # Ctrl+G – the letter before 
 WS_GREEK.update(zip(_WS_GRK, _WS_LAT))
 WS_RESERVED = ("pi", "π") + WS_FUNCS + WS_NAMED + WS_WORDS
 # the keys of the formula window (fixed – not in the shortcut file): the legend, a watermark of the sheet
-WS_HINTS = (("/", "ułamek"), ("(", "nawias"), ("\\", "pierwiastek kwadratowy"), ("Ctrl+\\", "pierwiastek n-tego stopnia"),
+WS_HINTS = (("2+2=", "na początek: wpisz działanie i znak =, aby otrzymać wynik"),
+            ("+ - *", "dodawanie, odejmowanie, mnożenie"), ("/", "ułamek (dzielenie)"), ("(", "nawias"),
+            ("\\", "pierwiastek kwadratowy"), ("Ctrl+\\", "pierwiastek n-tego stopnia"),
             ("|", "wartość bezwzględna"), ("^", "potęga"), ("_", "indeks dolny (po literze)"),
             ("Ctrl+_", "indeks górny (po literze)"), ("'", "jednostka – także własna, np. 'kN, 'szt"),
-            ("=", "wynik; po nazwie zmiennej – przypisanie"), ("< >", "mniejszy, większy"),
-            ("Ctrl+< Ctrl+>", "mniejszy lub równy, większy lub równy"), ("= !=", "równy, nierówny (w warunku)"),
-            ("and or xor", "i, lub, albo (+ Spacja)"), ("if(", "warunek – if w, poniżej a, else b (strzałki ↑↓)"),
-            ("sin cos tan cot", "funkcje trygonometryczne (kąt w stopniach)"), ("ln log", "logarytm naturalny, "
-             "dziesiętny; log(x; n) – o podstawie n"), ("Ctrl+G", "litera grecka (po literze)"), ('"', "komentarz"),
+            ("Klik na jednostce wyniku", "zmiana jednostki wyniku, np. cm zamiast m, deg zamiast rad"),
+            ("=", "wynik; po nowej nazwie zmiennej – przypisanie"),
+            (":", "przypisanie (:=) – zawsze, także ponowne zdefiniowanie zmiennej"), ("< >", "mniejszy, większy"),
+            ("Ctrl+< Ctrl+>", "mniejszy lub równy, większy lub równy"), ("= !=", "równy, nierówny"),
+            ("and or xor", "i, lub, albo – wpisz słowo i naciśnij Spację"), ("if(", "warunek"),
+            ("sin( cos( tan( cot(", "funkcje trygonometryczne"), ("asin( acos( atan(", "funkcje odwrotne (wynik – kąt)"),
+            ("30'deg 30'grad", "kąt w stopniach, gradach; bez jednostki lub 'rad – w radianach"),
+            ("ln( log(", "logarytm naturalny, dziesiętny"), ("exp( min( max(", "eˣ, najmniejsza, największa wartość"),
+            ("Ctrl+G", "zmiana litery wpisanej z klawiatury na grecki odpowiednik"), ('"', "komentarz"),
             ("Spacja", "wyjście z ułamka, nawiasu…"), ("Enter", "koniec obszaru"),
             ("Strzałki", "przesuwanie zaznaczonych obszarów"), ("Ctrl+Z  Ctrl+Y", "cofnij, ponów"),
             ("Ctrl+kółko", "powiększenie"))
+# what an empty slot expects (drawn in it while it is empty – Issue #6): the argument of a function, the slots of if
+WS_ANGLE_HINT = "kąt: liczba lub 'rad – radiany, 'deg – stopnie, 'grad – grady"
+WS_ARG_HINTS = {"sin": WS_ANGLE_HINT, "cos": WS_ANGLE_HINT, "tan": WS_ANGLE_HINT, "cot": WS_ANGLE_HINT,
+                "asin": "liczba", "acos": "liczba", "atan": "liczba", "ln": "liczba dodatnia",
+                "log": "liczba; podstawa (bez niej – 10)", "exp": "wykładnik", "min": "a; b; …", "max": "a; b; …"}
+WS_IF_HINTS = ("warunek", "wartość, gdy prawda", "wartość, gdy fałsz")
+WS_INCOMPLETE = ("niewypełnione pole", "niepełne wyrażenie", "pusty obszar")    # not an error while being typed
 
 
 class WC:
@@ -9493,7 +9507,7 @@ def _ws_unit(box):
 
 def _ws_angle(q, fn):
     if not q[1]:
-        return math.radians(q[0])                        # a plain number – degrees
+        return q[0]                                      # a plain number – radians (Issue #6; 30'deg – degrees)
     if q[1] == (("rad", 1),):
         return q[0]
     raise FormulaError(f"argument funkcji {fn} musi być kątem (jest: {dims_text(q[1])})")
@@ -9721,6 +9735,15 @@ def ws_evaluate(regs):
         try:
             res[i] = dict(ws_region(r["row"], env), ok=True, err="")
             last[res[i]["kind"]] = res[i]
+            if r.get("unit") and res[i]["show"]:             # the unit of the result chosen by the user
+                try:
+                    uq = ws_unit_q(r["unit"])
+                    if not ws_unit_fits(uq[1], res[i]["q"][1]):
+                        raise FormulaError(f"jednostka „{r['unit']}” nie pasuje do wyniku "
+                                           f"({dims_text(res[i]['q'][1])})")
+                    res[i]["uq"] = uq
+                except FormulaError as e:
+                    res[i]["uerr"] = str(e)
         except FormulaError as e:
             res[i] = dict(ok=False, err=str(e), kind=None, q=None, show=False)
             err = err or str(e)
@@ -9748,6 +9771,8 @@ def ws_regions(sheet):
         except FormulaError:
             row = [WC(c) for c in str(r.get("wzor", "")) if not c.isspace()]
         out.append(dict(x=x, y=y, row=row))
+        if str(r.get("jedn") or "").strip():
+            out[-1]["unit"] = str(r["jedn"]).strip()
     return out
 
 
@@ -9759,6 +9784,8 @@ def ws_sheet(regs):
         if r.get("row") is not None:
             if r["row"]:
                 out.append({"x": x, "y": y, "wzor": ws_dump(r["row"])})
+                if r.get("unit"):
+                    out[-1]["jedn"] = r["unit"]
         elif str(r.get("text") or "").strip():
             out.append({"x": x, "y": y, "tekst": r["text"]})
     return {"regiony": out}
@@ -9798,14 +9825,51 @@ def ws_num(v, dec=","):
     return s.replace(".", dec).replace("-", "−")
 
 
-def ws_unit_value(q):
-    """(value shown, unit text) of a result: an angle in degrees, a number without a unit – no text."""
+def ws_unit_value(q, uq=None, unit=None):
+    """(value shown, unit text) of a result: an angle in radians (the default unit of angles; another one – a click
+    on the unit), a number without a unit – no text; uq / unit – the unit chosen for the result (`ws_unit_q`)."""
     v, d = q
+    if uq is not None and unit:
+        return v / uq[0], ws_unit_label(unit)
     if not d:
         return v, ""
-    if d == (("rad", 1),):
-        return math.degrees(v), "°"
     return v, dims_text(d)
+
+
+_UNSUP = {c: str(i) for i, c in enumerate("⁰¹²³⁴⁵⁶⁷⁸⁹")}
+
+
+def ws_unit_q(text):
+    """The unit typed for the result of a region (a click on the unit of the result – Issue #6): „cm”, „kN/m2”,
+    „kN/m^2”, „kN/m²”, „kN·m”, „deg”, „grad” → (factor to kN / m / rad, dimension). FormulaError – not a unit."""
+    t = str(text or "").strip()
+    bad = FormulaError(f"niepoprawna jednostka „{t}”")
+    if not t or not re.search(r"[^\W\d_]|[°%]", t):
+        raise bad
+    s = re.sub(r"(⁻?)([⁰¹²³⁴⁵⁶⁷⁸⁹]+)",
+               lambda k: "^" + ("-" if k.group(1) else "") + "".join(_UNSUP[c] for c in k.group(2)), t)
+    s = re.sub(r"([^\W\d_]+|[°%])(-?\d+)?", lambda k: "'" + k.group(1) + ("^" + k.group(2) if k.group(2) else ""), s)
+    s = s.replace("·", "*").replace("×", "*").replace(" ", "")
+    try:
+        q = ws_calc(ws_parse(s), {})
+    except FormulaError:
+        raise bad from None
+    if not q[0] > 0:
+        raise bad
+    return q
+
+
+def ws_unit_fits(ud, qd):
+    """Can a result of the dimension qd be shown in a unit of the dimension ud? The same dimension – or differing
+    only by the angle: a plain number is an angle in radians (Issue #6: π/6 shown as 30 deg, an angle as a number)."""
+    return ud == qd or tuple(x for x in ud if x[0] != "rad") == tuple(x for x in qd if x[0] != "rad")
+
+
+def ws_unit_label(text):
+    """The unit of a result as shown: „kN/m^2”, „kN/m2” → „kN/m²”, „*” → „·”."""
+    s = str(text or "").strip().replace("*", "·")
+    s = re.sub(r"\^\{?(-?\d+)\}?", lambda k: k.group(1).translate(_SUP), s)
+    return re.sub(r"([^\W\d_])(-?\d+)", lambda k: k.group(1) + k.group(2).translate(_SUP), s)
 
 
 def lab_base(it):
@@ -9834,6 +9898,8 @@ def ws_cmd_args(sheet):
     out = []
     for r in (sheet or {}).get("regiony") or []:
         body = ("#" + r["tekst"].replace("\\", "\\\\").replace("\n", "\\n")) if "tekst" in r else r.get("wzor", "")
+        if "tekst" not in r and r.get("jedn"):
+            body += f"[{r['jedn']}]"                     # the unit chosen for the result: „a=[cm]”
         out.append(cq(f"@{r['x']}:{r['y']} {body}".replace('"', "”")))
     return " ".join(out)
 
@@ -9853,7 +9919,11 @@ def ws_from_args(args, layout=None):
             t = re.sub(r"\\(n|\\)", lambda k: "\n" if k.group(1) == "n" else "\\", s[1:])
             r = dict(x=x, y=yy if yy is not None else y, text=t)
         else:
-            r = dict(x=x, y=yy if yy is not None else y, row=ws_parse(s))
+            u = re.match(r"^(.*=)\s*\[([^\[\]]*)\]\s*$", s, re.S)   # „a=[cm]” – the unit of the result
+            r = dict(x=x, y=yy if yy is not None else y, row=ws_parse(u.group(1) if u else s))
+            if u and u.group(2).strip():
+                ws_unit_q(u.group(2))
+                r["unit"] = u.group(2).strip()
         regs.append(r)
         h = layout.region_size(r)[1] if layout is not None else 24.0
         y = max(y, r["y"] + h + 12)
@@ -10140,26 +10210,34 @@ class WsLayout:
     def adv(self, fm, s):
         return _raw_fn(QFontMetricsF, "horizontalAdvance")(fm, s)
 
-    def row(self, row, size, names=True, color=None):
+    def row(self, row, size, names=True, color=None, hint=None):
         """(w, a, d, ops) of a row of nodes; names – letters italic (variable names; the names of functions before a
         bracket upright), color – one colour (a unit). In a name „_” starts the lower index, „`” the upper one (not
-        drawn); „:=” is drawn as `self.assign` („=” – except in the region being edited)."""
+        drawn); „:=” is drawn as `self.assign` („=” – except in the region being edited). hint – what an empty row
+        expects (drawn in it, e.g. „kąt” in sin( ) – WS_ARG_HINTS, WS_IF_HINTS)."""
         if not row:
             w, a, d = 0.62 * size, 0.74 * size, 0.12 * size
+            if hint:
+                f, fm = self.font(size * 0.78, True)
+                t = tr(hint)
+                w, d = self.adv(fm, t) + 0.4 * size, 0.22 * size
+                return w, a, d, [["ph", 0.0, 0.0, w, a, d, t, f, 0.2 * size],
+                                 ["row", 0.0, 0.0, row, a, d, [0.0], w]]
             return w, a, d, [["ph", 0.0, 0.0, w, a, d], ["row", 0.0, 0.0, row, a, d, [0.0], w]]
 
         def namech(x, first=False):
             return isinstance(x, WC) and len(x.c) == 1 and (x.c.isalpha() or not first and (x.c.isdigit()
                                                                                              or x.c in WS_IDX))
-        upright, i = set(), 0
+        upright, fn_of, i = set(), {}, 0
         while i < len(row):                                # function names (sin, log, if …) before „(” – upright
             if namech(row[i], True):
                 j = i
                 while j < len(row) and namech(row[j]):
                     j += 1
-                if "".join(x.c for x in row[i:j]) in WS_FUNCS and j < len(row) and isinstance(row[j], WB) \
-                        and row[j].k == "paren":
+                nm = "".join(x.c for x in row[i:j])
+                if nm in WS_FUNCS and j < len(row) and isinstance(row[j], WB) and row[j].k == "paren":
                     upright.update(range(i, j))
+                    fn_of[j] = nm                          # the bracket of a function – the hint of its argument
                 i = j
             else:
                 i += 1
@@ -10202,7 +10280,7 @@ class WsLayout:
                 x += l_ + w + r_
             else:
                 in_name, idx = False, None
-                w, a, d, kid = self.node(n, size)
+                w, a, d, kid = self.node(n, size, fn_of.get(k))
                 ops += _ws_shift(kid, x, 0.0)
                 x += w
                 A, D = max(A, a), max(D, d)
@@ -10211,7 +10289,7 @@ class WsLayout:
         ops.append(["row", 0.0, 0.0, row, A, D, bounds, x])
         return x, A, D, ops
 
-    def node(self, n, size):
+    def node(self, n, size, fn=None):
         k, lw, ink = n.k, max(1.0, size / 14.0), self.INK
         if k == "frac":
             nw, na, nd, no = self.row(n.s[0], size)
@@ -10223,7 +10301,7 @@ class WsLayout:
             return (W + 0.08 * size, ax + gap + nd + na, max(0.0, -ax + gap + da + dd),
                     no + do + [["l", pad * 0.5, -ax, W - pad, 0.0, lw, ink]])
         if k == "paren":
-            iw, ia, id_, io = self.row(n.s[0], size)
+            iw, ia, id_, io = self.row(n.s[0], size, hint=WS_ARG_HINTS.get(fn))
             top, bot = -ia - 0.06 * size, id_ + 0.06 * size
             h = bot - top
             pw = 0.24 * size + 0.05 * h
@@ -10267,9 +10345,9 @@ class WsLayout:
             return ew + 0.08 * size, sh + ea, max(0.0, ed - sh), _ws_shift(eo, 0.04 * size, -sh)
         if k == "if":
             f, fm = self.font(size)
-            cw, ca, cd, co = self.row(n.s[0], size)
-            yw, ya, yd, yo = self.row(n.s[1], size)
-            ew, ea, ed, eo = self.row(n.s[2], size)
+            cw, ca, cd, co = self.row(n.s[0], size, hint=WS_IF_HINTS[0])
+            yw, ya, yd, yo = self.row(n.s[1], size, hint=WS_IF_HINTS[1])
+            ew, ea, ed, eo = self.row(n.s[2], size, hint=WS_IF_HINTS[2])
             kw = self.adv(fm, "if ")
             ind, gap = 1.1 * size, 0.3 * size
             y1 = cd + gap + ya                           # the baselines of the lower levels
@@ -10282,9 +10360,11 @@ class WsLayout:
         uw, ua, ud, uo = self.row(n.s[0], size, names=False, color=self.UNIT)          # unit
         return uw + 0.14 * size, ua, ud, _ws_shift(uo, 0.14 * size, 0.0)
 
-    def region(self, r, res=None, active=False):
+    def region(self, r, res=None, active=False, uedit=None):
         """(w, a, d, ops) of a region (its baseline y = 0, left edge x = 0); res – its result (after „=”); active –
-        the region being edited (only there the assignment shows as „:=”)."""
+        the region being edited (only there the assignment shows as „:=”); uedit – the text of the unit of the result
+        being typed (a click on the unit). ["ru", x, y, w, a, d] – the place of the unit of the result (a click
+        there changes it), ["ue", x, y, text, font] – the unit being typed."""
         self.assign = ":=" if active else "="
         if r.get("row") is None:
             f, fm = self.font(self.px * 0.95)
@@ -10298,15 +10378,28 @@ class WsLayout:
             return w, self.px * 0.74, (len(lines) - 1) * lh + self.px * 0.26, ops
         w, a, d, ops = self.row(r["row"], self.px)
         if res and res.get("ok") and res.get("show"):
-            v, u = ws_unit_value(res["q"])
+            v, u = ws_unit_value(res["q"], res.get("uq"), r.get("unit"))
             f, fm = self.font(self.px)
             t = ws_num(v, self.dec)                       # („=” has its space after it)
             ops.append(["t", w, 0.0, t, f, self.INK])
             w += self.adv(fm, t)
-            if u:
-                t = ("" if u == "°" else " ") + u
-                ops.append(["t", w, 0.0, t, f, self.UNIT])
-                w += self.adv(fm, t)
+            sp = 0.0 if u == "°" and uedit is None else self.adv(fm, " ")
+            ua, ud = 0.74 * self.px, 0.26 * self.px
+            if uedit is not None:                         # the unit being typed
+                uw = max(self.adv(fm, uedit), 0.62 * self.px)
+                if not uedit:
+                    ops.append(["ph", w + sp, 0.0, uw, ua, 0.12 * self.px])
+                ops.append(["t", w + sp, 0.0, uedit, f, self.UNIT])
+                ops.append(["ue", w + sp, 0.0, uedit, f])
+                ops.append(["ru", w, 0.0, sp + uw, ua, ud])
+                w += sp + uw
+            elif u:
+                uw = self.adv(fm, u)
+                ops.append(["t", w + sp, 0.0, u, f, self.UNIT])
+                ops.append(["ru", w, 0.0, sp + uw, ua, ud])
+                w += sp + uw
+            else:                                         # a number – the place after it (a unit, e.g. %)
+                ops.append(["ru", w, 0.0, 0.7 * self.px, ua, ud])
         return w, a, d, ops
 
     def region_size(self, r):
@@ -10339,16 +10432,28 @@ class WsLayout:
                 p.setPen(QPen(QColor(self.MUTE), 1, Qt.PenStyle.DotLine))
                 p.setBrush(QColor("#f3f4f6"))
                 p.drawRect(QRectF(x + 1, y - o[4], o[3] - 2, o[4] + o[5]))
+                if len(o) > 6:                             # what the slot expects
+                    p.setFont(o[7])
+                    p.setPen(QColor("#6b7280"))
+                    draw(p, QPointF(x + o[8], y), o[6])
 
-    def sheet_ops(self, regs, res, k=1.0, act=None):
-        """Every region of a sheet placed (positions × k): [(rect, ops, error ops)]; act – the region edited."""
+    def sheet_ops(self, regs, res, k=1.0, act=None, uedit=None):
+        """Every region of a sheet placed (positions × k): [(rect, ops, error ops)]; act – the region edited (an
+        incomplete expression there – no error: the empty slots show what they expect); uedit – (region, text) of
+        the unit of a result being typed."""
         out = []
         for i, r in enumerate(regs):
-            w, a, d, ops = self.region(r, res.get(i), active=r is act)
+            ut = uedit[1] if uedit is not None and uedit[0] is r else None
+            w, a, d, ops = self.region(r, res.get(i), active=r is act, uedit=ut)
             x, y = r["x"] * k, r["y"] * k
             _ws_shift(ops, x, y + a)
             rr = res.get(i)
-            err = self.error_ops(rr["err"], x + w + self.px * 0.8, y + a) if rr and not rr["ok"] else []
+            e = None
+            if rr and not rr["ok"] and not (r is act and rr["err"] in WS_INCOMPLETE):
+                e = rr["err"]
+            elif rr and rr["ok"] and rr.get("uerr") and ut is None:
+                e = rr["uerr"]
+            err = self.error_ops(e, x + w + self.px * 0.8, y + a) if e else []
             out.append((QRectF(x, y, w, a + d), ops, err))
         return out
 
@@ -10459,12 +10564,13 @@ class FormulaCanvas(QWidget):
         self._last = None
         self.legend = True                               # the keys as a watermark (the Pomoc box of the window)
         self._home_hov, self._anim, self._fitted = False, None, False
+        self.uedit = None                                # the unit of a result being typed: dict(r, t, i, all)
         self.set_sheet(sheet, reset=True)
 
     # --- data
     def set_sheet(self, sheet, reset=False):
         self.regs = ws_regions(sheet)
-        self.act, self.row, self.anc, self.rsel = None, None, None, []
+        self.act, self.row, self.anc, self.rsel, self.uedit = None, None, None, [], None
         if self.regs:
             last = max(self.regs, key=lambda r: r["y"])
             self.cross = QPointF(last["x"], last["y"] + self.L.region_size(last)[1] + self.GRID * 2)
@@ -10529,7 +10635,7 @@ class FormulaCanvas(QWidget):
             return
         snap = self.hist.redo() if redo else self.hist.undo()
         self.regs = ws_regions(json.loads(snap))
-        self.act, self.row, self.anc, self.rsel = None, None, None, []
+        self.act, self.row, self.anc, self.rsel, self.uedit = None, None, None, [], None
         self._edit(record=False)
 
     # --- geometry
@@ -10538,7 +10644,8 @@ class FormulaCanvas(QWidget):
         if self.L.dec != dec:                            # the language changed – the decimal sign too
             self.L.dec, self._geo = dec, None
         if self._geo is None:
-            self._geo = self.L.sheet_ops(self.regs, self.res, act=self.act)
+            ue = (self.uedit["r"], self.uedit["t"]) if self.uedit is not None else None
+            self._geo = self.L.sheet_ops(self.regs, self.res, act=self.act, uedit=ue)
         return self._geo
 
     # --- the whole content in sight (the house in the top right corner; every opening of the window)
@@ -10984,6 +11091,95 @@ class FormulaCanvas(QWidget):
                 self.act["text"] = t[:self.ti - 1] + WS_GREEK[t[self.ti - 1]] + t[self.ti:]
                 self._edit()
 
+    # --- the unit of a result: a click on it – typed anew (Issue #6; e.g. cm instead of m); a valid unit of the
+    # same dimension is taken, an empty one – back to the default unit
+    def _unit_at(self, sp):
+        for k, (rect, ops, err) in enumerate(self.geo()):
+            for o in ops:
+                if o[0] == "ru" and QRectF(o[1], o[2] - o[4], o[3], o[4] + o[5]).adjusted(-2, -2, 2, 2).contains(sp):
+                    return k
+        return None
+
+    def _unit_start(self, k):
+        r = self.regs[k]
+        if self.act is not None:
+            self._leave()
+        if r not in self.regs:
+            return
+        rr = self.res.get(self.regs.index(r)) or {}
+        cur = r.get("unit") or (ws_unit_value(rr["q"])[1] if rr.get("ok") else "")
+        self.uedit = dict(r=r, t=cur, i=len(cur), all=bool(cur))
+        self.rsel, self._geo = [], None
+        self.update()
+
+    def _unit_check(self):
+        """The unit typed: (ok, the unit to keep – None: the default one)."""
+        u = self.uedit
+        t = u["t"].strip()
+        if not t:
+            return True, None
+        rr = self.res.get(self.regs.index(u["r"])) if u["r"] in self.regs else None
+        try:
+            uq = ws_unit_q(t)
+        except FormulaError:
+            return False, None
+        if rr and rr.get("ok"):
+            if not ws_unit_fits(uq[1], rr["q"][1]):
+                return False, None
+            if ws_unit_label(t) == ws_unit_value(rr["q"])[1]:
+                return True, None                        # the default unit typed again
+        return True, t
+
+    def _unit_end(self, keep=True):
+        """The end of typing the unit; keep – take it (when valid; otherwise the unit stays as it was)."""
+        if self.uedit is None:
+            return True
+        ok, unit = self._unit_check()
+        r = self.uedit["r"]
+        self.uedit, self._geo = None, None
+        if keep and ok and r in self.regs and unit != r.get("unit"):
+            if unit:
+                r["unit"] = unit
+            else:
+                r.pop("unit", None)
+            self._edit()
+        else:
+            self.update()
+        return ok
+
+    def _unit_key(self, k, t):
+        K = Qt.Key
+        u = self.uedit
+        if k in (K.Key_Return, K.Key_Enter):
+            if self._unit_check()[0]:
+                self._unit_end()
+            else:
+                QApplication.beep()                      # not a unit (of this result) – not taken
+            return
+        if k == K.Key_Escape:
+            self._unit_end(keep=False)
+            return
+        s, i = u["t"], u["i"]
+        if u["all"] and (k in (K.Key_Backspace, K.Key_Delete) or (t and t.isprintable())):
+            s, i = "", 0                                 # the whole unit selected – replaced
+        u["all"] = False
+        if k == K.Key_Backspace:
+            if i > 0 and s:
+                s, i = s[:i - 1] + s[i:], i - 1
+        elif k == K.Key_Delete:
+            s = s[:i] + s[i + 1:]
+        elif k == K.Key_Left:
+            i = max(0, i - 1)
+        elif k == K.Key_Right:
+            i = min(len(s), i + 1)
+        elif k in (K.Key_Home, K.Key_End):
+            i = 0 if k == K.Key_Home else len(s)
+        elif t and t.isprintable():
+            s, i = s[:i] + t + s[i:], i + len(t)
+        u["t"], u["i"] = s, i
+        self._geo = None
+        self.update()
+
     # --- comments
     def _text_key(self, e, k, t):
         K = Qt.Key
@@ -11134,6 +11330,14 @@ class FormulaCanvas(QWidget):
         alt = bool(m & (Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.MetaModifier))
         shift = bool(m & Qt.KeyboardModifier.ShiftModifier)
         fx = self._fixed(e)
+        if self.uedit is not None:
+            if fx in ("undo", "redo"):
+                self._unit_end(keep=False)
+            elif not ctrl or alt:
+                self._unit_key(k, t)
+                return
+            else:
+                return
         if fx in ("undo", "redo"):
             if self.act is not None and self.row is None:
                 self._leave()
@@ -11231,6 +11435,14 @@ class FormulaCanvas(QWidget):
         if self.home_rect().adjusted(-3, -3, 3, 3).contains(pos):
             self.fit(animate=True)
             return
+        ku = self._unit_at(sp)
+        if self.uedit is not None:
+            if ku is not None and self.regs[ku] is self.uedit["r"]:
+                return                                   # still typing the unit
+            self._unit_end()
+        if ku is not None:
+            self._unit_start(ku)
+            return
         fk = self._frame_at(sp)
         k = self._region_at(sp, 1.0)
         if fk is not None or (k is not None and self.regs[k] in self.rsel and len(self.rsel) > 1):
@@ -11276,7 +11488,8 @@ class FormulaCanvas(QWidget):
         if d is None:
             fk = self._frame_at(sp)
             k = self._region_at(sp, 1.0)
-            self.setCursor(Qt.CursorShape.SizeAllCursor if fk is not None else
+            self.setCursor(Qt.CursorShape.PointingHandCursor if self._unit_at(sp) is not None else
+                           Qt.CursorShape.SizeAllCursor if fk is not None else
                            Qt.CursorShape.IBeamCursor if k is not None else Qt.CursorShape.CrossCursor)
             hv = fk if fk is not None else k
             if hv != self._hover:
@@ -11370,7 +11583,7 @@ class FormulaCanvas(QWidget):
         kw = max(adv(fmb, k) for k in keys) + 12
         dw = max(adv(QFontMetricsF(f), tr(d)) for _, d in WS_HINTS)
         x0 = max(12.0, self.width() - 16 - kw - dw)
-        lh = 15.0
+        lh = max(11.0, min(15.0, (self.height() - 24) / max(1, len(WS_HINTS) - 1)))
         y = self.height() - 12 - lh * (len(WS_HINTS) - 1)
         p.setPen(QColor("#c9ced6"))
         for k, (_, d) in zip(keys, WS_HINTS):
@@ -11435,11 +11648,20 @@ class FormulaCanvas(QWidget):
                 if o is not None:
                     a, b = self._sel()
                     p.fillRect(QRectF(o[1] + o[6][a], o[2] - o[4], o[6][b] - o[6][a], o[4] + o[5]), QColor("#bfdbfe"))
+            ue = self.uedit if self.uedit is not None and self.uedit["r"] is r else None
+            o = next((o for o in ops if o[0] == "ue"), None) if ue else None
+            if o is not None and ue["all"] and ue["t"]:
+                fm = QFontMetricsF(o[4])
+                p.fillRect(QRectF(o[1], o[2] - self.PX * 0.78, self.L.adv(fm, ue["t"]), self.PX), QColor("#bfdbfe"))
             self.L.paint(p, ops)
             self.L.paint(p, err)
             if r is self.act and self.hasFocus():
                 self._paint_cursor(p, k, ops)
-        if self.act is None:
+            if o is not None:                            # the unit of the result being typed
+                x = o[1] + self.L.adv(QFontMetricsF(o[4]), ue["t"][:ue["i"]])
+                p.setPen(QPen(QColor(ACCENT), 1.6 / z))
+                p.drawLine(QPointF(x, o[2] - self.PX * 0.78), QPointF(x, o[2] + self.PX * 0.22))
+        if self.act is None and self.uedit is None:
             c, s = self.cross, 6.0
             p.setPen(QPen(QColor("#dc2626"), 1.4 / z))
             p.drawLine(QPointF(c.x() - s, c.y()), QPointF(c.x() + s, c.y()))
@@ -11557,8 +11779,9 @@ class FormulaWindow(QWidget):
                                     f"{html.escape(LAB_UNITS[lv['exp']])}</b>")
                 self.status.setStyleSheet("")
             else:
+                typing = self.canvas.act is not None and any(w in lv["err"] for w in WS_INCOMPLETE)
                 self.status.setText(html.escape(lv["err"]))
-                self.status.setStyleSheet("color: #b91c1c;")
+                self.status.setStyleSheet(f"color: {MUTED};" if typing else "color: #b91c1c;")
         self.btn_del.setEnabled(bool(it.get("arkusz")))
 
     def remove_formula(self):
@@ -11570,6 +11793,8 @@ class FormulaWindow(QWidget):
         self.refresh()
 
     def closeEvent(self, e):
+        if self.canvas.uedit is not None:
+            self.canvas._unit_end()
         if self.canvas.act is not None:
             self.canvas._leave()
         if getattr(self.row, "_fw", None) is self:
@@ -17302,8 +17527,9 @@ def _c_formula_legend(app, a):
 @command("LABFORMULA", "numer obszar… | numer -",
          "Ustawia formułę pozycji obciążeń własnych – arkusz jak w oknie formuły; każdy argument to jeden obszar, "
          "np. \"a:=0,12'm\" \"a*25'kN/'m^3=\": ułamek a/b, potęga x^2, sqrt(x), root(x;n), abs(x), jednostka po ', "
-         "przypisanie :=, wynik =; \"#tekst\" – komentarz; „@x:y ” na początku – położenie obszaru (bez niego – "
-         "jeden pod drugim). Wartość pozycji – ostatnie „=”. „-” usuwa formułę (zostaje ostatnia wartość).",
+         "przypisanie :=, wynik =, wynik w wybranej jednostce =[cm]; kąt bez jednostki lub 'rad – w radianach, "
+         "30'deg – w stopniach, 30'grad – w gradach; \"#tekst\" – komentarz; „@x:y ” na początku – położenie obszaru (bez niego – jeden pod "
+         "drugim). Wartość pozycji – ostatnie „=”. „-” usuwa formułę (zostaje ostatnia wartość).",
          group="Obciążenia własne")
 def _c_lab_formula(app, a):
     _need(a, 2, "LABFORMULA numer obszar… | numer -")
