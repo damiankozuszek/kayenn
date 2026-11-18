@@ -6,7 +6,7 @@
 
 Dokument sprawdza, czy KAYENN 0.2.6 liczy zgodnie z normami obciążenie śniegiem, obciążenie wiatrem (budynki, budowle inne niż budynki, parametry terenu, współczynnik konstrukcyjny, tarcie) i obciążenia użytkowe. Dla każdego rodzaju obiektu przyjęto przykładowy zestaw danych, obliczono go ręcznie ściśle według normy i porównano z wynikiem programu.
 
-**Normy odniesienia** (teksty PDF z katalogu `Normy/`):
+**Normy odniesienia:**
 
 - PN-EN 1991-1-3:2005 + AC + Ap1, Załącznik krajowy NB (Tabl. NB.1, wzory NB.1–NB.3, NB1.3–NB1.13).
 - PN-EN 1991-1-4:2008 + AC:2009 + Ap1–Ap3, Załącznik krajowy NA (Tabl. NA.1–NA.3, NA.7, NA.8, NA.10, NA.16).
