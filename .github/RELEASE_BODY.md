@@ -1,32 +1,30 @@
-# KAYENN 0.2.5 – formulas like in SMath, a wind rose
+# KAYENN 0.2.6 – validated against the codes
 
 KAYENN is a program for structural engineers for determining building loads, released under the open source
 **MIT** licence.
 
-## What's new in 0.2.5
+## What's new in 0.2.6
 
-- **Own loads – formulas in their own window.** The value field now shows only the value; the **fx** button in the
-  field (or **Ctrl+G**) opens the formula window – a worksheet like in SMath:
-  - mathematics written as mathematics: fractions (also multi-level), brackets, square roots and roots of any
-    degree, powers and absolute values are built as you type (`/`, `(`, `\`, Ctrl+\, `^`, `|`);
-  - **variables** (`a=` after a new name becomes the assignment `:=`; a variable is read below its definition),
-    lower and upper indexes in names (`_`, Ctrl+_), **Greek letters** (Ctrl+G after a letter);
-  - **units** after `'` – the known ones (`'kN`, `'m`, `'kg` …) and **your own** (`'pcs`) – only the result is
-    checked;
-  - comparisons, **and / or / xor**, the condition **if – else** drawn on several levels, trigonometric functions,
-    logarithms;
-  - comments anywhere on an unlimited sheet; a region that grows moves the ones below it down; the house in the
-    corner shows everything; a help with the keys can be shown on the sheet (**Help**).
+A release of **corrections to the code values**, found by a full validation of the program against the codes –
+every kind of object compared with a hand calculation made strictly to the code (635 comparisons, now all in
+agreement; the document and the scripts are in [`validation/`](https://github.com/damiankozuszek/kayenn/tree/main/validation)).
 
-  The value of the item is the last expression ending with `=`; a result with units sets the unit of the item.
-  The printout shows the whole worksheet.
-- **Wind rose** on the 3D model of the wind when a sector of the directional factor is chosen.
-- **View cube**: the house returns to the default view with the same smooth turn, zoom and position included.
-- **Updates**: the downloaded installer is removed after a successful installation.
+- **Wind – directional factor c_dir, zone 3** (Table NA.2): sectors 150° and 180° had the values of the
+  neighbouring sectors (0.7 and 0.9 instead of 0.9 and 1.0) – the peak velocity pressure was too low when one of
+  these sectors was chosen. The default “any direction” (c_dir = 1.0) was not affected.
+- **Wind – roofs, interpolation between the angles of Tables 7.3a–7.5**: where one of the two table angles has no
+  value of the sign of the variant (pressure / suction), the value of the other angle now holds over the whole
+  interval instead of an interpolation through zero (e.g. duopitch 10°, zone I, pressure: +0.0 instead of −0.3).
+- **Wind – multispan roof with troughs** (Fig. 7.10 c): the last span takes zone H of the trough (0.6·cpe,H).
+- **Imposed loads – reduction factor αA**: only for categories A–D (corrigendum AC:2009 to 6.3.1.2(10)); it was
+  offered for category E as well.
+- **Imposed loads – movable partitions**: αA and αn now reduce qₖ together with the allowance for partitions
+  (6.3.1.2(10) with AC).
 
 > [!IMPORTANT]
-> The text formulas of 0.2.4 (e.g. `0,12[m]*25[kN/m3]` typed in the value field) are not read any more – such an
-> item shows an invalid value; write the formula again in the formula window.
+> The reports of load cases saved in older versions keep the values they were calculated with. Check the cases
+> affected above (wind in zone 3 with a chosen sector, roof angles between the table values, multispan roofs with
+> troughs, imposed loads with a reduction) and calculate them again (**Edit**).
 
 > [!NOTE]
 > **Updating:** from 0.2.3 use **About → Check for updates → Install**; from older versions download the package
@@ -57,9 +55,9 @@ clause of the code), crashes, unclear behaviour and awkward English wording are 
 
 | System | File |
 |---|---|
-| Windows 10 / 11 | `KAYENN-0.2.5-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
-| macOS 12+ | `KAYENN-0.2.5-macos-arm64.dmg` (Apple Silicon) or `…-macos-x64.dmg` (Intel) |
-| Linux | `kayenn_0.2.5_amd64.deb` or `KAYENN-0.2.5-linux-x86_64.tar.gz` |
+| Windows 10 / 11 | `KAYENN-0.2.6-windows-x64-setup.exe` (installer) or `…-windows-x64.zip` (portable) |
+| macOS 12+ | `KAYENN-0.2.6-macos-arm64.dmg` (Apple Silicon) or `…-macos-x64.dmg` (Intel) |
+| Linux | `kayenn_0.2.6_amd64.deb` or `KAYENN-0.2.6-linux-x86_64.tar.gz` |
 
 The program is not digitally signed yet – on the first start the system may warn about an unknown publisher
 (Windows: “More info” → “Run anyway”; macOS: right click → “Open”).

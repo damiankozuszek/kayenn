@@ -30,7 +30,7 @@ import shutil
 import sys
 import time
 
-APP_VERSION = "0.2.5"
+APP_VERSION = "0.2.6"
 # program resources folder (fonts, icons, material database) – also inside the PyInstaller bundle (sys._MEIPASS)
 BASE_DIR = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
 FROZEN = bool(getattr(sys, "frozen", False))
@@ -1754,7 +1754,7 @@ CDIR_ANY = "dowolny kierunek (c_dir = 1,0)"
 CDIR_SECTORS = tuple(f"sektor {a}°" for a in range(0, 360, 30))
 CDIR_NA2 = {"1": (0.8, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.8, 0.9, 1.0, 1.0, 0.9),
             "2": (1.0, 0.9, 0.8, 0.7, 0.7, 0.7, 0.7, 0.8, 0.9, 1.0, 1.0, 1.0),
-            "3": (0.8, 0.7, 0.7, 0.7, 0.7, 0.7, 0.9, 1.0, 1.0, 1.0, 1.0, 1.0)}
+            "3": (0.8, 0.7, 0.7, 0.7, 0.7, 0.9, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)}
 
 
 # Orography – Annex A.3 (formulas (A.4)–(A.13) with Ap1:2010); 0 – none (c0 = 1)
@@ -2063,11 +2063,27 @@ T_CAN2 = {
 
 
 def tab_cpe(table, zone, alpha, sign, alphas=ALPHAS):
-    rows = []
+    """cpe (cpe,10, cpe,1) of a table row for the variant sign ("n" – suction, "p" – pressure). Linear
+    interpolation only between values of the same sign (Notes to Tables 7.3a–7.5); where one of the two table
+    nodes has no value of the variant's sign, the value of the other node holds over the whole interval
+    (user's rule 2026-11-18 – e.g. Table 7.4a, zone I, α = 10°, pressure: +0.0, not −0.3)."""
+    rows, has = [], []
     for r in table[zone]:
         r = _n(r)
-        rows.append(r[sign] if isinstance(r, dict) else r)
-    return (interp(alpha, alphas, [r[0] for r in rows]), interp(alpha, alphas, [r[1] for r in rows]))
+        if isinstance(r, dict):
+            rows.append(r[sign])
+            has.append(True)
+        else:
+            rows.append(r)
+            has.append((r[0] < 0) == (sign == "n"))
+    if alpha <= alphas[0] or alpha >= alphas[-1] or alpha in alphas:
+        i = 0 if alpha <= alphas[0] else len(alphas) - 1 if alpha >= alphas[-1] else alphas.index(alpha)
+        return rows[i]
+    i = max(k for k in range(len(alphas) - 1) if alphas[k] < alpha)
+    if has[i] != has[i + 1]:
+        return rows[i] if has[i] else rows[i + 1]
+    xs, a, b = alphas[i:i + 2], rows[i], rows[i + 1]
+    return (interp(alpha, xs, [a[0], b[0]]), interp(alpha, xs, [a[1], b[1]]))
 
 
 # Table 7.2 – rounded edges (r/h; r/h = 0 – sharp edges: interpolation below 0.05, Note 1) and mansard edges
@@ -2725,8 +2741,8 @@ def multi_zones(g, R, e, b, d, h, theta, sw, sl, info):
         for k in range(1, n):
             f_ = 1.0 if k == 1 else 0.6
             sfx = "" if f_ == 1.0 else "·0.6"
-            if k == n - 1:                               # monopitch at the leeward end
-                R("I" + sfx, k * w, (k + 1) * w, 0, b, It, factor=f_)
+            if k == n - 1:                               # monopitch at the leeward end – zone H of a trough
+                R("H" + sfx, k * w, (k + 1) * w, 0, b, Ht, factor=f_)   # (user's decision 2026-11-18)
             else:                                        # trough: the windward and the leeward slope
                 R("H" + sfx, k * w, k * w + w / 2, 0, b, Ht, factor=f_)
                 R("I" + sfx, k * w + w / 2, (k + 1) * w, 0, b, It, factor=f_)
@@ -4124,10 +4140,10 @@ UŻYTKOWE – PN-EN 1991-1-1:2004 z poprawkami AC:2009, Ap1:2010, Ap2:2011 (Zał
   domyślna; wartość poniżej dolnej granicy Tablicy 6.2 jest odrzucana (NB1). Kategoria I – użytkowanie jak A–G.
 • Przestawne ścianki działowe (6.3.1.2(8)): dodatek do qₖ 0,50 / 0,80 / 1,20 kN/m² dla ciężaru ścianki
   ≤ 1,0 / 2,0 / 3,0 kN/m (stropy kategorii A–D, nie schody i balkony). Cięższe ścianki – obliczać indywidualnie (9).
-• Redukcja qₖ: αA = 5/7·ψ₀ + A₀/A ≤ 1,0, A₀ = 10 m² (6.1; kategorie A–E; C i D: αA ≥ 0,6) albo
-  αn = [2 + (n − 2)ψ₀]/n, n > 2 (6.2; kategorie A–D). ψ₀ wg EN 1990, Tabl. A1.1 (A–D: 0,7; E: 1,0;
-  Załącznik krajowy nie zmienia). Redukcja dotyczy qₖ z Tablicy 6.2, nie Qₖ; dodatek od ścianek działowych
-  nie jest redukowany. Przy oddziaływaniu towarzyszącym stosuje się tylko jeden ze współczynników ψ₀ i αn (3.3.2(2)).
+• Redukcja qₖ: αA = 5/7·ψ₀ + A₀/A ≤ 1,0, A₀ = 10 m² (6.1; kategorie A–D wg AC:2009; C i D: αA ≥ 0,6) albo
+  αn = [2 + (n − 2)ψ₀]/n, n > 2 (6.2; kategorie A–D). ψ₀ wg EN 1990, Tabl. A1.1 (A–D: 0,7;
+  Załącznik krajowy nie zmienia). Redukcja dotyczy qₖ z Tablicy 6.2 razem z dodatkiem od ścianek działowych
+  (6.3.1.2(10) wg AC: Tablica 6.2 oraz (8) i (9)), nie Qₖ. Przy oddziaływaniu towarzyszącym stosuje się tylko jeden ze współczynników ψ₀ i αn (3.3.2(2)).
 • Kombinacje oddziaływań i współczynniki częściowe (EN 1990) – poza zakresem programu: podawane są wartości
   charakterystyczne.
 • Podnośniki widłowe FL 1–FL 6 (6.3.2.3, Tabl. 6.5, 6.6): Qₖ osi, Qₖ,dyn = φ·Qₖ (φ = 1,40 opony pneumatyczne,
@@ -4284,10 +4300,10 @@ IMPOSED – PN-EN 1991-1-1:2004 with corrigenda AC:2009, Ap1:2010, Ap2:2011 (Nat
   the default; a value below the lower limit of Table 6.2 is rejected (NB1). Category I – use as A–G.
 • Movable partitions (6.3.1.2(8)): addition to qₖ 0.50 / 0.80 / 1.20 kN/m² for a partition self-weight
   ≤ 1.0 / 2.0 / 3.0 kN/m (floors of categories A–D, not stairs and balconies). Heavier partitions – calculate individually (9).
-• Reduction of qₖ: αA = 5/7·ψ₀ + A₀/A ≤ 1.0, A₀ = 10 m² (6.1; categories A–E; C and D: αA ≥ 0.6) or
-  αn = [2 + (n − 2)ψ₀]/n, n > 2 (6.2; categories A–D). ψ₀ to EN 1990, Table A1.1 (A–D: 0.7; E: 1.0;
-  the National Annex does not change it). The reduction applies to qₖ of Table 6.2, not to Qₖ; the addition for partitions
-  is not reduced. For an accompanying action only one of the factors ψ₀ and αn is applied (3.3.2(2)).
+• Reduction of qₖ: αA = 5/7·ψ₀ + A₀/A ≤ 1.0, A₀ = 10 m² (6.1; categories A–D per AC:2009; C and D: αA ≥ 0.6) or
+  αn = [2 + (n − 2)ψ₀]/n, n > 2 (6.2; categories A–D). ψ₀ to EN 1990, Table A1.1 (A–D: 0.7;
+  the National Annex does not change it). The reduction applies to qₖ of Table 6.2 together with the addition for
+  partitions (6.3.1.2(10) with AC: Table 6.2 and (8), (9)), not to Qₖ. For an accompanying action only one of the factors ψ₀ and αn is applied (3.3.2(2)).
 • Combinations of actions and partial factors (EN 1990) – outside the scope of the program: characteristic values
   are given.
 • Forklifts FL 1–FL 6 (6.3.2.3, Tables 6.5, 6.6): axle Qₖ, Qₖ,dyn = φ·Qₖ (φ = 1.40 pneumatic tyres,
@@ -19313,7 +19329,7 @@ class App:
         e, v, _ = self._use_entry()
         has_q = bool(v.get("q")) and not v.get("line")
         part = self.use_group.currentIndex() == 0 and v["code"] not in ("A2", "A3") and has_q
-        return part, has_q and v["code"][0] in "ABCDE", has_q and v["code"][0] in "ABCD"
+        return part, has_q and v["code"][0] in "ABCD", has_q and v["code"][0] in "ABCD"   # αA: A–D (AC:2009)
 
     def _use_extra(self):
         """Partitions and reduction chosen on the form:
@@ -19366,7 +19382,8 @@ class App:
                 else:
                     out["red"] = ("n", use_alpha_n(psi0, int(round(n))), psi0, int(round(n)))
         if q is not None and (out["part"] is not None or out["red"]):
-            out["total"] = q * (out["red"][1] if out["red"] else 1.0) + (out["part"] or 0.0)
+            # αA / αn reduce qₖ together with the partitions (6.3.1.2(10) with AC: Table 6.2 and (8), (9))
+            out["total"] = (q + (out["part"] or 0.0)) * (out["red"][1] if out["red"] else 1.0)
         return out
 
     def _use_check(self):
@@ -19401,13 +19418,13 @@ class App:
             msgs.append(ex["err"])
             bad = True
         f = self._use_fmt
+        if ex["part"] is not None:
+            msgs.append(f"+ ścianki działowe {f(ex['part'])} kN/m².")
         if ex["red"]:
             kind, al, psi0, par = ex["red"]
             msgs.append(f"α_{kind} = {f(al)} (ψ₀ = {f(psi0)}, {'A' if kind == 'A' else 'n'} = {par:g}) → "
-                        f"zredukowane qₖ = {f(al * (parse_num(self.use_q.text()) or 0.0))} kN/m²."
-                        if parse_num(self.use_q.text()) is not None else f"α_{kind} = {f(al)}.")
-        if ex["part"] is not None:
-            msgs.append(f"+ ścianki działowe {f(ex['part'])} kN/m².")
+                        f"zredukowane qₖ = {f(ex['total'])} kN/m²."
+                        if ex["total"] is not None else f"α_{kind} = {f(al)}.")
         if ex["total"] is not None:
             msgs.append(f"Razem qₖ = {f(ex['total'])} kN/m².")
         if ex["fl"]:
@@ -19491,15 +19508,14 @@ class App:
                      f" (przedział normowy {f(lo)}–{f(hi)} {un}, zalecana {f(rec)} {un})")
             rows.append(f"<b>{sym} = {f(x)} {un}</b>{r}")
         ex = self._use_extra()
-        if ex["red"]:
-            kind, al, psi0, par = ex["red"]
-            qv = parse_num(self.use_q.text())
-            rows.append(f"α_{kind} = {f(al)} (ψ₀ = {f(psi0)}, {'A' if kind == 'A' else 'n'} = {par:g}) → "
-                        + (f"<b>zredukowane qₖ = {f(al * qv)} kN/m²</b>" if qv is not None else "") +
-                        (" (6.3.1.2(10), wzór 6.1)" if kind == "A" else " (6.3.1.2(11), wzór 6.2)"))
         if ex["part"] is not None:
             rows.append(f"przestawne ścianki działowe: <b>+ {f(ex['part'])} kN/m²</b> "
                         f"({USE_PARTS[self.use_part.currentIndex()]}, 6.3.1.2(8))")
+        if ex["red"]:
+            kind, al, psi0, par = ex["red"]
+            rows.append(f"α_{kind} = {f(al)} (ψ₀ = {f(psi0)}, {'A' if kind == 'A' else 'n'} = {par:g}) → "
+                        + (f"<b>zredukowane qₖ = {f(ex['total'])} kN/m²</b>" if ex["total"] is not None else "") +
+                        (" (6.3.1.2(10), wzór 6.1)" if kind == "A" else " (6.3.1.2(11), wzór 6.2)"))
         if ex["total"] is not None:
             rows.append(f"<b>qₖ łącznie = {f(ex['total'])} kN/m²</b>")
         if ex["fl"]:

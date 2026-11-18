@@ -14,3 +14,6 @@ promo/
 
 # website: server-local settings
 website/.env
+
+# validation: result files of the scripts
+validation/*_out.json

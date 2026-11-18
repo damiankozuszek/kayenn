@@ -49,6 +49,9 @@ programem do obliczeń konstrukcji metodą elementów skończonych (MES).
   a program ustawia strefę i wysokość nad poziomem morza.
 - **Model 3D** budynku lub budowli z rozkładem obciążeń – obracanie i powiększanie, kostka widoków (z góry, z boku,
   z narożnika), z wymiarami, które możesz zmieniać kliknięciem.
+- **Walidacja z normami** – każdy rodzaj obiektu porównany z obliczeniem ręcznym wykonanym ściśle według normy
+  (635 porównań, wszystkie zgodne): [dokument walidacyjny](validation/walidacja_pl.md) i skrypty w
+  [`validation/`](validation/).
 
 ### Obciążenia własne
 

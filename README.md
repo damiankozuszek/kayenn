@@ -49,6 +49,9 @@ structural analysis program based on the finite element method (FEM).
   program sets the zone and the altitude above sea level.
 - **3D model** of the building or structure with the load distribution – rotate and zoom, a view cube for the
   views from above, from a side or from a corner, with dimensions you can change by clicking them.
+- **Validated against the codes** – every kind of object checked against a hand calculation made strictly to the
+  code (635 comparisons, all in agreement): [validation document (Polish)](validation/walidacja_pl.md) and the
+  scripts in [`validation/`](validation/).
 
 ### Own loads
 
